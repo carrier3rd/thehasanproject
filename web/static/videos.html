@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Videos · VOD archive</title><link rel="stylesheet" href="style.css"></head>
+<body><main>
+  <form id="form" class="row">
+    <label>From <input type="date" id="from"></label><label>To <input type="date" id="to"></label>
+    <button>Filter</button><span id="total" class="note" style="padding:0"></span>
+  </form>
+  <table><thead><tr><th>Date</th><th>Title</th><th>Length</th></tr></thead><tbody id="rows"></tbody></table>
+  <div class="row"><button id="prev">← Newer</button><span id="pageno" class="note" style="padding:0"></span><button id="next">Older →</button></div>
+</main>
+<script src="common.js"></script>
+<script>
+let page = 1;
+async function load() {
+  try {
+    const r = await api('/api/videos', { from: $('#from').value, to: $('#to').value, page });
+    $('#rows').replaceChildren(...r.videos.map(v => el('tr', {},
+      el('td', { class: 'num', text: fmtDate(v.upload_date) }),
+      el('td', {}, el('a', { href: watchUrl(v.id, 0), text: v.title || v.id })),
+      el('td', { class: 'num', text: fmtTime(v.duration || 0) }))));
+    $('#total').textContent = `${r.total} VOD${r.total === 1 ? '' : 's'}`;
+    $('#pageno').textContent = `Page ${r.page} of ${r.pages}`;
+    $('#prev').disabled = r.page <= 1;
+    $('#next').disabled = r.page >= r.pages;
+  } catch (e) { $('#total').textContent = 'Could not load videos: ' + e.message; }
+}
+(async () => {
+  await chrome('videos.html');
+  $('#form').addEventListener('submit', e => { e.preventDefault(); page = 1; load(); });
+  $('#prev').addEventListener('click', () => { page--; load(); });
+  $('#next').addEventListener('click', () => { page++; load(); });
+  load();
+})();
+</script></body></html>

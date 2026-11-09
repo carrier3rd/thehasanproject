@@ -1,0 +1,13 @@
+# Public site only. The admin app (127.0.0.1:8001) is never proxied.
+# Replace example.com with the site domain (also set site_domain in config.yaml).
+example.com {
+	encode zstd gzip
+
+	# Basic auth is ON by default. Generate a hash with: caddy hash-password
+	# Older Caddy (< 2.8) spells this directive `basicauth`.
+	basic_auth {
+		viewer REPLACE_WITH_CADDY_HASH_PASSWORD_OUTPUT
+	}
+
+	reverse_proxy 127.0.0.1:8000
+}
