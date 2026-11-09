@@ -1,0 +1,18 @@
+[Unit]
+Description=VOD archive public web app (reads public.db only)
+After=network.target
+
+[Service]
+# Dedicated user with NO read permission on archive.db (chmod 600 archive.db, owned by the pipeline user).
+User=vodweb
+WorkingDirectory=/opt/vod-archive
+ExecStart=/opt/vod-archive/.venv/bin/uvicorn web.app:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+InaccessiblePaths=-/opt/vod-archive/archive.db -/opt/vod-archive/archive.db-wal -/opt/vod-archive/archive.db-shm
+
+[Install]
+WantedBy=multi-user.target

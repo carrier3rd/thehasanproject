@@ -1,0 +1,67 @@
+# All settings live here. Paths are relative to this file unless absolute.
+channel_name: hasanabi            # archive target
+log_channels: [hasanabi]          # live logger may watch several channels
+sources:                          # every place full VODs exist; user fills in
+  - https://www.twitch.tv/hasanabi/videos?filter=archives
+  # - https://www.youtube.com/@<vod-channel>/streams
+audio_format: opus
+audio_quality: 64K
+download_sleep: [5, 20]
+skip_if_ended_within_hours: 2     # don't grab VODs that are live or just ended
+dedupe_date_days: 1               # Twitch/YouTube twin: dates within this many days...
+dedupe_duration_tolerance: 0.02   # ...and durations within this fraction
+twitch_downloader_cli: TwitchDownloaderCLI   # path to the binary (Phase 1)
+
+whisper_model: large-v3           # pilot compares against large-v3-turbo
+pilot_models: [large-v3, large-v3-turbo]
+compute_type: float16
+batch_size: 16
+chunk_minutes: 60
+chunk_overlap_seconds: 10
+diarization_model: null           # null = whisperx default
+voice_embedding_model: pyannote/wespeaker-voxceleb-resnet34-LM
+use_diarizer_embeddings: true     # use the diarizer's own speaker embeddings when it returns them
+speaker_match_threshold: 0.55     # recalibrated at the pilot
+unknown_cluster_threshold: 0.60   # cosine for merging unknown speakers across chunks
+low_confidence_margin: 0.05       # score within this of the threshold => "?" on the public site
+hallucination_repeat_n: 3
+mute_min_seconds: 20              # digital silence at least this long counts as muted
+mute_noise_db: -70
+media_segment_min_seconds: 4      # unknown-speaker segment at least this long => is_media
+media_minute_share: 0.6           # minute with >= this share of unknown-voice time => all segments in it is_media
+turn_merge_gap_seconds: 2.0
+turn_max_seconds: 30              # stop merging once a turn is this long (keeps timestamps and search windows precise)
+
+chat_anchor_every_minutes: 15
+chat_anchor_max_jump_seconds: 2.0
+chat_anchor_window_seconds: 60
+chat_anchor_bisect_seconds: 30
+chat_window_seconds: 30
+
+irc_host: irc.chat.twitch.tv
+irc_port: 6667
+session_gap_minutes: 30
+logger_batch_seconds: 1.0
+logger_batch_messages: 200
+
+embed_model: BAAI/bge-small-en-v1.5
+embed_query_prefix: "Represent this sentence for searching relevant passages: "
+embed_window_seconds: 60
+embed_window_overlap_seconds: 15
+llm_model: claude-opus-5-5        # used only by `ask.py --llm`
+
+public_speakers: [Hasan]          # voiceprint names shown publicly; others -> "Guest"
+publish_min_distinct_chatters: 5  # a term/emote appears in public aggregates only if >= N distinct chatters used it that minute
+publish_top_terms: 10
+publish_deleted_text: false       # true shows mod-deleted text publicly
+deleted_placeholder: "[deleted by mods]"
+optout_file: optout.txt           # one username or user_id per line
+
+site_domain: localhost            # Twitch embed `parent`; set to the real domain
+contact_email: ""                 # shown on about.html
+rate_limit_per_minute: 60
+robots_noindex: true
+
+paths: {audio: data/audio, chat: data/chat, transcripts: data/transcripts, muted: data/muted,
+        archive_db: archive.db, public_db: public.db, index: index,
+        voices: voices, voiceprints: voiceprints, logs: logs, qa: qa}

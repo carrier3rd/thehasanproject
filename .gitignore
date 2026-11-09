@@ -1,0 +1,13 @@
+data/
+voices/
+voiceprints/
+index/
+logs/
+qa/
+*.db
+*.db-wal
+*.db-shm
+*.tmp.db
+optout.txt
+__pycache__/
+.pytest_cache/

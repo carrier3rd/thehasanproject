@@ -1,0 +1,13 @@
+yt-dlp
+whisperx
+pyannote.audio
+sentence-transformers
+chat-downloader
+fastapi
+uvicorn
+numpy
+pyyaml
+tqdm
+anthropic        # only for `ask.py --llm`
+pytest           # tests
+httpx            # tests (FastAPI TestClient)

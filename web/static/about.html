@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>About · VOD archive</title><link rel="stylesheet" href="style.css"></head>
+<body><main>
+  <h1>About this archive</h1>
+  <p>This is an unofficial, searchable archive of one streamer's past broadcasts. Each stream has a machine-generated
+     transcript with speaker labels, and the chat messages sent while it aired, lined up against the video. The video
+     itself is not hosted here: every page embeds or links to the original.</p>
+  <p>Transcripts and speaker labels are produced by speech-recognition software and contain mistakes. Names are attached
+     only to a small set of public figures; everyone else appears as "Guest", and audio from videos being watched on
+     stream appears as "Media". Sections muted on the original video are left out.</p>
+  <h2>Chat messages and opting out</h2>
+  <p>Chat is shown with the username it was sent under. Messages removed by moderators are shown as a placeholder
+     rather than their text. If you would like your messages removed from this site, write to the address below from any
+     account or address, stating your Twitch username. Your messages, under your current and previous names, are
+     excluded the next time the site is rebuilt, normally within a day.</p>
+  <h2>Corrections and takedown requests</h2>
+  <p id="contact">Contact address not configured.</p>
+</main>
+<script src="common.js"></script>
+<script>
+chrome('about.html').then(cfg => {
+  if (cfg.contact_email) $('#contact').replaceChildren('For opt-outs, corrections or takedown requests, write to ',
+    el('a', { href: 'mailto:' + cfg.contact_email, text: cfg.contact_email }), '.');
+});
+</script></body></html>

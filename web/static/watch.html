@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Watch · VOD archive</title><link rel="stylesheet" href="style.css"></head>
+<body><main class="watch">
+  <div class="col">
+    <div id="player"></div>
+    <div id="slider" hidden>
+      <div class="note" style="padding:0 0 6px">The original video is no longer available. Use the slider to move through the transcript and chat.</div>
+      <input type="range" id="range" min="0" value="0" step="1" aria-label="Position">
+      <div class="bar"><button id="play">Play</button><span id="clock" class="num"></span></div>
+    </div>
+    <div class="bar">
+      <h1 id="title"></h1>
+      <label><input type="checkbox" id="hidemedia"> hide media</label>
+      <button id="resume" hidden>Resume auto-scroll</button>
+      <button id="copy">Copy link</button>
+      <a id="source" target="_blank" rel="noopener noreferrer">Original</a>
+    </div>
+    <div id="transcript"></div>
+  </div>
+  <div class="col">
+    <canvas id="strip" title="Chat messages per minute. Click to seek."></canvas>
+    <div id="terms"></div>
+    <div id="chat"><div class="note" style="padding:10px">No chat for this moment.</div></div>
+  </div>
+</main>
+<script src="common.js"></script>
+<script>
+const params = new URLSearchParams(location.search);
+const VID = params.get('v'), T0 = Math.max(+params.get('t') || 0, 0);
+let cfg, video, turns = [], muted = [], minutes = [], maxMsgs = 1;
+let player = { getTime: () => 0, seek: () => {} };
+let now = T0, currentTurn = -1, autoScroll = true, programmatic = false, lastChatKey = '';
+const buckets = new Map();   // 60 s bucket index -> messages array | 'loading'
+
+// ---------- players ----------
+function loadScript(src) {
+  return new Promise((ok, fail) => document.head.append(el('script', { src, onload: ok, onerror: fail })));
+}
+async function initPlayer() {
+  const box = $('#player');
+  if (video.embed_type === 'youtube') {
+    await new Promise(ok => { window.onYouTubeIframeAPIReady = ok; loadScript('https://www.youtube.com/iframe_api'); });
+    await new Promise(ok => {
+      const yt = new YT.Player(box.appendChild(el('div')), { videoId: video.embed_id, width: '100%', height: '100%',
+        playerVars: { start: Math.floor(T0), rel: 0 }, events: { onReady: ok } });
+      player = { getTime: () => (yt.getCurrentTime ? yt.getCurrentTime() : now), seek: t => yt.seekTo(t, true) };
+    });
+  } else if (video.embed_type === 'twitch') {
+    await loadScript('https://player.twitch.tv/js/embed/v1.js');
+    const tw = new Twitch.Player(box, { video: String(video.embed_id).replace(/^v/, ''), parent: [cfg.site_domain],
+      width: '100%', height: '100%', autoplay: false, time: fmtTime(T0).replace(/(\d+):(\d+):(\d+)/, '$1h$2m$3s') });
+    player = { getTime: () => tw.getCurrentTime() || now, seek: t => tw.seek(t) };
+  } else {
+    box.hidden = true;
+    $('#slider').hidden = false;
+    const range = $('#range');
+    range.max = Math.floor(video.duration || (turns.length ? turns[turns.length - 1].end : 0));
+    let pos = T0, playing = null;
+    range.value = pos;
+    range.addEventListener('input', () => { pos = +range.value; });
+    $('#play').addEventListener('click', () => {
+      if (playing) { clearInterval(playing); playing = null; $('#play').textContent = 'Play'; return; }
+      let last = performance.now();
+      playing = setInterval(() => { const n = performance.now(); pos = Math.min(pos + (n - last) / 1000, +range.max); last = n; range.value = pos; }, 250);
+      $('#play').textContent = 'Pause';
+    });
+    player = { getTime: () => pos, seek: t => { pos = t; range.value = t; } };
+  }
+}
+
+// ---------- transcript ----------
+function renderTranscript() {
+  const box = $('#transcript'), nodes = [];
+  let mi = 0;
+  turns.forEach((t, i) => {
+    while (mi < muted.length && muted[mi][0] <= t.start) {
+      nodes.push(el('div', { class: 'mutedband', text: `Muted on the original video ${fmtTime(muted[mi][0])} – ${fmtTime(muted[mi][1])}` }));
+      mi++;
+    }
+    const who = el('span', { class: 'who', text: t.speaker + (t.low_confidence ? ' ?' : '') });
+    if (t.low_confidence) who.title = 'Low-confidence speaker label';
+    if (t.speaker_raw) who.title = `${t.speaker_raw} · score ${t.speaker_score ?? 'n/a'}`;
+    nodes.push(el('div', { class: 'turn' + (t.is_media ? ' media' : ''), 'data-i': i, onclick: () => seek(t.start) },
+      el('span', { class: 't', text: fmtTime(t.start) }), el('span', {}, who, document.createTextNode(t.text))));
+  });
+  for (; mi < muted.length; mi++)
+    nodes.push(el('div', { class: 'mutedband', text: `Muted on the original video ${fmtTime(muted[mi][0])} – ${fmtTime(muted[mi][1])}` }));
+  if (!nodes.length) nodes.push(el('div', { class: 'note', style: 'padding:10px', text: 'No transcript.' }));
+  box.replaceChildren(...nodes);
+  box.addEventListener('scroll', () => {
+    if (programmatic) return;
+    autoScroll = false;
+    $('#resume').hidden = false;
+  });
+}
+function turnAt(t) {
+  let lo = 0, hi = turns.length - 1, ans = -1;
+  while (lo <= hi) { const mid = (lo + hi) >> 1; if (turns[mid].start <= t) { ans = mid; lo = mid + 1; } else hi = mid - 1; }
+  return ans;
+}
+function scrollToTurn(node) {
+  const box = $('#transcript');
+  programmatic = true;
+  box.scrollTop = node.offsetTop - box.offsetTop - box.clientHeight / 3;
+  setTimeout(() => { programmatic = false; }, 150);
+}
+function highlight(t) {
+  const i = turnAt(t);
+  if (i === currentTurn) return;
+  const box = $('#transcript');
+  const old = box.querySelector('.turn.now');
+  if (old) old.classList.remove('now');
+  currentTurn = i;
+  const node = i >= 0 ? box.querySelector(`.turn[data-i="${i}"]`) : null;
+  if (!node) return;
+  node.classList.add('now');
+  if (autoScroll && node.offsetParent) scrollToTurn(node);
+}
+
+// ---------- chat ----------
+function fetchBucket(b) {
+  if (b < 0 || buckets.has(b)) return;
+  buckets.set(b, 'loading');
+  api(`/api/videos/${encodeURIComponent(VID)}/chat`, { start: b * 60, end: (b + 1) * 60 })
+    .then(r => { buckets.set(b, r.messages); lastChatKey = ''; })
+    .catch(() => buckets.delete(b));
+}
+function renderChat(t) {
+  const win = cfg.chat_window_seconds, from = t - win;
+  const b0 = Math.floor(Math.max(from, 0) / 60), b1 = Math.floor(t / 60);
+  const msgs = [];
+  for (let b = b0; b <= b1; b++) {
+    fetchBucket(b);
+    const got = buckets.get(b);
+    if (Array.isArray(got)) for (const m of got) if (m.t > from && m.t <= t) msgs.push(m);
+  }
+  fetchBucket(b1 + 1);   // warm the next bucket
+  const key = msgs.length ? `${msgs[0].id}-${msgs[msgs.length - 1].id}-${msgs.length}` : 'empty';
+  if (key === lastChatKey) return;
+  lastChatKey = key;
+  const box = $('#chat');
+  if (!msgs.length) return box.replaceChildren(el('div', { class: 'note', style: 'padding:10px', text: 'No chat for this moment.' }));
+  box.replaceChildren(...msgs.map(m => {
+    const who = el('span', { class: 'who', text: m.author || '?', title: m.user_id ? `user_id ${m.user_id}` : 'Search this author',
+      onclick: () => { location.href = 'index.html?tab=chat&author=' + encodeURIComponent(m.author || ''); } });
+    const time = el('span', { class: 't', text: fmtTime(m.t) });
+    if (m.kind === 'mod_action') return el('div', { class: 'msg mod' }, time, who, document.createTextNode(' ' + m.text));
+    return el('div', { class: 'msg' + (m.deleted ? ' deleted' : '') }, time,
+      m.first_msg ? el('span', { class: 'first', title: 'First message in this channel', text: 'first' }) : null,
+      who, document.createTextNode(': '), el('span', { class: 'body', text: m.text }),
+      m.deleted ? el('span', { class: 'tag del', text: 'deleted by mods' }) : null);
+  }));
+  box.scrollTop = box.scrollHeight;
+}
+
+// ---------- activity strip ----------
+function drawStrip(t) {
+  const c = $('#strip'), dpr = window.devicePixelRatio || 1, w = c.clientWidth, h = c.clientHeight;
+  if (c.width !== w * dpr) { c.width = w * dpr; c.height = h * dpr; }
+  const g = c.getContext('2d'), css = getComputedStyle(document.documentElement);
+  const dur = Math.max(video.duration || 1, 1), x = s => s / dur * w;
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+  g.fillStyle = css.getPropertyValue('--band');
+  for (const [a, b] of muted) g.fillRect(x(a), 0, Math.max(x(b) - x(a), 1), h);
+  g.fillStyle = css.getPropertyValue('--muted');
+  const bw = Math.max(w / (dur / 60), 1);
+  for (const m of minutes) { const bh = m.msgs / maxMsgs * (h - 6); g.fillRect(x(m.minute * 60), h - bh, bw, bh); }
+  g.fillStyle = css.getPropertyValue('--accent');
+  g.fillRect(x(t) - 1, 0, 2, h);
+}
+function showTerms(t) {
+  const m = minutes.find(m => m.minute === Math.floor(t / 60));
+  $('#terms').textContent = m ? `${m.msgs} msgs/min · ${m.distinct_chatters} chatters` +
+    (m.top_terms && m.top_terms.length ? ' · ' + m.top_terms.map(x => x[0]).join('  ') : '') : '';
+}
+
+// ---------- wiring ----------
+function seek(t) {
+  player.seek(t);
+  now = t;
+  autoScroll = true;
+  $('#resume').hidden = true;
+  currentTurn = -2;
+  tick();
+}
+function tick() {
+  const t = player.getTime();
+  if (typeof t === 'number' && isFinite(t)) now = t;
+  highlight(now);
+  renderChat(now);
+  drawStrip(now);
+  showTerms(now);
+  $('#clock').textContent = fmtTime(now);
+}
+
+(async () => {
+  cfg = await chrome('');
+  if (!VID) return $('#title').textContent = 'No video selected.';
+  try {
+    const r = await api('/api/videos/' + encodeURIComponent(VID));
+    video = r.video; turns = r.turns; muted = r.muted;
+  } catch (e) { return $('#title').textContent = 'Could not load this video: ' + e.message; }
+  document.title = `${video.title || VID} · VOD archive`;
+  $('#title').textContent = `${fmtDate(video.upload_date)} ${video.title || VID}`;
+  if (/^https?:\/\//.test(video.source_url || '')) $('#source').href = video.source_url; else $('#source').hidden = true;
+  renderTranscript();
+  try {
+    minutes = (await api(`/api/videos/${encodeURIComponent(VID)}/chat_stats`)).minutes;
+    maxMsgs = Math.max(1, ...minutes.map(m => m.msgs));
+  } catch (e) { /* no chat stats */ }
+  $('#hidemedia').addEventListener('change', e => $('#transcript').classList.toggle('hide-media', e.target.checked));
+  $('#resume').addEventListener('click', () => { autoScroll = true; $('#resume').hidden = true; currentTurn = -2; tick(); });
+  $('#copy').addEventListener('click', async () => {
+    const url = new URL(watchUrl(VID, now), location.href).href;
+    try { await navigator.clipboard.writeText(url); $('#copy').textContent = 'Copied'; }
+    catch (e) { prompt('Copy this link', url); }
+    setTimeout(() => { $('#copy').textContent = 'Copy link'; }, 1500);
+  });
+  $('#strip').addEventListener('click', e => {
+    const box = e.target.getBoundingClientRect();
+    seek((e.clientX - box.left) / box.width * (video.duration || 0));
+  });
+  try { await initPlayer(); }
+  catch (e) { $('#player').replaceChildren(el('div', { class: 'note', style: 'padding:16px;color:#ccc', text: 'The video player could not load. Transcript and chat still work.' })); }
+  tick();
+  setInterval(tick, 500);
+})();
+</script></body></html>

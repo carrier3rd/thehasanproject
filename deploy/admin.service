@@ -1,0 +1,14 @@
+[Unit]
+Description=VOD archive private admin app (reads archive.db; localhost only)
+After=network.target
+
+[Service]
+User=vodarchive
+WorkingDirectory=/opt/vod-archive
+# 127.0.0.1 only: reach it through an SSH tunnel or Tailscale. Never add it to the Caddyfile.
+ExecStart=/opt/vod-archive/.venv/bin/uvicorn admin.app:app --host 127.0.0.1 --port 8001
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

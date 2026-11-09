@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Search · VOD archive</title><link rel="stylesheet" href="style.css"></head>
+<body><main>
+  <form id="form">
+    <div class="row"><input type="search" id="q" placeholder="Search…" autofocus><button>Search</button></div>
+    <div class="tabs" id="tabs">
+      <button type="button" data-tab="transcripts">Transcripts</button>
+      <button type="button" data-tab="chat">Chat</button>
+      <button type="button" data-tab="semantic">Semantic</button>
+    </div>
+    <div class="row" id="filters">
+      <select id="speaker" data-for="transcripts"><option value="">Any speaker</option></select>
+      <input type="text" id="author" data-for="chat" placeholder="Chat author" style="max-width:200px">
+      <input type="text" id="user_id" data-for="chat" placeholder="user_id" style="max-width:140px" hidden>
+      <label data-for="chat"><input type="checkbox" id="first_msg"> first-time chatters</label>
+      <label data-for="transcripts chat">From <input type="date" id="from"></label>
+      <label data-for="transcripts chat">To <input type="date" id="to"></label>
+      <label data-for="transcripts"><input type="checkbox" id="include_media"> include media</label>
+      <select id="mode" data-for="semantic"><option value="hybrid">Hybrid</option><option value="semantic">Semantic only</option></select>
+    </div>
+  </form>
+  <div id="results"></div>
+  <div class="row" id="pager" hidden><button id="prev">← Previous</button><span id="pageno" class="note"></span><button id="next">Next →</button></div>
+</main>
+<script src="common.js"></script>
+<script>
+const LIMIT = 50;
+const state = { tab: 'transcripts', offset: 0 };
+const fields = ['q', 'speaker', 'author', 'user_id', 'from', 'to', 'mode'];
+
+function setTab(tab) {
+  state.tab = tab;
+  for (const b of document.querySelectorAll('#tabs button')) b.classList.toggle('on', b.dataset.tab === tab);
+  for (const f of document.querySelectorAll('#filters [data-for]')) {
+    const show = f.dataset.for.split(' ').includes(tab) && !(f.id === 'user_id' && CONFIG.mode !== 'admin');
+    f.hidden = !show;
+  }
+}
+
+function readUrl() {
+  const p = new URLSearchParams(location.search);
+  for (const f of fields) if (p.has(f)) $('#' + f).value = p.get(f);
+  $('#include_media').checked = p.get('include_media') === '1';
+  $('#first_msg').checked = p.get('first_msg') === '1';
+  state.offset = +p.get('offset') || 0;
+  setTab(['transcripts', 'chat', 'semantic'].includes(p.get('tab')) ? p.get('tab') : 'transcripts');
+}
+
+function writeUrl() {
+  const p = new URLSearchParams({ tab: state.tab });
+  for (const f of fields) if ($('#' + f).value && !$('#' + f).hidden) p.set(f, $('#' + f).value);
+  if ($('#include_media').checked) p.set('include_media', '1');
+  if ($('#first_msg').checked) p.set('first_msg', '1');
+  if (state.offset) p.set('offset', state.offset);
+  history.replaceState(null, '', '?' + p);
+}
+
+function hitRow(link, metaParts, bodyNodes, tags = []) {
+  const meta = el('div', { class: 'meta' }, el('a', { href: link, text: metaParts[0] }), ' · ' + metaParts.slice(1).join(' · '));
+  for (const t of tags) meta.append(el('span', { class: 'tag' + (t === 'deleted by mods' ? ' del' : ''), text: t }));
+  return el('div', { class: 'hit' }, meta, el('p', {}, ...bodyNodes));
+}
+
+async function run() {
+  const box = $('#results');
+  writeUrl();
+  const q = $('#q').value.trim();
+  const dates = { from: $('#from').value, to: $('#to').value };
+  box.replaceChildren(el('div', { class: 'note', text: 'Searching…' }));
+  $('#pager').hidden = true;
+  try {
+    let n = 0;
+    if (state.tab === 'transcripts') {
+      if (!q) return box.replaceChildren(el('div', { class: 'note', text: 'Type something to search the transcripts.' }));
+      const r = await api('/api/search', { q, speaker: $('#speaker').value, ...dates,
+        include_media: $('#include_media').checked ? 1 : 0, limit: LIMIT, offset: state.offset });
+      n = r.hits.length;
+      box.replaceChildren(...r.hits.map(h => hitRow(watchUrl(h.video_id, h.start),
+        [`${fmtDate(h.upload_date)} ${h.title}`, fmtTime(h.start), h.speaker + (h.low_confidence ? ' ?' : '')],
+        snippetNodes(h.snippet), h.is_media ? ['media'] : [])));
+    } else if (state.tab === 'chat') {
+      const author = $('#author').value.trim(), user_id = $('#user_id').value.trim();
+      if (!q && !author && !user_id) return box.replaceChildren(el('div', { class: 'note', text: 'Enter text or an author.' }));
+      const r = await api('/api/chat/search', { q, author, user_id, ...dates,
+        first_msg: $('#first_msg').checked ? 1 : 0, limit: LIMIT, offset: state.offset });
+      n = r.hits.length;
+      box.replaceChildren(...r.hits.map(h => {
+        const tags = [];
+        if (h.deleted) tags.push('deleted by mods');
+        if (h.kind === 'mod_action') tags.push('mod action');
+        if (h.first_msg) tags.push('first message');
+        if (h.user_id) tags.push('id ' + h.user_id);
+        const when = h.t === null ? 'not in video' : fmtTime(h.t);
+        return hitRow(h.t === null ? watchUrl(h.video_id, 0) : watchUrl(h.video_id, Math.max(h.t - 5, 0)),
+          [`${fmtDate(h.upload_date)} ${h.title}`, when, h.author || ''], snippetNodes(h.snippet), tags);
+      }));
+    } else {
+      if (!q) return box.replaceChildren(el('div', { class: 'note', text: 'Ask a question or describe a topic.' }));
+      const r = await api('/api/semantic', { q, mode: $('#mode').value });
+      n = -r.hits.length;
+      box.replaceChildren(...r.hits.map(h => hitRow(watchUrl(h.video_id, h.start),
+        [`${fmtDate(h.upload_date)} ${h.title}`, fmtTime(h.start)],
+        h.turns.flatMap(t => [el('b', { text: t.speaker + ': ' }), document.createTextNode(t.text + ' ')]))));
+    }
+    if (!box.children.length) box.replaceChildren(el('div', { class: 'note', text: 'No results.' }));
+    if (n >= 0) {
+      $('#pager').hidden = !(state.offset > 0 || n === LIMIT);
+      $('#prev').disabled = state.offset === 0;
+      $('#next').disabled = n < LIMIT;
+      $('#pageno').textContent = `Page ${state.offset / LIMIT + 1}`;
+    }
+  } catch (e) {
+    box.replaceChildren(el('div', { class: 'note', text: 'Search failed: ' + e.message }));
+  }
+}
+
+(async () => {
+  await chrome('index.html');
+  try {
+    for (const s of (await api('/api/speakers')).speakers) $('#speaker').append(el('option', { value: s, text: s }));
+  } catch (e) { /* dropdown stays at "Any speaker" */ }
+  readUrl();
+  for (const b of document.querySelectorAll('#tabs button')) b.addEventListener('click', () => { setTab(b.dataset.tab); state.offset = 0; run(); });
+  $('#form').addEventListener('submit', e => { e.preventDefault(); state.offset = 0; run(); });
+  $('#prev').addEventListener('click', () => { state.offset = Math.max(state.offset - LIMIT, 0); run(); scrollTo(0, 0); });
+  $('#next').addEventListener('click', () => { state.offset += LIMIT; run(); scrollTo(0, 0); });
+  if ($('#q').value || $('#author').value || $('#user_id').value) run();
+})();
+</script></body></html>
