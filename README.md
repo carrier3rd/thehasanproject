@@ -11,7 +11,8 @@ pip install -r requirements.txt
 export HF_TOKEN=...            # after accepting the pyannote model terms on Hugging Face
 python check_env.py            # must be all green
 ```
-Fill in `sources`, `site_domain`, `contact_email` and `twitch_downloader_cli` in `config.yaml`.
+Clone the private settings repo next to this one (`../thehasanprojectprivate`) and fill in its `config.yaml`
+(domain, contact address, sources, TwitchDownloaderCLI path). Put `HF_TOKEN` in `.env` here, never in git.
 
 ## Pipeline (run from the repo root)
 ```bash

@@ -357,3 +357,39 @@ def test_qa_report_sheet_and_health(project):
     assert "unlabeled" in run(root, "qa.py", "--score").stdout
     health = run(root, "qa.py", "--health").stdout
     assert "low-confidence alignments" in health and "VODs without chat" in health
+
+
+def test_ban_hides_that_users_earlier_messages(tmp_path):
+    import chat_logger as cl
+    import yaml
+    from common import load_config
+    from conftest import REPO
+    c = yaml.safe_load((REPO / "config.yaml").read_text())
+    c["log_channels"] = ["ch"]
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump(c))
+    store = cl.Store(load_config(tmp_path / "config.yaml"))
+    msg = lambda ts, uid, text: cl.parse_line(f"@tmi-sent-ts={ts};user-id={uid};id=m{ts} :u{uid}!u@u PRIVMSG #ch :{text}")
+    for ts, uid in ((1000, 7), (2000, 8), (3000, 7)):
+        store.handle(msg(ts, uid, "hi"))
+    store.handle(cl.parse_line("@ban-duration=60;target-user-id=7;tmi-sent-ts=4000 :tmi.twitch.tv CLEARCHAT #ch :u7"))
+    store.handle(msg(5000, 7, "after the timeout"))
+    store.maybe_commit(force=True)
+    rows = store.con.execute("SELECT ts_ms, deleted FROM live_msgs WHERE kind='msg' ORDER BY ts_ms").fetchall()
+    assert [tuple(r) for r in rows] == [(1000, 1), (2000, 0), (3000, 1), (5000, 0)]
+
+
+def test_private_config_overlay(tmp_path):
+    import yaml
+    from common import cfg_file, load_config
+    from conftest import REPO
+    priv = tmp_path / "private"
+    priv.mkdir()
+    (priv / "config.yaml").write_text(yaml.safe_dump({"site_domain": "example.org", "optout_file": "optout.txt",
+                                                      "paths": {"archive_db": "/srv/a.db"}}))
+    c = yaml.safe_load((REPO / "config.yaml").read_text())
+    c["private_dir"] = "private"
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump(c))
+    cfg = load_config(tmp_path / "config.yaml")
+    assert cfg["site_domain"] == "example.org" and cfg["paths"]["archive_db"] == "/srv/a.db"
+    assert cfg["paths"]["audio"] == "data/audio"
+    assert cfg_file(cfg, "optout_file") == priv / "optout.txt"
