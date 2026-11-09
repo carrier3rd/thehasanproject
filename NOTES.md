@@ -56,6 +56,11 @@ Run `python -m pytest` from the repo root (27 tests, no GPU or network needed).
 - **Diarizer embeddings** are used only when their dimension matches the voiceprints; otherwise the crop-and-embed
   fallback runs. Models stay loaded across chunks; "free GPU memory after each chunk" is `gc` + `empty_cache`.
 
+- **Timeouts and bans hide that user's earlier messages** from the current stream (`hide_messages_on_ban`), as
+  Twitch does in its own chat. Public shows the placeholder; the text stays in archive.db.
+- **Private settings** (domain, contact, sources, opt-out list) live in the private repo `thehasanprojectprivate`,
+  cloned next to this one; its `config.yaml` overrides this repo's (`private_dir`, or `VOD_ARCHIVE_PRIVATE_DIR`).
+
 ## Library versions checked
 Signatures were read from the wheels, not run: whisperx 3.8.6 (`whisperx.diarize.DiarizationPipeline(token=...)`,
 `__call__(..., return_embeddings=True)` returning `(df, {speaker: vector})`), pyannote.audio 4.0.7
@@ -63,9 +68,6 @@ Signatures were read from the wheels, not run: whisperx 3.8.6 (`whisperx.diarize
 (`use_auth_token`, no `return_embeddings`) are handled by fallbacks.
 
 ## Open questions for the user
-1. **Bans and timeouts do not hide earlier messages.** Twitch clears a user's messages when they are timed out or banned
-   (CLEARCHAT). The spec only marks CLEARMSG targets as deleted, so a banned user's earlier messages publish with their
-   full text next to a public "ban" line. Marking them deleted is a small change in `chat_logger.py`.
-2. **publish.py rebuilds public.db from scratch.** That was cheap when it held transcripts only. With every chat
+1. **publish.py rebuilds public.db from scratch.** That was cheap when it held transcripts only. With every chat
    message it will take minutes and grow with the archive; an incremental publish may be needed after the backfill.
-3. **Opt-outs are applied on the next publish**, i.e. up to a day later with the nightly schedule.
+2. **Opt-outs are applied on the next publish**, i.e. up to a day later with the nightly schedule.

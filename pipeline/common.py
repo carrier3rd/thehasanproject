@@ -78,6 +78,30 @@ def load_config(path: str | os.PathLike | None = None) -> dict:
     with open(path) as f:
         cfg = yaml.safe_load(f)
     cfg["_root"] = str(path.resolve().parent)
+    return merge_private(cfg)
+
+
+def merge_private(cfg: dict) -> dict:
+    """Overlay <private_dir>/config.yaml (site-specific settings kept out of the public repo).
+    Relative file settings in the overlay (optout_file) resolve against the private dir."""
+    pdir = os.environ.get("VOD_ARCHIVE_PRIVATE_DIR") or cfg.get("private_dir")
+    if not pdir:
+        return cfg
+    pdir = Path(pdir)
+    if not pdir.is_absolute():
+        pdir = Path(cfg["_root"]) / pdir
+    overlay_path = pdir / "config.yaml"
+    if not overlay_path.is_file():
+        return cfg
+    overlay = yaml.safe_load(overlay_path.read_text()) or {}
+    for key, value in overlay.items():
+        if key == "paths" and isinstance(value, dict):
+            cfg["paths"] = {**cfg.get("paths", {}), **value}
+        elif key == "optout_file" and not Path(value).is_absolute():
+            cfg[key] = str(pdir / value)
+        else:
+            cfg[key] = value
+    cfg["_private"] = str(pdir.resolve())
     return cfg
 
 

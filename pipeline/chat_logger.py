@@ -97,6 +97,12 @@ class Store:
                 "INSERT INTO live_msgs(ts_ms, channel, room_id, user_id, author, text, kind) VALUES(?,?,?,?,?,?,?)",
                 (ts, channel, tags.get("room-id"), tags.get("target-user-id"), params[1],
                  f"timeout {dur}s" if dur else "ban", "mod_action"))
+            if self.cfg.get("hide_messages_on_ban", True) and tags.get("target-user-id"):
+                # Twitch removes a timed-out/banned user's messages from chat; mirror that
+                s = self.sessions.get(channel)
+                since = s[1] if s and ts - s[2] < self.gap_ms else ts - self.gap_ms
+                self.con.execute("UPDATE live_msgs SET deleted=1 WHERE channel=? AND user_id=? AND kind='msg' "
+                                 "AND ts_ms BETWEEN ? AND ?", (channel, tags["target-user-id"], since, ts))
         else:
             return
         self.pending += 1

@@ -1,4 +1,7 @@
 # All settings live here. Paths are relative to this file unless absolute.
+# Site-specific / private values (domain, contact, sources, opt-outs) go in <private_dir>/config.yaml,
+# which overrides any key below. Override the location with VOD_ARCHIVE_PRIVATE_DIR.
+private_dir: ../thehasanprojectprivate
 channel_name: hasanabi            # archive target
 log_channels: [hasanabi]          # live logger may watch several channels
 sources:                          # every place full VODs exist; user fills in
@@ -54,6 +57,7 @@ public_speakers: [Hasan]          # voiceprint names shown publicly; others -> "
 publish_min_distinct_chatters: 5  # a term/emote appears in public aggregates only if >= N distinct chatters used it that minute
 publish_top_terms: 10
 publish_deleted_text: false       # true shows mod-deleted text publicly
+hide_messages_on_ban: true        # a timeout/ban also marks that user's earlier messages this stream as deleted
 deleted_placeholder: "[deleted by mods]"
 optout_file: optout.txt           # one username or user_id per line
 
