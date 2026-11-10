@@ -37,7 +37,7 @@ def run(root, script, *args, check=True):
 
 def build_project(root: Path) -> dict:
     cfg = yaml.safe_load((REPO / "config.yaml").read_text())
-    cfg.update(channel_name="teststreamer", log_channels=["teststreamer"], site_domain="localhost",
+    cfg.update(channel_name="teststreamer", log_channels=["teststreamer"], site_domain="localhost", site_password_required=False,
                contact_email="archive@example.org", rate_limit_per_minute=1000)
     (root / "config.yaml").write_text(yaml.safe_dump(cfg))
     from common import connect_archive, load_config, make_dirs, P

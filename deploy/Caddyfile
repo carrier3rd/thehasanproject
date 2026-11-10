@@ -1,3 +1,5 @@
+# Only for the alternative setup with your own domain and router port forwarding.
+# The default laptop setup uses Tailscale Funnel instead (deploy/laptop/install.sh).
 # Public site only. The admin app (127.0.0.1:8001) is never proxied.
 # Replace example.com with the site domain (also set site_domain in config.yaml).
 example.com {

@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 import sqlite3
 
-from common import P, fmt_ts, load_config, watch_link
+from common import P, fmt_ts, load_config, site_url, watch_link
 from search import Embedder, Index, hybrid, window_results
 
 INSTRUCTION = ("Answer only from these excerpts, cite the link for every claim, "
@@ -48,7 +48,7 @@ def main():
     con = sqlite3.connect(f"file:{P(cfg, 'public_db')}?mode=ro", uri=True)
     qvec = Embedder(cfg).query(a.question)
     hits = index.semantic(qvec, a.k) if a.mode == "semantic" else hybrid(con, index, a.question, qvec, a.k)
-    base = f"https://{cfg['site_domain']}/"
+    base = site_url(cfg)
     blocks = []
     for r in window_results(con, index, hits):
         link = base + watch_link(r["video_id"], r["start"])

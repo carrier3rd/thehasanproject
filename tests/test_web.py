@@ -136,3 +136,20 @@ def test_rate_limit(project):
     codes = [client.get("/api/search", params={"q": "x"}).status_code for _ in range(5)]
     assert codes == [200, 200, 200, 429, 429]
     assert client.get("/api/videos").status_code == 200           # browsing is not limited
+
+
+def test_site_password_and_auto_domain(project, monkeypatch):
+    root, cfg = project
+    from webcore import create_app
+    locked = dict(cfg, site_password_required=True, site_domain="auto")
+    monkeypatch.delenv("SITE_PASSWORD", raising=False)
+    assert TestClient(create_app(locked, "public")).get("/").status_code == 503          # fails closed
+    monkeypatch.setenv("SITE_USER", "viewer")
+    monkeypatch.setenv("SITE_PASSWORD", "s3cret pass")
+    client = TestClient(create_app(locked, "public"), base_url="https://laptop.tail1234.ts.net")
+    r = client.get("/api/videos")
+    assert r.status_code == 401 and r.headers["www-authenticate"].startswith("Basic")
+    assert client.get("/api/videos", auth=("viewer", "wrong")).status_code == 401
+    assert client.get("/index.html", auth=("viewer", "s3cret pass")).status_code == 200
+    assert client.get("/api/config", auth=("viewer", "s3cret pass")).json()["site_domain"] == "laptop.tail1234.ts.net"
+    assert TestClient(create_app(locked, "admin")).get("/api/config").status_code == 200  # admin is local-only, no password

@@ -11,7 +11,7 @@ from collections import defaultdict
 import numpy as np
 
 from build_db import media_flags, merge_turns
-from common import P, connect_archive, fmt_ts, load_config, make_dirs, read_tsv, watch_link
+from common import P, connect_archive, fmt_ts, load_config, make_dirs, read_tsv, site_url, watch_link
 
 LABEL_FIELDS = ["model", "video_id", "start", "end", "link", "predicted_speaker", "text", "true_speaker", "transcript_ok"]
 YES = {"y", "yes", "1", "true", "ok"}
@@ -84,7 +84,7 @@ def write_sheet(cfg: dict, n: int, force: bool) -> None:
                     turns.append((jp.stem, t))
         for vid, t in rng.sample(turns, min(n, len(turns))):
             rows.append({"model": model, "video_id": vid, "start": round(t["start"], 1), "end": round(t["end"], 1),
-                         "link": f"https://{cfg['site_domain']}/" + watch_link(vid, t["start"]),
+                         "link": site_url(cfg) + watch_link(vid, t["start"]),
                          "predicted_speaker": t["speaker"], "text": t["text"].replace("\t", " "),
                          "true_speaker": "", "transcript_ok": ""})
     with open(dest, "w", newline="") as f:
