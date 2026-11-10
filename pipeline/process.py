@@ -380,6 +380,7 @@ def main():
     ap.add_argument("--model", help="Whisper model; output goes to data/transcripts/<model>/ (pilot)")
     ap.add_argument("--rename-only", action="store_true", help="redo speaker naming from saved embeddings (no GPU)")
     ap.add_argument("--shard", help="i/n: process only ids whose hash mod n == i")
+    ap.add_argument("--allow-cpu", action="store_true", help="run without an NVIDIA GPU (very slow)")
     a = ap.parse_args()
     cfg = load_config()
     make_dirs(cfg)
@@ -395,6 +396,16 @@ def main():
     if not todo:
         print("nothing to process")
         return 0
+    if not a.allow_cpu:
+        try:
+            import torch
+            has_gpu = torch.cuda.is_available()
+        except ImportError:
+            has_gpu = False
+        if not has_gpu:
+            print(f"{len(todo)} VOD(s) need transcription, but this machine has no NVIDIA GPU. "
+                  "Run them on a GPU machine with deploy/gpu/run_remote.sh (or pass --allow-cpu).")
+            return 3
     if not load_voiceprints(cfg):
         log.warning("no voiceprints found; every speaker will be Unknown_n")
     models = Models(cfg, model_name)

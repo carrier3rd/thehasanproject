@@ -61,6 +61,13 @@ Run `python -m pytest` from the repo root (27 tests, no GPU or network needed).
 - **Private settings** (domain, contact, sources, opt-out list) live in the private repo `thehasanprojectprivate`,
   cloned next to this one; its `config.yaml` overrides this repo's (`private_dir`, or `VOD_ARCHIVE_PRIVATE_DIR`).
 
+- **Two machines.** The always-on laptop has no NVIDIA GPU (Intel Iris Plus only), so transcription and voice
+  enrollment run on a rented GPU via `deploy/gpu/run_remote.sh`; everything else runs on the laptop.
+  `requirements.txt` is the laptop set (CPU PyTorch), `requirements-gpu.txt` the GPU set, `check_env.py --role`.
+  `process.py` refuses to run without a GPU unless given `--allow-cpu`; `nightly.sh` transcribes only when `GPU_HOST`
+  is set, otherwise it reports how many VODs are waiting. `run_remote.sh` was dry-run against a local stand-in for
+  SSH (sync, batch limit, token-only `.env`, pull without overwriting local transcripts); never against a real GPU host.
+
 ## Library versions checked
 Signatures were read from the wheels, not run: whisperx 3.8.6 (`whisperx.diarize.DiarizationPipeline(token=...)`,
 `__call__(..., return_embeddings=True)` returning `(df, {speaker: vector})`), pyannote.audio 4.0.7
