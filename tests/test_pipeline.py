@@ -450,3 +450,19 @@ def test_download_fetches_fragments_concurrently(tmp_path, monkeypatch):
     download.fetch({"id": "v1", "platform": "twitch", "url": "https://www.twitch.tv/videos/1"}, cfg)
     i = seen["cmd"].index("--concurrent-fragments")
     assert seen["cmd"][i + 1] == "6"
+
+
+def test_download_check_complete_catches_cut_off_conversion(tmp_path):
+    import download as d
+    row = {"id": "v42", "duration": "3600"}
+    assert d.check_complete(tmp_path, row, "opus", probe=lambda f: 3600.0) == "no audio produced (skipped as live?)"
+    (tmp_path / "v42.opus").write_bytes(b"x")
+    (tmp_path / "v42.info.json").write_text("{}")
+    assert d.check_complete(tmp_path, row, "opus", probe=lambda f: 3599.0) is None
+    assert "0.80 h" in d.check_complete(tmp_path, row, "opus", probe=lambda f: 2880.0)
+    (tmp_path / "v42.mp4").write_bytes(b"x")   # yt-dlp deletes this only after a finished conversion
+    assert "leftover v42.mp4" in d.check_complete(tmp_path, row, "opus", probe=lambda f: 3600.0)
+    assert [f.name for f in d.leftovers(tmp_path, "v42", "opus")] == ["v42.mp4"]
+    (tmp_path / "v42.mp4").unlink()
+    (tmp_path / "v42.opus.incomplete").write_bytes(b"x")
+    assert d.leftovers(tmp_path, "v42", "opus") == []

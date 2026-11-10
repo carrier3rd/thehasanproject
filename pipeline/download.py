@@ -6,6 +6,7 @@ import datetime as dt
 import json
 import subprocess
 import time
+from pathlib import Path
 
 from common import P, get_logger, load_config, log_failure, make_dirs, read_tsv, write_tsv
 
@@ -113,6 +114,40 @@ def refresh_meta(row: dict, runner=subprocess.run) -> dict:
     return row
 
 
+KEEP_SUFFIXES = (".info.json", ".meta.json", ".incomplete")
+
+
+def leftovers(audio: Path, vod_id: str, fmt: str) -> list[Path]:
+    """Intermediate files yt-dlp leaves when a download or the audio conversion stops part way."""
+    return [f for f in audio.glob(f"{vod_id}.*")
+            if f.name != f"{vod_id}.{fmt}" and not f.name.endswith(KEEP_SUFFIXES)]
+
+
+def probe_seconds(path: Path) -> float | None:
+    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
+                         capture_output=True, text=True)
+    try:
+        return float(out.stdout.strip())
+    except ValueError:
+        return None
+
+
+def check_complete(audio: Path, row: dict, fmt: str, probe=probe_seconds) -> str | None:
+    """Why the audio file is not a finished download, or None when it is.
+    A conversion that is cut off still leaves a playable but short file, so existence alone proves nothing."""
+    f = audio / f"{row['id']}.{fmt}"
+    if not f.exists():
+        return "no audio produced (skipped as live?)"
+    left = leftovers(audio, row["id"], fmt)
+    if left:
+        return "conversion did not finish (leftover " + ", ".join(x.name for x in left) + ")"
+    want = float(row.get("duration") or 0)
+    got = probe(f) if want else None
+    if want and got is not None and got < want * 0.98:
+        return f"audio is {got / 3600:.2f} h but the VOD is {want / 3600:.2f} h"
+    return None
+
+
 def fetch(row: dict, cfg: dict) -> None:
     audio = P(cfg, "audio")
     lo, hi = cfg["download_sleep"]
@@ -130,8 +165,12 @@ def fetch(row: dict, cfg: dict) -> None:
         cmd += ["-f", "bestaudio/best"]
     url = video_url(row)
     out = subprocess.run(cmd + [url], capture_output=True, text=True)
-    if not (audio / f"{row['id']}.{cfg['audio_format']}").exists():
-        raise RuntimeError((out.stderr or out.stdout).strip()[-400:] or "no audio produced (skipped as live?)")
+    problem = check_complete(audio, row, cfg["audio_format"])
+    if problem:
+        f = audio / f"{row['id']}.{cfg['audio_format']}"
+        if f.exists():   # set the short file aside so the next run converts again
+            f.rename(f.with_name(f.name + ".incomplete"))
+        raise RuntimeError(f"{problem}: " + ((out.stderr or out.stdout).strip()[-300:]))
 
 
 def main():
@@ -147,7 +186,9 @@ def main():
     if not rows:
         log.error("logs/inventory.tsv is empty; run inventory.py first")
         return 1
-    have = {p.stem for p in audio.glob(f"*.{cfg['audio_format']}")}
+    fmt = cfg["audio_format"]
+    # an audio file with yt-dlp leftovers next to it is a conversion that stopped part way: fetch it again
+    have = {p.stem for p in audio.glob(f"*.{fmt}") if not leftovers(audio, p.stem, fmt)}
     todo, twins = plan(rows, cfg, have)
     if a.only:
         wanted = [x for part in a.only for x in part.split(",") if x]
