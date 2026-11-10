@@ -61,7 +61,7 @@ hide_messages_on_ban: true        # a timeout/ban also marks that user's earlier
 deleted_placeholder: "[deleted by mods]"
 optout_file: optout.txt           # one username or user_id per line
 
-site_domain: auto                 # Twitch embed `parent`; auto = the host the visitor used (works with Tailscale Funnel)
+site_domain: auto                 # public address, for links printed by the CLI tools; the site itself uses whatever address it is opened on
 site_password_required: true      # public site asks for SITE_USER / SITE_PASSWORD from site.env (spec: basic auth on by default)
 contact_email: ""                 # shown on about.html
 rate_limit_per_minute: 60
