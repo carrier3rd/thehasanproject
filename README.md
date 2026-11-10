@@ -11,22 +11,19 @@ decisions.
 | **Laptop** (always on, no GPU needed) | chat logger, inventory, downloads, muted spans, chat replay, alignment, database, publish, search index, web + admin apps |
 | **Rented NVIDIA GPU** (by the hour) | transcription (`process.py`) and voice enrollment, driven from the laptop by `deploy/gpu/run_remote.sh` |
 
-### Laptop setup
+### Laptop setup (Ubuntu)
 ```bash
-python -m venv .venv && . .venv/bin/activate
-pip install torch --index-url https://download.pytorch.org/whl/cpu   # CPU-only PyTorch, much smaller
-pip install -r requirements.txt
-python check_env.py --role laptop
+sudo apt install -y git gh
+gh auth login                      # GitHub account; answer yes to "authenticate Git"
+cd ~
+gh repo clone carrier3rd/thehasanproject
+gh repo clone carrier3rd/thehasanprojectprivate
+cd thehasanproject
+deploy/laptop/bootstrap.sh         # packages, Python env (CPU PyTorch), TwitchDownloaderCLI, no sleep
+sudo deploy/laptop/install.sh      # services + site password (see "The website" below)
 ```
-Clone the private settings repo next to this one (`../thehasanprojectprivate`) and fill in its `config.yaml`
-(domain, contact address, sources, TwitchDownloaderCLI path). Put `HF_TOKEN=...` in `.env` here, never in git.
-
-Keep the laptop awake around the clock, or the live chat log has gaps. On Linux with systemd:
-```bash
-sudo sed -i 's/^#\?HandleLidSwitch=.*/HandleLidSwitch=ignore/; s/^#\?HandleLidSwitchExternalPower=.*/HandleLidSwitchExternalPower=ignore/' /etc/systemd/logind.conf
-sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
-sudo systemctl restart systemd-logind
-```
+`bootstrap.sh` turns off sleep and suspend (lid closed or idle) so the chat logger never stops; it prints the undo
+command. Put `HF_TOKEN=...` in `.env` here before the first GPU run. Never put it in git.
 
 ### Rented GPU (RunPod, Vast.ai, Lambda, ...)
 Rent a Linux machine with an NVIDIA card of at least 16 GB (24 GB such as an RTX 4090, A10 or L4 is plenty) and a
