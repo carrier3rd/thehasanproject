@@ -121,6 +121,8 @@ def fetch(row: dict, cfg: dict) -> None:
            "--write-info-json", "--ignore-errors", "--no-playlist",
            "--match-filter", "!is_live & live_status!=is_live & live_status!=post_live",
            "--sleep-interval", str(lo), "--max-sleep-interval", str(hi),
+           # fetch several HLS pieces at once; one at a time is the main reason Twitch downloads crawl
+           "--concurrent-fragments", str(cfg.get("download_fragments", 4)),
            "-o", str(audio / f"{row['id']}.%(ext)s")]
     if row["platform"] == "twitch":
         cmd += ["-f", "audio_only/bestaudio/worst"]

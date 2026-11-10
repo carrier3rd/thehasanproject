@@ -4,6 +4,7 @@ import sqlite3
 import subprocess
 import threading
 import time
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -430,3 +431,22 @@ def test_download_refresh_meta_fills_missing_times():
     with pytest.raises(RuntimeError):
         d.refresh_meta(row, fail)
     assert d.refresh_meta(r, fail) is r            # already complete: no lookup
+
+
+def test_download_fetches_fragments_concurrently(tmp_path, monkeypatch):
+    import download
+    cfg = {"paths": {"audio": str(tmp_path / "audio"), "logs": str(tmp_path / "logs")}, "download_sleep": [5, 20],
+           "audio_format": "opus", "audio_quality": "64K", "download_fragments": 6}
+    (tmp_path / "audio").mkdir()
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen["cmd"] = cmd
+        (tmp_path / "audio" / "v1.opus").write_bytes(b"x")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(download.subprocess, "run", fake_run)
+    monkeypatch.setattr(download, "P", lambda c, k: Path(c["paths"][k]))
+    download.fetch({"id": "v1", "platform": "twitch", "url": "https://www.twitch.tv/videos/1"}, cfg)
+    i = seen["cmd"].index("--concurrent-fragments")
+    assert seen["cmd"][i + 1] == "6"

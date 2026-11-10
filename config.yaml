@@ -10,6 +10,7 @@ sources:                          # every place full VODs exist; user fills in
 audio_format: opus
 audio_quality: 64K
 download_sleep: [5, 20]
+download_fragments: 4             # pieces of a VOD fetched at once (yt-dlp --concurrent-fragments)
 skip_if_ended_within_hours: 2     # don't grab VODs that are live or just ended
 dedupe_date_days: 1               # Twitch/YouTube twin: dates within this many days...
 dedupe_duration_tolerance: 0.02   # ...and durations within this fraction
