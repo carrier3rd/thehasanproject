@@ -97,6 +97,12 @@ Run `python -m pytest` from the repo root (27 tests, no GPU or network needed).
   addresses (counted from uvicorn's access log, which shows the forwarded address under `--proxy-headers`; addresses
   are never printed) and whether the admin app is tailnet-only. Tested here for parsing only, not on the laptop.
 
+- **Rhetoric study** (not in the spec; owner's request 2026-11-10): `research/` holds the design, pre-registered
+  predictions, a sourced watchlist (`watchlist.csv`: antisemitism under IHRA and JDA side by side, Holocaust
+  distortion, Finkelstein and Mearsheimer talking points, anti-US framing) and the socialscope Kremlin-narratives list.
+  Patterns only find candidates; Claude codes stance, and only `endorse` counts. `tests/test_watchlist.py` checks every
+  pattern. The analysis script is not written yet.
+
 ## Library versions checked
 Signatures were read from the wheels, not run: whisperx 3.8.6 (`whisperx.diarize.DiarizationPipeline(token=...)`,
 `__call__(..., return_embeddings=True)` returning `(df, {speaker: vector})`), pyannote.audio 4.0.7
