@@ -93,3 +93,15 @@ def test_scan_code_collect_report(chat_project, capsys):
     assert "IHRA: 12 messages" in text and "JDA: 6" in text
     accounts = (rhetoric.out_root(cfg) / "accounts.tsv").read_text()
     assert "name" in accounts
+
+
+def test_key_from_dotenv(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    env = tmp_path / ".env"
+    env.write_text("HF_TOKEN=hf_x\nexport ANTHROPIC_API_KEY='sk-ant-test'\n")
+    assert rhetoric.key_from_dotenv(path=env)
+    import os
+    assert os.environ["ANTHROPIC_API_KEY"] == "sk-ant-test"
+    monkeypatch.delenv("ANTHROPIC_API_KEY")
+    env.write_text("HF_TOKEN=hf_x\n")
+    assert not rhetoric.key_from_dotenv(path=env)

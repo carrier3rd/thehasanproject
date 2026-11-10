@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import random
 import re
 import sys
@@ -34,6 +35,29 @@ DEFAULTS = {"model": "claude-opus-5-5", "effort": "low", "context_messages": 10,
             # USD per million tokens (input, output), standard rates as of 2026-11; batches bill half
             "prices": {"claude-opus-5-5": [4.0, 20.0], "claude-sonnet-5-5": [2.0, 10.0], "claude-haiku-5-5": [0.10, 0.50]},
             "est_output_tokens": 400}
+
+
+def key_from_dotenv(name: str = "ANTHROPIC_API_KEY", path: Path | None = None) -> bool:
+    """Put NAME from the repo's .env into the environment if it isn't set (scripts run by hand don't source .env).
+    Accepts `NAME=value`, `export NAME=value` and quoted values. Never prints the value."""
+    if os.environ.get(name):
+        return True
+    path = path or ROOT / ".env"
+    if not path.exists():
+        return False
+    for line in path.read_text().splitlines():
+        m = re.match(rf"^\s*(?:export\s+)?{name}\s*=\s*(.*?)\s*$", line)
+        if m and m.group(1):
+            os.environ[name] = m.group(1).strip("'\"")
+            return True
+    return False
+
+
+def api_client():
+    import anthropic
+    if not key_from_dotenv():
+        sys.exit("ANTHROPIC_API_KEY is not set and not found in .env (add a line ANTHROPIC_API_KEY=sk-ant-...)")
+    return anthropic.Anthropic()
 
 
 def settings(cfg: dict) -> dict:
@@ -323,8 +347,7 @@ def code(cfg: dict, only=None, yes=False, client=None, research: Path = RESEARCH
         print("Not submitted. Re-run with --yes to spend that.")
         return None
     if client is None:
-        import anthropic
-        client = anthropic.Anthropic()
+        client = api_client()
     requests, ids = [], []
     for k, (uid, it) in enumerate(items):
         cid = f"{re.sub(r'[^A-Za-z0-9_-]', '_', uid)[:40]}-{it['n']}"
@@ -357,8 +380,7 @@ def collect(cfg: dict, client=None, wait=False) -> int:
         print("no batches waiting")
         return 0
     if client is None:
-        import anthropic
-        client = anthropic.Anthropic()
+        client = api_client()
     total = 0
     for b in batches:
         if b["collected"]:
