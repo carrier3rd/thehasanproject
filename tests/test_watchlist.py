@@ -77,3 +77,13 @@ def test_kremlin_narratives_present():
     assert len(rows) == 18
     for r in rows:
         re.compile(r["pattern"], re.I)
+
+
+def test_allen_dogwhistles_load_and_stay_quiet_on_ordinary_chat():
+    rows = list(csv.DictReader(open(ROOT / "research" / "dogwhistles_allen.csv", newline="", encoding="utf-8")))
+    assert len(rows) >= 70
+    pats = {r["id"]: re.compile(r["pattern"], re.I) for r in rows}
+    assert pats["aw_6mwe"].search("6MWE") and pats["aw_zionist_occupation_government"].search("ZOG")
+    quiet = [r["id"] for r in rows if r["needs_context"] == "no"]
+    hits = [(pid, t) for t in BENIGN for pid in quiet if pats[pid].search(t)]
+    assert not hits, hits
