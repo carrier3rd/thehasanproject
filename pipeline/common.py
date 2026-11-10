@@ -77,7 +77,16 @@ CREATE INDEX IF NOT EXISTS idx_sessions ON sessions(channel, start_ms);
 """
 
 
+def clean_hf_token() -> None:
+    """A token pasted with a trailing space or newline makes every Hugging Face request fail with
+    'Invalid leading whitespace ... in header value' (seen on Colab); strip it once for every script."""
+    tok = os.environ.get("HF_TOKEN")
+    if tok is not None and tok != tok.strip():
+        os.environ["HF_TOKEN"] = tok.strip()
+
+
 def load_config(path: str | os.PathLike | None = None) -> dict:
+    clean_hf_token()
     path = Path(path or os.environ.get("VOD_ARCHIVE_CONFIG", ROOT / "config.yaml"))
     with open(path) as f:
         cfg = yaml.safe_load(f)
