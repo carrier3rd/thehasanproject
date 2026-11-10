@@ -622,14 +622,67 @@ def sheet(cfg: dict, n: int = 100, force: bool = False) -> Path:
             w.writerow([f"{uid}:{it['n']}", ctx, f"{it['alias']}: {it['text']}", "", "", "", "", ""])
     print(f"wrote {len(pick)} items to {path}\nFill in your_stance ({'/'.join(STANCES)}/not_applicable), "
           f"your_categories (comma-separated: {', '.join(CATEGORIES)}), your_ihra and your_jda (y/n). "
-          f"Then run: rhetoric.py agree")
+          f"Easiest: run `rhetoric.py label` to answer one message at a time; then `rhetoric.py agree`.")
     return path
+
+
+def write_sheet(path: Path, rows: list[dict]) -> None:
+    tmp = path.with_suffix(".tmp")
+    with open(tmp, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=SHEET_COLS, delimiter="\t")
+        w.writeheader()
+        w.writerows(rows)
+    tmp.replace(path)
+
+
+def label(cfg: dict, ask=input, say=print) -> int:
+    """Fill hand_labels.tsv in the terminal, one message at a time; saves after each answer, resumable."""
+    path = out_root(cfg) / "hand_labels.tsv"
+    if not path.exists():
+        sys.exit("no hand_labels.tsv yet: run `rhetoric.py sheet` first")
+    rows = list(csv.DictReader(open(path, newline="", encoding="utf-8"), delimiter="\t"))
+    todo = [r for r in rows if not r["your_stance"].strip()]
+    stances = STANCES + ["not_applicable"]
+    say(f"{len(rows) - len(todo)} of {len(rows)} done. Ctrl+C stops; your answers so far are saved.")
+    done = 0
+    for r in todo:
+        say("\n" + "=" * 70 + f"\n[{rows.index(r) + 1}/{len(rows)}]  chat just before:\n  "
+            + (r["chat_before"].replace(" | ", "\n  ") or "(none)") + f"\n\nMESSAGE  {r['message']}\n")
+        say("  ".join(f"{i}={s}" for i, s in enumerate(stances, 1)))
+        while True:
+            a = ask("stance number: ").strip()
+            if a.isdigit() and 1 <= int(a) <= len(stances):
+                break
+        r["your_stance"] = stances[int(a) - 1]
+        if r["your_stance"] != "not_applicable":
+            say("  ".join(f"{i}={c}" for i, c in enumerate(CATEGORIES, 1)))
+            while True:
+                a = ask("categories (numbers, e.g. 3 or 1,3; empty = none): ").replace(" ", "")
+                nums = [x for x in a.split(",") if x]
+                if all(x.isdigit() and 1 <= int(x) <= len(CATEGORIES) for x in nums):
+                    break
+            r["your_categories"] = ",".join(CATEGORIES[int(x) - 1] for x in nums)
+        yn = lambda q: next(v for v in iter(lambda: ask(q).strip().lower()[:1], None) if v in ("y", "n"))
+        if r["your_stance"] == "endorse" and r["your_categories"]:
+            r["your_ihra"] = yn("antisemitic under IHRA? y/n: ")
+            r["your_jda"] = yn("antisemitic under the Jerusalem Declaration? y/n: ")
+        else:
+            r["your_ihra"] = r["your_jda"] = "n"
+        r["notes"] = ask("note (optional, Enter to skip): ").strip()
+        write_sheet(path, rows)
+        done += 1
+    say(f"\nAll {len(rows)} labelled. Now run: rhetoric.py agree")
+    return done
 
 
 def agree(cfg: dict) -> str:
     root = out_root(cfg)
     rows = list(csv.DictReader(open(root / "hand_labels.tsv", newline="", encoding="utf-8"), delimiter="\t"))
     rows = [r for r in rows if r["your_stance"].strip()]
+    if not rows:
+        msg = "No labels yet. Run `rhetoric.py label` to label the messages one at a time."
+        print(msg)
+        return msg
     coded = {}
     for d in root.glob("*"):
         for c in read_jsonl(d / "coded.jsonl"):
@@ -660,7 +713,7 @@ def agree(cfg: dict) -> str:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("step", choices=["scan", "code", "collect", "report", "sheet", "agree"])
+    ap.add_argument("step", choices=["scan", "code", "collect", "report", "sheet", "label", "agree"])
     ap.add_argument("--force", action="store_true", help="sheet: overwrite an existing hand_labels.tsv")
     ap.add_argument("--unit", action="append", help="only this VOD id / live-YYYYmmdd-HHMM unit (repeatable)")
     ap.add_argument("--yes", action="store_true", help="code: actually submit the batch (spends money)")
@@ -683,6 +736,11 @@ def main():
         collect(cfg, wait=a.wait)
     elif a.step == "sheet":
         sheet(cfg, force=a.force)
+    elif a.step == "label":
+        try:
+            label(cfg)
+        except (KeyboardInterrupt, EOFError):
+            print("\nstopped; answers so far are saved. Run `rhetoric.py label` again to continue.")
     elif a.step == "agree":
         agree(cfg)
     else:
