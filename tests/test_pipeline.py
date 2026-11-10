@@ -474,3 +474,11 @@ def test_load_config_strips_hf_token_whitespace(monkeypatch):
     monkeypatch.setenv("HF_TOKEN", "hf_abc123\n ")
     common.load_config()
     assert os.environ["HF_TOKEN"] == "hf_abc123"
+
+
+def test_load_config_rescues_messy_hf_token(monkeypatch):
+    import os
+    import common
+    monkeypatch.setenv("HF_TOKEN", "HF_TOKEN=hf_" + "a1B2" * 8 + "\nsomething else")
+    common.load_config()
+    assert os.environ["HF_TOKEN"] == "hf_" + "a1B2" * 8

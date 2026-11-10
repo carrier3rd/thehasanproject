@@ -6,6 +6,7 @@ import csv
 import fcntl
 import logging
 import os
+import re
 import sqlite3
 import sys
 import time
@@ -81,8 +82,9 @@ def clean_hf_token() -> None:
     """A token pasted with a trailing space or newline makes every Hugging Face request fail with
     'Invalid leading whitespace ... in header value' (seen on Colab); strip it once for every script."""
     tok = os.environ.get("HF_TOKEN")
-    if tok is not None and tok != tok.strip():
-        os.environ["HF_TOKEN"] = tok.strip()
+    if tok:
+        m = re.search(r"hf_[A-Za-z0-9]{20,}", tok)   # also rescues a paste with line breaks or HF_TOKEN= in it
+        os.environ["HF_TOKEN"] = m.group(0) if m else tok.strip()
 
 
 def load_config(path: str | os.PathLike | None = None) -> dict:
