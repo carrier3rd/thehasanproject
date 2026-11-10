@@ -34,7 +34,7 @@ DEFAULTS = {"model": "claude-opus-5-5", "effort": "low", "context_messages": 10,
             "max_requests": 5000, "transcript_window_s": 30,
             # USD per million tokens (input, output), standard rates as of 2026-11; batches bill half
             "prices": {"claude-opus-5-5": [4.0, 20.0], "claude-sonnet-5-5": [2.0, 10.0], "claude-haiku-5-5": [0.10, 0.50]},
-            "est_output_tokens": 400}
+            "est_output_tokens": 150}   # measured on the first laptop batch: ~110 per message at effort low
 
 
 def key_from_dotenv(name: str = "ANTHROPIC_API_KEY", path: Path | None = None) -> bool:
@@ -177,12 +177,21 @@ def scan(cfg: dict, only: list[str] | None = None, research: Path = RESEARCH) ->
                 cand.append(i)
             else:
                 rest.append(i)
-        rng = random.Random(f"{st['seed']}:{uid}")
-        sample = sorted(rng.sample(rest, min(st["sample_size"], len(rest))))
         d = out_root(cfg) / uid
         d.mkdir(parents=True, exist_ok=True)
+        # keep the sample drawn on an earlier scan, so messages already coded stay in it (live units can grow)
+        rest_set = set(rest)
+        old = [it["n"] for it in read_jsonl(d / "candidates.jsonl") if it["kind"] == "sample"]
+        if old and all(i in rest_set for i in old):
+            sample = sorted(old)
+        else:
+            rng = random.Random(f"{st['seed']}:{uid}")
+            sample = sorted(rng.sample(rest, min(st["sample_size"], len(rest))))
+        # every message mods deleted gets coded too (live units only; replays don't keep deleted messages)
+        sample_set = set(sample)
+        deleted = [i for i in rest if rows[i]["deleted"] and i not in sample_set]
         with open(d / "candidates.jsonl", "w", encoding="utf-8") as f:
-            for kind, idx in (("candidate", cand), ("sample", sample)):
+            for kind, idx in (("candidate", cand), ("sample", sample), ("deleted", deleted)):
                 for i in idx:
                     r = rows[i]
                     ctx, target = context(rows, i, st["context_messages"])
@@ -194,12 +203,14 @@ def scan(cfg: dict, only: list[str] | None = None, research: Path = RESEARCH) ->
         cats = Counter(p.category for p in pats for _ in range(hits_by_id.get(p.id, 0)))
         stats = {"unit": uid, "kind": u["kind"], "messages": len(rows), "chatters": len({r["user_id"] for r in rows}),
                  "deleted": sum(r["deleted"] for r in rows), "candidates": len(cand), "sample": len(sample),
+                 "deleted_extra": len(deleted),
                  "non_candidates": len(rest), "transcript": bool(segs), "topic_messages": dict(topic_counts),
                  "hits_by_pattern": dict(hits_by_id.most_common()), "hits_by_category": dict(cats)}
         (d / "stats.json").write_text(json.dumps(stats, indent=1))
         summary[uid] = stats
         print(f"{uid}: {len(rows)} messages, {stats['chatters']} chatters, {len(cand)} candidates "
-              f"({100 * len(cand) / len(rows):.2f}%), sample {len(sample)}")
+              f"({100 * len(cand) / len(rows):.2f}%), sample {len(sample)}"
+              + (f", {len(deleted)} more deleted messages" if deleted else ""))
     return summary
 
 
@@ -435,25 +446,49 @@ def collect(cfg: dict, client=None, wait=False) -> int:
 
 # ---------------------------------------------------------------- report
 ANTISEMITISM_CATS = {"antisemitism", "holocaust_distortion"}
+TIER_ORDER = ["explicit", "trope", "dogwhistle", "narrative", "contested", "talking_point", "charged"]
 
 
-def report(cfg: dict) -> str:
+def wilson(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
+    if not n:
+        return 0.0, 0.0
+    p = k / n
+    c = (p + z * z / (2 * n)) / (1 + z * z / n)
+    h = z * ((p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5) / (1 + z * z / n)
+    return max(0.0, c - h), min(1.0, c + h)
+
+
+def strongest_tier(c: dict, it: dict, cat: str, tier_of: dict, cat_of: dict) -> str:
+    ids = [i for i in set(c.get("pattern_ids") or []) | set(it.get("hits") or []) if cat_of.get(i) == cat]
+    tiers = [tier_of[i] for i in ids if tier_of.get(i) in TIER_ORDER]
+    return min(tiers, key=TIER_ORDER.index) if tiers else "coder_only"
+
+
+def endorsed(c: dict) -> bool:
+    return c.get("status") == "succeeded" and c["stance"] == "endorse" and bool(c["categories"])
+
+
+def report(cfg: dict, research: Path = RESEARCH) -> str:
     root = out_root(cfg)
+    pats = load_patterns(research)
+    tier_of, cat_of = {p.id: p.tier for p in pats}, {p.id: p.category for p in pats}
     lines = ["# Rhetoric study: chat report", "",
-             f"Generated {time.strftime('%Y-%m-%d %H:%M')}. Counts are messages coded `endorse` by Claude. Aggregates only;",
-             "per-account detail is in accounts.tsv (private).", ""]
+             f"Generated {time.strftime('%Y-%m-%d %H:%M')}. Counts are messages coded `endorse` by Claude among the keyword",
+             "candidates, unless a line says otherwise. Aggregates only; per-account detail is in accounts.tsv (private).", ""]
     accounts = defaultdict(lambda: Counter())
     names = defaultdict(set)
-    pooled = Counter()
+    pooled, pooled_tier, pooled_miss = Counter(), Counter(), Counter()
+    tot = Counter()
     for d in sorted(p for p in root.glob("*") if (p / "stats.json").exists()):
         st = json.loads((d / "stats.json").read_text())
         cands = {json.loads(l)["n"]: json.loads(l) for l in open(d / "candidates.jsonl", encoding="utf-8")}
         coded = [c for c in read_jsonl(d / "coded.jsonl") if c["n"] in cands]
         ok = [c for c in coded if c["status"] == "succeeded"]
-        cand_codes = [c for c in ok if c["kind"] == "candidate"]
-        samp_codes = [c for c in ok if c["kind"] == "sample"]
-        endorsed = [c for c in cand_codes if c["stance"] == "endorse" and c["categories"]]
+        cand_codes = [c for c in ok if cands[c["n"]]["kind"] == "candidate"]
+        samp_codes = [c for c in ok if cands[c["n"]]["kind"] == "sample"]
+        endorsed_c = [c for c in cand_codes if endorsed(c)]
         n_msg, n_chat = st["messages"], st["chatters"]
+        tot["messages"] += n_msg
         lines += [f"## {st['unit']} ({st['kind']})", "",
                   f"- {n_msg:,} messages from {n_chat:,} chatters; {st['deleted']:,} deleted by mods; "
                   f"transcript context: {'yes' if st['transcript'] else 'no'}",
@@ -465,15 +500,22 @@ def report(cfg: dict) -> str:
         if coded:
             q = [c for c in ok if c.get("quote")]
             lines.append(f"- quotes found verbatim in the message: {sum(c['quote_ok'] for c in q)}/{len(q)}")
-        lines += ["", "| category | endorsed msgs | % of messages | chatters | % of chatters |", "|---|---|---|---|---|"]
+        lines += ["", "| category | endorsed msgs | % of messages | chatters | % of chatters | by tier |",
+                  "|---|---|---|---|---|---|"]
         for cat in CATEGORIES:
-            rows = [c for c in endorsed if cat in c["categories"]]
+            rows = [c for c in endorsed_c if cat in c["categories"]]
             users = {cands[c["n"]]["user_id"] for c in rows}
+            tiers = Counter(strongest_tier(c, cands[c["n"]], cat, tier_of, cat_of) for c in rows)
             pooled[cat] += len(rows)
+            for t, k in tiers.items():
+                pooled_tier[(cat, t)] += k
             lines.append(f"| {cat} | {len(rows)} | {100 * len(rows) / n_msg:.3f} | {len(users)} | "
-                         f"{100 * len(users) / n_chat:.2f} |")
-        ihra = [c for c in endorsed if c["ihra_antisemitic"]]
-        jda = [c for c in endorsed if c["jda_antisemitic"]]
+                         f"{100 * len(users) / n_chat:.2f} | "
+                         + ", ".join(f"{t} {k}" for t, k in sorted(tiers.items(), key=lambda kv: (TIER_ORDER + ['coder_only']).index(kv[0]))) + " |")
+        ihra = [c for c in endorsed_c if c["ihra_antisemitic"]]
+        jda = [c for c in endorsed_c if c["jda_antisemitic"]]
+        tot["ihra"] += len(ihra)
+        tot["jda"] += len(jda)
         topic = max(st["topic_messages"].get("topic_jews", 0), st["topic_messages"].get("topic_israel", 0))
         lines += ["", f"- antisemitic, IHRA: {len(ihra)} messages ({100 * len(ihra) / n_msg:.3f}%), "
                       f"JDA: {len(jda)} ({100 * len(jda) / n_msg:.3f}%)"
@@ -481,25 +523,40 @@ def report(cfg: dict) -> str:
                          f"JDA {100 * len(jda) / topic:.2f}" if topic else "")]
         stance = Counter(c["stance"] for c in cand_codes)
         lines.append(f"- stances among candidates: {dict(stance)}")
-        flagged_users = Counter(cands[c["n"]]["user_id"] for c in endorsed if set(c["categories"]) & ANTISEMITISM_CATS
+        flagged_users = Counter(cands[c["n"]]["user_id"] for c in endorsed_c if set(c["categories"]) & ANTISEMITISM_CATS
                                 or c["ihra_antisemitic"])
         if flagged_users:
             counts = sorted(flagged_users.values(), reverse=True)
             top = lambda frac: sum(counts[: max(1, round(len(counts) * frac))]) / sum(counts)
             lines.append(f"- concentration (antisemitism/Holocaust/IHRA): {len(counts)} accounts; "
                          f"top 10% wrote {100 * top(0.10):.0f}%, top 1% wrote {100 * top(0.01):.0f}% of those messages")
-        if st["kind"] == "live" and st["deleted"]:
-            dele = [c for c in endorsed if cands[c["n"]]["deleted"]]
-            kept = len(endorsed) - len(dele)
-            lines.append(f"- endorsed-flag rate: deleted messages {100 * len(dele) / st['deleted']:.2f}%, "
-                         f"kept {100 * kept / max(1, n_msg - st['deleted']):.3f}%")
+        if st["deleted"]:
+            dcoded = [c for c in ok if cands[c["n"]]["deleted"]]
+            dend = [c for c in dcoded if endorsed(c)]
+            kept_end = [c for c in endorsed_c if not cands[c["n"]]["deleted"]]
+            kept_samp = [c for c in samp_codes if not cands[c["n"]]["deleted"]]
+            kept_rate = len(kept_end) / max(1, n_msg - st["deleted"]) + (
+                sum(endorsed(c) for c in kept_samp) / len(kept_samp) * st["non_candidates"] / max(1, n_msg) if kept_samp else 0)
+            dcats = Counter(cat for c in dend for cat in c["categories"])
+            lines.append(f"- deleted messages: {len(dcoded):,} of {st['deleted']:,} coded; {len(dend)} endorse a flag "
+                         f"({100 * len(dend) / max(1, len(dcoded)):.2f}%) {dict(dcats)}; kept messages, estimated: "
+                         f"{100 * kept_rate:.3f}%")
         if samp_codes:
-            miss = [c for c in samp_codes if c["stance"] == "endorse" and c["categories"]]
+            miss = [c for c in samp_codes if endorsed(c)]
             rate = len(miss) / len(samp_codes)
+            lo, hi = wilson(len(miss), len(samp_codes))
+            tot["sample"] += len(samp_codes)
+            tot["miss"] += len(miss)
+            tot["non_candidates"] += st["non_candidates"]
+            tot["found"] += len(endorsed_c)
+            for c in miss:
+                pooled_miss.update(c["categories"])
             lines.append(f"- missed by keywords (random sample): {len(miss)}/{len(samp_codes)} endorsed "
-                         f"({100 * rate:.2f}%), so about {rate * st['non_candidates']:,.0f} more messages in this stream")
+                         f"({100 * rate:.2f}%, 95% CI {100 * lo:.2f}-{100 * hi:.2f}%) "
+                         f"{dict(Counter(cat for c in miss for cat in c['categories']))}; about "
+                         f"{rate * st['non_candidates']:,.0f} more messages in this stream")
         lines.append("")
-        for c in endorsed:
+        for c in [c for c in ok if endorsed(c)]:
             it = cands[c["n"]]
             names[it["user_id"]].add(it["author"])
             for cat in c["categories"]:
@@ -508,7 +565,19 @@ def report(cfg: dict) -> str:
             accounts[it["user_id"]]["jda"] += int(c["jda_antisemitic"])
             accounts[it["user_id"]]["deleted"] += it["deleted"]
             accounts[it["user_id"]]["streams:" + d.name] = 1
-    lines += ["## Pooled endorsed messages by category", ""] + [f"- {k}: {pooled[k]}" for k in CATEGORIES]
+    lines += ["## Pooled", "", f"- {tot['messages']:,} messages. IHRA antisemitic {tot['ihra']}, JDA {tot['jda']}.", "",
+              "| category | endorsed (keyword candidates) | by tier |", "|---|---|---|"]
+    for k in CATEGORIES:
+        tiers = {t: n for (c, t), n in pooled_tier.items() if c == k}
+        lines.append(f"| {k} | {pooled[k]} | " + ", ".join(
+            f"{t} {n}" for t, n in sorted(tiers.items(), key=lambda kv: (TIER_ORDER + ['coder_only']).index(kv[0]))) + " |")
+    if tot["sample"]:
+        lo, hi = wilson(tot["miss"], tot["sample"])
+        est = tot["miss"] / tot["sample"] * tot["non_candidates"]
+        lines += ["", f"- keyword misses, pooled sample: {tot['miss']}/{tot['sample']} ({100 * tot['miss'] / tot['sample']:.2f}%, "
+                      f"95% CI {100 * lo:.2f}-{100 * hi:.2f}%) {dict(pooled_miss)}: about {est:,.0f} endorsed messages "
+                      f"(range {lo * tot['non_candidates']:,.0f}-{hi * tot['non_candidates']:,.0f}) beyond the "
+                      f"{tot['found']} the keywords found in the sampled streams"]
     text = "\n".join(lines) + "\n"
     (root / "report.md").write_text(text)
     with open(root / "accounts.tsv", "w", newline="", encoding="utf-8") as f:
@@ -520,15 +589,81 @@ def report(cfg: dict) -> str:
     return text
 
 
+# ---------------------------------------------------------------- hand check
+SHEET_COLS = ["item", "chat_before", "message", "your_categories", "your_stance", "your_ihra", "your_jda", "notes"]
+
+
+def sheet(cfg: dict, n: int = 100, force: bool = False) -> Path:
+    """Blind sheet: n coded messages (half that Claude marked endorse), shuffled, without Claude's labels."""
+    root = out_root(cfg)
+    path = root / "hand_labels.tsv"
+    if path.exists() and not force:
+        sys.exit(f"{path} exists (labels in progress?); use --force to overwrite")
+    pool_e, pool_o = [], []
+    for d in sorted(p for p in root.glob("*") if (p / "coded.jsonl").exists()):
+        cands = {it["n"]: it for it in read_jsonl(d / "candidates.jsonl")}
+        for c in read_jsonl(d / "coded.jsonl"):
+            if c.get("status") == "succeeded" and c["n"] in cands:
+                (pool_e if endorsed(c) else pool_o).append((d.name, cands[c["n"]]))
+    rng = random.Random(settings(cfg)["seed"])
+    pick = rng.sample(pool_e, min(n // 2, len(pool_e)))
+    pick += rng.sample(pool_o, min(n - len(pick), len(pool_o)))
+    rng.shuffle(pick)
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f, delimiter="\t")
+        w.writerow(SHEET_COLS)
+        for uid, it in pick:
+            ctx = " | ".join(f"{a}: {t}" for a, t in it["context"][-5:])
+            w.writerow([f"{uid}:{it['n']}", ctx, f"{it['alias']}: {it['text']}", "", "", "", "", ""])
+    print(f"wrote {len(pick)} items to {path}\nFill in your_stance ({'/'.join(STANCES)}/not_applicable), "
+          f"your_categories (comma-separated: {', '.join(CATEGORIES)}), your_ihra and your_jda (y/n). "
+          f"Then run: rhetoric.py agree")
+    return path
+
+
+def agree(cfg: dict) -> str:
+    root = out_root(cfg)
+    rows = list(csv.DictReader(open(root / "hand_labels.tsv", newline="", encoding="utf-8"), delimiter="\t"))
+    rows = [r for r in rows if r["your_stance"].strip()]
+    coded = {}
+    for d in root.glob("*"):
+        for c in read_jsonl(d / "coded.jsonl"):
+            coded[f"{d.name}:{c['n']}"] = c
+    yes = lambda v: v.strip().lower() in ("y", "yes", "1", "true")
+    k = Counter()
+    for r in rows:
+        c = coded[r["item"]]
+        me_end = r["your_stance"].strip() == "endorse" and bool(r["your_categories"].strip())
+        k["n"] += 1
+        k["stance"] += r["your_stance"].strip() == c["stance"]
+        k["endorse"] += me_end == endorsed(c)
+        mine = {x.strip() for x in r["your_categories"].split(",") if x.strip()}
+        k["cats"] += mine == set(c["categories"]) if me_end and endorsed(c) else 0
+        k["both_end"] += me_end and endorsed(c)
+        k["ihra"] += yes(r["your_ihra"]) == bool(c["ihra_antisemitic"])
+        k["jda"] += yes(r["your_jda"]) == bool(c["jda_antisemitic"])
+        k["claude_only"] += endorsed(c) and not me_end
+        k["owner_only"] += me_end and not endorsed(c)
+    n = max(1, k["n"])
+    text = (f"{k['n']} hand-labelled items. Agreement: endorse-or-not {100 * k['endorse'] / n:.0f}%, exact stance "
+            f"{100 * k['stance'] / n:.0f}%, IHRA {100 * k['ihra'] / n:.0f}%, JDA {100 * k['jda'] / n:.0f}%; same categories "
+            f"on {k['cats']}/{k['both_end']} items both call endorse. Claude-only endorse: {k['claude_only']}; "
+            f"owner-only: {k['owner_only']}.")
+    print(text)
+    return text
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("step", choices=["scan", "code", "collect", "report"])
+    ap.add_argument("step", choices=["scan", "code", "collect", "report", "sheet", "agree"])
+    ap.add_argument("--force", action="store_true", help="sheet: overwrite an existing hand_labels.tsv")
     ap.add_argument("--unit", action="append", help="only this VOD id / live-YYYYmmdd-HHMM unit (repeatable)")
     ap.add_argument("--yes", action="store_true", help="code: actually submit the batch (spends money)")
     ap.add_argument("--wait", action="store_true", help="collect: wait until batches finish")
     ap.add_argument("--model", help="code: model id (default rhetoric.model in config.yaml, else claude-opus-5-5)")
     ap.add_argument("--max", type=int, help="code: at most this many messages in this batch")
-    ap.add_argument("--kind", choices=["candidate", "sample"], help="code: only keyword candidates, or only the random sample")
+    ap.add_argument("--kind", choices=["candidate", "sample", "deleted"],
+                    help="code: only keyword candidates, the random sample, or the remaining mod-deleted messages")
     ap.add_argument("--sample", type=int, help="code: code at most this many sample messages per stream")
     a = ap.parse_args()
     cfg = load_config()
@@ -541,6 +676,10 @@ def main():
         code(cfg, a.unit, a.yes, kind=a.kind)
     elif a.step == "collect":
         collect(cfg, wait=a.wait)
+    elif a.step == "sheet":
+        sheet(cfg, force=a.force)
+    elif a.step == "agree":
+        agree(cfg)
     else:
         print(report(cfg))
         print(f"(per-account file: {out_root(cfg) / 'accounts.tsv'}; private, never commit or publish)")
