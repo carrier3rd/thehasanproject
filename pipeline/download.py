@@ -7,7 +7,7 @@ import json
 import subprocess
 import time
 
-from common import P, get_logger, load_config, log_failure, make_dirs, read_tsv
+from common import P, get_logger, load_config, log_failure, make_dirs, read_tsv, write_tsv
 
 log = get_logger("download")
 
@@ -84,6 +84,35 @@ def plan(rows: list[dict], cfg: dict, have: set[str]) -> tuple[list[dict], dict[
     return todo, twins
 
 
+def video_url(row: dict) -> str:
+    if row.get("url"):
+        return row["url"]
+    if row["platform"] == "twitch":
+        return f"https://www.twitch.tv/videos/{row['id'].lstrip('v')}"
+    return f"https://www.youtube.com/watch?v={row['id']}"
+
+
+def refresh_meta(row: dict, runner=subprocess.run) -> dict:
+    """Fill start time, duration, date and live state from the video's own page (the playlist listing
+    often lacks them, e.g. Twitch). Raises if the lookup fails, so an unknown VOD is never downloaded blind."""
+    if row.get("timestamp") and row.get("date"):
+        return row
+    out = runner(["yt-dlp", "-J", "--skip-download", "--no-playlist", video_url(row)], capture_output=True, text=True)
+    if out.returncode != 0 or not out.stdout.strip():
+        raise RuntimeError((out.stderr or "metadata lookup failed").strip()[-300:])
+    info = json.loads(out.stdout)
+    ts = info.get("timestamp") or info.get("release_timestamp")
+    live = info.get("is_live") or info.get("live_status") in ("is_live", "is_upcoming", "post_live")
+    row = dict(row)
+    if ts:
+        row["timestamp"] = int(ts)
+    if info.get("duration"):
+        row["duration"] = int(info["duration"])
+    row["date"] = info.get("upload_date") or (time.strftime("%Y%m%d", time.gmtime(ts)) if ts else row.get("date", ""))
+    row["is_live"] = 1 if live else 0
+    return row
+
+
 def fetch(row: dict, cfg: dict) -> None:
     audio = P(cfg, "audio")
     lo, hi = cfg["download_sleep"]
@@ -97,8 +126,7 @@ def fetch(row: dict, cfg: dict) -> None:
         cmd += ["-f", "audio_only/bestaudio/worst"]
     else:
         cmd += ["-f", "bestaudio/best"]
-    url = row["url"] or (f"https://www.twitch.tv/videos/{row['id'].lstrip('v')}" if row["platform"] == "twitch"
-                         else f"https://www.youtube.com/watch?v={row['id']}")
+    url = video_url(row)
     out = subprocess.run(cmd + [url], capture_output=True, text=True)
     if not (audio / f"{row['id']}.{cfg['audio_format']}").exists():
         raise RuntimeError((out.stderr or out.stdout).strip()[-400:] or "no audio produced (skipped as live?)")
@@ -107,7 +135,7 @@ def fetch(row: dict, cfg: dict) -> None:
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--limit", type=int)
-    ap.add_argument("--only")
+    ap.add_argument("--only", nargs="+", metavar="ID", help="these VOD ids only (space or comma separated)")
     ap.add_argument("--yes", action="store_true", help="allow more than 5 downloads in one run")
     a = ap.parse_args()
     cfg = load_config()
@@ -120,16 +148,32 @@ def main():
     have = {p.stem for p in audio.glob(f"*.{cfg['audio_format']}")}
     todo, twins = plan(rows, cfg, have)
     if a.only:
-        todo = [r for r in rows if r["id"] == a.only and r["id"] not in have]
-    skipped = [r for r in todo if is_recent_or_live(r, cfg)]
-    todo = [r for r in todo if not is_recent_or_live(r, cfg)]
-    for r in skipped:
-        log.info("skip %s: live or ended within %sh (not archived)", r["id"], cfg["skip_if_ended_within_hours"])
+        wanted = [x for part in a.only for x in part.split(",") if x]
+        unknown = [w for w in wanted if w not in {r["id"] for r in rows}]
+        if unknown:
+            print(f"not in logs/inventory.tsv: {' '.join(unknown)}")
+            return 1
+        todo = [r for r in rows if r["id"] in wanted and r["id"] not in have]
     if a.limit:
         todo = todo[:a.limit]
     if len(todo) > 5 and not a.yes:
         print(f"{len(todo)} VODs pending. Downloading more than 5 needs --yes (or use --limit).")
         return 2
+    # look up real start times / live state before deciding (and keep them in the inventory)
+    checked, skipped, by_id = [], [], {r["id"]: i for i, r in enumerate(rows)}
+    for r in todo:
+        try:
+            r = refresh_meta(r)
+            rows[by_id[r["id"]]] = r
+        except Exception as e:
+            log.error("skip %s: could not read its details (%s)", r["id"], e)
+            log_failure(cfg, r["id"], "download", f"metadata: {e}")
+            continue
+        (skipped if is_recent_or_live(r, cfg) else checked).append(r)
+    write_tsv(P(cfg, "logs") / "inventory.tsv", rows, list(rows[0].keys()))
+    todo = checked
+    for r in skipped:
+        log.info("skip %s: live or ended within %sh (not archived)", r["id"], cfg["skip_if_ended_within_hours"])
     ok = 0
     for r in todo:
         try:
