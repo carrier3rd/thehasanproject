@@ -1,6 +1,10 @@
 # Rented / NVIDIA GPU machine: transcription (process.py) and voice enrollment (enroll_voices.py) only.
-whisperx
-pyannote.audio
+# Pinned: whisperx needs huggingface-hub<1.0, which only transformers 4.x accepts. Unpinned, pip tried
+# transformers 5.x releases one by one (minutes of "Downloading transformers-..." on Colab) before settling.
+whisperx==3.8.6
+pyannote.audio==4.0.7
+transformers==4.57.6
+huggingface-hub>=0.34,<1.0
 numpy
 pyyaml
 tqdm
