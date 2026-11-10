@@ -1,4 +1,5 @@
 """pipeline/rhetoric.py end to end on synthetic chat, with a fake Batches client (no network, no spend)."""
+import csv
 import json
 from types import SimpleNamespace as NS
 
@@ -164,3 +165,18 @@ def test_rescan_after_growth_keeps_coded_sample(chat_project):
     fake = NS(messages=NS(batches=FakeBatches()))
     cfg2 = {**cfg, "rhetoric": {"sample_per_unit": len(coded_sample)}}
     assert rhetoric.code(cfg2, ["v9001"], yes=True, client=fake, kind="sample") is None   # cap already reached
+
+
+def test_label_in_terminal_then_agree(chat_project):
+    cfg = chat_project
+    rhetoric.sheet(cfg, n=6, force=True)
+    assert rhetoric.agree(cfg).startswith("No labels yet")
+    # answers: stance 1 (endorse), categories "1", IHRA y, JDA n, empty note, for every item; plus junk to retry
+    answers = iter(["9", "1", "x", "1", "y", "n", ""] * 10)
+    out = []
+    n = rhetoric.label(cfg, ask=lambda q: next(answers), say=out.append)
+    assert n == 6 and "All 6 labelled" in out[-1]
+    rows = list(csv.DictReader(open(rhetoric.out_root(cfg) / "hand_labels.tsv"), delimiter="\t"))
+    assert all(r["your_stance"] == "endorse" and r["your_categories"] == "antisemitism" and r["your_ihra"] == "y" for r in rows)
+    assert "6 hand-labelled items" in rhetoric.agree(cfg)
+    assert rhetoric.label(cfg, ask=lambda q: "", say=out.append) == 0          # nothing left to do
