@@ -25,7 +25,7 @@ if [ -x "$TDL_DIR/TwitchDownloaderCLI" ]; then
   echo "already installed"
 else
   url=$(curl -fsSL https://api.github.com/repos/lay295/TwitchDownloader/releases/latest \
-        | .venv/bin/python -c "import json,re,sys; a=[x['browser_download_url'] for x in json.load(sys.stdin)['assets'] if re.search(r'CLI.*Linux-x64\.zip$', x['name'])]; print(a[0] if a else '')" || true)
+        | .venv/bin/python -c "import json,re,sys; a=[x['browser_download_url'] for x in json.load(sys.stdin)['assets'] if re.search(r'CLI.*Linux-x64\.zip$', x['name'])]; print(a[0] if a else '')" 2>/dev/null || true)
   if [ -n "$url" ]; then
     tmp=$(mktemp -d)
     curl -fsSL -o "$tmp/tdl.zip" "$url"
