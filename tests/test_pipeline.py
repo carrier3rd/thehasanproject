@@ -407,3 +407,26 @@ def test_pending_lists_untranscribed_audio_and_muted(project):
     assert out == ["data/audio/v1001.opus", "data/muted/v1001.json"]
     for f in ("v1001.opus", "vNEW.opus"):
         (P(cfg, "audio") / f).unlink()
+
+
+def test_download_refresh_meta_fills_missing_times():
+    import download as d
+    from types import SimpleNamespace
+    calls = []
+    def runner(cmd, **kw):
+        calls.append(cmd)
+        return SimpleNamespace(returncode=0, stderr="", stdout=json.dumps(
+            {"timestamp": 1_800_000_000, "duration": 7200, "upload_date": "20270115", "live_status": "was_live"}))
+    row = {"id": "v123", "platform": "twitch", "url": "", "date": "", "duration": "6000", "is_live": "0", "timestamp": ""}
+    r = d.refresh_meta(row, runner)
+    assert calls[0][-1] == "https://www.twitch.tv/videos/123"
+    assert (r["timestamp"], r["duration"], r["date"], r["is_live"]) == (1_800_000_000, 7200, "20270115", 0)
+    cfg = {"skip_if_ended_within_hours": 2}
+    assert d.is_recent_or_live(r, cfg, now=1_800_000_000 + 7200 + 3600)          # ended 1 h ago -> skip
+    assert not d.is_recent_or_live(r, cfg, now=1_800_000_000 + 7200 + 3 * 3600)
+    live = lambda cmd, **kw: SimpleNamespace(returncode=0, stderr="", stdout=json.dumps({"is_live": True, "timestamp": 1}))
+    assert d.is_recent_or_live(d.refresh_meta(row, live), cfg)
+    fail = lambda cmd, **kw: SimpleNamespace(returncode=1, stderr="ERROR: gone", stdout="")
+    with pytest.raises(RuntimeError):
+        d.refresh_meta(row, fail)
+    assert d.refresh_meta(r, fail) is r            # already complete: no lookup
