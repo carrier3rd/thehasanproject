@@ -49,6 +49,7 @@ Run `python -m pytest` from the repo root (27 tests, no GPU or network needed).
 - **public.db connection**: one read-only connection per request instead of reopen-on-inode-change. Same effect, no state.
 - **Opt-out matching** is deliberately wide: a listed name excludes every user_id that ever used it, and every other
   name those user_ids used. A different person who later takes an opted-out name is excluded too.
+- **`download_fragments: 4`** (new setting): yt-dlp fetches that many pieces of a VOD at once (`--concurrent-fragments`). One at a time was slow on the laptop.
 - **download.py refuses more than 5 pending VODs without `--yes`**, and `nightly.sh` does not pass `--yes`. The first
   backfill is a manual, deliberate run.
 - **Logger heartbeat** (`logs/chat_logger.heartbeat`, once a minute) so `qa.py --health` can tell "logger down" from
