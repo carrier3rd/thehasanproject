@@ -101,7 +101,12 @@ Run `python -m pytest` from the repo root (27 tests, no GPU or network needed).
   predictions, a sourced watchlist (`watchlist.csv`: antisemitism under IHRA and JDA side by side, Holocaust
   distortion, Finkelstein and Mearsheimer talking points, anti-US framing) and the socialscope Kremlin-narratives list.
   Patterns only find candidates; Claude codes stance, and only `endorse` counts. `tests/test_watchlist.py` checks every
-  pattern. The analysis script is not written yet.
+  pattern. `pipeline/rhetoric.py` runs the chat part: `scan` (local, free) finds candidates and a
+  random sample of the rest; `code` sends them to Claude as one Message Batch (half price; prints a cost estimate and
+  submits only with `--yes`); `collect`; `report`. Account names never leave the laptop: Claude sees aliases (u1, u2...).
+  Output goes to `archive/rhetoric/` (masked from the public site); `report.md` has aggregates only and `accounts.tsv`
+  names accounts (owner's choice; never commit or publish it). Tested with a fake Batches client
+  (`tests/test_rhetoric.py`); never run against the real API from the cloud session.
 
 ## Library versions checked
 Signatures were read from the wheels, not run: whisperx 3.8.6 (`whisperx.diarize.DiarizationPipeline(token=...)`,
