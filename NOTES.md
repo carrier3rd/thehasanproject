@@ -68,6 +68,14 @@ Run `python -m pytest` from the repo root (27 tests, no GPU or network needed).
   `process.py` refuses to run without a GPU unless given `--allow-cpu`; `nightly.sh` transcribes only when `GPU_HOST`
   is set, otherwise it reports how many VODs are waiting. `run_remote.sh` was dry-run against a local stand-in for
   SSH (sync, batch limit, token-only `.env`, pull without overwriting local transcripts); never against a real GPU host.
+- **Google Colab as the GPU** (owner's choice, 2026-11-09). Colab has no SSH, so `run_remote.sh` can't drive it;
+  `deploy/colab/` moves files through Google Drive instead. `pack.sh` bundles pending audio + muted spans,
+  voiceprints, `voices/` and the private `config.yaml` into `colab/bundle.tar` (never `.env`); `transcribe.ipynb`
+  reads `HF_TOKEN` from Colab Secrets, runs `enroll_voices.py` and/or `process.py`, and writes transcripts and logs
+  straight to `My Drive/vod-archive/out` so a disconnect loses at most the VOD in progress; `unpack.sh` merges that
+  back with `run_remote.sh pull`'s rules. Uploads and downloads are by hand in the Drive web UI (no rclone yet), and
+  the nightly job can't transcribe through Colab: new VODs wait for a manual Colab run. `pack.sh` and `unpack.sh`
+  were run on the laptop; the notebook has not been run in Colab yet.
 
 - **Website on the laptop via Tailscale Funnel** (no domain, no port forwarding). `deploy/laptop/install.sh` writes
   systemd units for the logger, site, admin app, nightly timer and a 10-minute GitHub auto-update
