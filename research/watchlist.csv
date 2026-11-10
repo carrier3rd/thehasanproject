@@ -1,0 +1,67 @@
+id,category,tier,ihra,jda,pattern,meaning,source
+slur_kike,antisemitism,explicit,yes,yes,\bk[i1]kes?\b,Slur for Jews,APT
+slur_hymie,antisemitism,explicit,yes,yes,\bhymies?\b,Slur for Jews,APT
+slur_sheeny,antisemitism,explicit,yes,yes,\bsheen(?:y|ies)\b,Slur for Jews (19th-century London),APT
+slur_heeb,antisemitism,explicit,yes,yes,\bheebs?\b|\bhebes?\b,Slur for Jews; sometimes reclaimed by Jews (check speaker),APT
+slur_yid,antisemitism,explicit,yes,yes,\byids?\b|\byiddos?\b,Slur for Jews; also a Tottenham fan self-label (check context),APT
+slur_joo,antisemitism,explicit,yes,yes,\bjoo(?:s|z)?\b,Misspelling of 'Jew' to dodge filters,APT
+jew_as_verb,antisemitism,explicit,yes,yes,\bjew(?:ed|ing)\b|\bjew\s+(?:\w+\s+)?down\b,"'Jew' as a verb: haggle, cheat, hoard",APT
+nazi_codes,antisemitism,explicit,yes,yes,\b1488\b|\b14\s*/\s*88\b|\bsieg heil\b|\bheil hitler\b|\b109\s*[/-]\s*110\b,"Neo-Nazi codes and salutes (14 words, Heil Hitler, '109 countries expelled the Jews')",APT; ADL Hate on Display
+zyklon,antisemitism,explicit,yes,yes,\bzyklon\b,"The Auschwitz gas, as threat or glorification",APT
+echo,antisemitism,explicit,yes,yes,"\({3}\s*[^()]{1,40}?\s*\){3}",Triple parentheses marking a name as Jewish (sometimes reclaimed),APT; ADL (2016)
+goyim_know,antisemitism,explicit,yes,yes,\bgoyim\s+know\b|\bgoyim defen[cs]e league\b,Meme about exposing a Jewish plot; GDL hate group,APT
+jewish_question,antisemitism,explicit,yes,yes,\bjewish question\b|\bJQ\b|\bj[- ]?woke\b,"'The Jewish Question', 'JQ', 'J-woke' (awakened to antisemitic views)",APT
+jwnru,antisemitism,explicit,yes,yes,\bjews will not replace us\b|\bjwnru\b|\bopen borders for israel\b,Great Replacement slogans (Charlottesville 2017),APT
+zog,antisemitism,explicit,yes,yes,\bZOG\b|\bzionist[- ]occupied government\b|\bzionist occupation government\b,'Zionist Occupied Government': Jews secretly run Western governments,ADL; APT (globalist entry)
+khazarian_mafia,antisemitism,explicit,yes,yes,\bkhazarian mafia\b,"Conspiracy label for Jews, often tied to 9/11 theories",APT; ADL extremism terms
+happy_merchant,antisemitism,explicit,yes,yes,\bhappy merchant\b,Antisemitic caricature meme,APT; ADL Hate on Display
+kill_jews,antisemitism,explicit,yes,yes,\b(?:gas|hang|kill|burn|nuke)\s+(?:the\s+|all\s+(?:the\s+)?)?(?:jews?|jewish(?: people)?|jooz?)\b|\b(?:jews?|jewish(?: people)?|jooz?)\s+(?:must|should|need to)\s+die\b|\bdie\s+jews?\b|\bi hate jews\b,"Calls for killing of, or hatred of, Jews",APT (always-antisemitic list); IHRA example 1
+khaybar,antisemitism,explicit,yes,yes,\bkhaybar\b,Chant recalling the 628 CE massacre of Jews; read as a threat,APT
+6mwe,holocaust_distortion,explicit,yes,yes,\b6mwe\b|\bsix million wasn'?t enough\b|\bhitler (?:was right|did nothing wrong)\b|\bhdnw\b|\bfinish (?:the job|what hitler started)\b,"Casting the Holocaust as positive, or wishing it completed",IHRA-HDD 2013 (positive event); APT
+holohoax,holocaust_distortion,explicit,yes,yes,\bholo(?:hoax|goax|cough)\b|\bholocaust (?:hoax|lie|myth)\b,Holocaust denial terms,APT
+gorillion,holocaust_distortion,explicit,yes,yes,\bgorillion\b,'Six gorillion': mocking the death toll,APT
+muh_holocaust,holocaust_distortion,explicit,yes,yes,\bmuh\s+holocaust\b|\ban+ud+a\s+shoah\b,Mocking Jews for 'always' invoking the Holocaust,APT
+holocaust_denial,holocaust_distortion,explicit,yes,yes,"\b(?:holocaust|shoah|gas chambers?)\b.{0,40}\b(?:never happened|didn'?t happen|fake|hoax|myth|made up|exaggerated|overblown|typhus)\b|\b(?:six|6)\s*(?:million|mil)\b.{0,30}\b(?:lie|myth|fake|impossible|exaggerat\w*|made up)\b",Denying or minimising the Holocaust or its death toll,IHRA-HDD 2013; JDA guideline 5
+small_hats,antisemitism,trope,yes,yes,\bsmall[- ]hats?(?: people)?\b,Coded reference to Jews (kippah),APT
+wooden_doors,holocaust_distortion,trope,yes,yes,\bwooden doors?\b,Denier claim that the gas chambers could not have worked,APT
+jewish_control,antisemitism,trope,yes,yes,"\b(?:jews?|jewish(?: people)?|jooz?)\b.{0,30}\b(?:control|own|run|rule|pull the strings)s?\b.{0,30}\b(?:media|banks?|hollywood|government|congress|the world|america|everything|the money)\b","Jews secretly control media, banks or governments",IHRA example 2; JDA guideline 2
+dual_loyalty,antisemitism,trope,yes,yes,\bdual loyalt\w*\b|\bloyal(?:ty)? (?:is )?to israel\b|\bisrael[- ]firsters?\b,Diaspora Jews are more loyal to Israel than to their own country,IHRA example 7; JDA guideline 9
+collective_blame,antisemitism,trope,yes,yes,"\b(?:jews?|jewish(?: people)?|jooz?)\b.{0,40}\b(?:genocid\w*|killing|murder\w*|bomb\w*|starv\w*)\b.{0,30}\b(?:gaza|palestin\w*|kids|children|babies)\b",Holding Jews collectively responsible for Israel (check: often 'Jews against the genocide'),IHRA example 10; JDA guideline 7
+blood_libel,antisemitism,trope,yes,yes,\bblood libel\b|\badrenochrome\b|\borgans?\s+(?:harvest\w*|steal\w*|theft)\b|\bharvest\w* (?:their |palestinian )?organs\b,Blood libel and its modern forms (organ-harvesting claims),IHRA example 2; APT; JDA guideline 6
+deicide,antisemitism,trope,yes,yes,\bchrist[- ]killers?\b|\b(?:jews|they) killed (?:jesus|christ)\b|\bsynagogue of satan\b|\b30 pieces of silver\b,"Jews as Christ-killers, of Satan, or Judas",APT (pieces of silver)
+rothschild,antisemitism,trope,context,context,\brothschilds?\b,Often a dog whistle for Jewish financial power,APT
+soros,antisemitism,trope,context,context,\bsoros\b,Conspiracy theories about George Soros controlling politics or migration,APT
+globalist,antisemitism,trope,context,context,\bglobalists?\b|\bnew world order\b|\bcultural marxis\w*\b,Dog whistle for Jews when it implies disloyal elites,APT
+khazar,antisemitism,trope,yes,yes,\bkhazar(?:s|ian)?\b,"'Ashkenazi Jews are Khazars, not real Jews' (denies Jewish ties to the land)",APT; ADL extremism terms
+israel_did_911,antisemitism,trope,yes,yes,"\b(?:israel|mossad|jews|dancing israelis)\b.{0,30}\b9\s*/?\s*11\b|\b9\s*/?\s*11\b.{0,30}\b(?:israel|mossad|dancing israelis)\b",Jews or Israel were behind 9/11,IHRA example 4; ADL
+shekels,antisemitism,trope,context,context,\bshekels?\b,Money stereotype when aimed at Jews (also Israel's currency),APT ('Jewish money')
+early_life,antisemitism,trope,context,context,\bearly life section\b|\bcheck (?:the|his|her|their) early life\b,Meme: 'check the early-life section' to point out that someone is Jewish,Widely documented meme; not in the APT/ADL pages pulled for this list (verify)
+zionist_control,antisemitism,contested,yes,context,"\bzionists?\b.{0,30}\b(?:control|own|run|rule|pull the strings)s?\b.{0,30}\b(?:media|banks?|hollywood|government|congress|the world|america|everything|the money)\b",The control trope with 'Zionist' in place of 'Jew' (JDA guideline 4: can be coded),APT (Zionist/Zio entry); JDA guideline 4
+israel_nazi_compare,israel,contested,yes,no,"\b(?:israel\w*|idf|zionis\w*|netanyahu|bibi)\b.{0,40}\b(?:nazis?|third reich|hitler|gestapo)\b|\bzio[- ]?nazis?\b|\bnazis?\b.{0,40}\b(?:israel\w*|idf|zionis\w*|netanyahu|bibi)\b",Comparing Israel to Nazi Germany,IHRA example 9; JDA guideline 13 (comparisons not antisemitic in themselves)
+gaza_holocaust,holocaust_distortion,contested,yes,no,"\b(?:gaza|palestin\w*)\b.{0,40}\b(?:holocaust|concentration camps?|auschwitz|warsaw ghetto|final solution)\b|\b(?:holocaust|concentration camps?|auschwitz|warsaw ghetto|final solution)\b.{0,40}\b(?:gaza|palestin\w*)\b","Holocaust inversion: Gaza as the Holocaust, Israelis as Nazis",IHRA example 9; IHRA-UHD 2021; JDA guideline 13
+zio,israel,contested,context,no,\bzios?\b,"'Zio': short for Zionist, widely treated as a slur",APT; socialscope glossary
+israel_no_right,israel,contested,yes,no,"\bisrael\b.{0,30}\b(?:has no right to exist|shouldn'?t exist|should not exist|must be destroyed|wiped off the map|needs to be destroyed)\b|\bdeath to israel\b",Denying Israel's existence; calls for its destruction,IHRA example 8; JDA guidelines 10 vs 12
+river_to_sea,israel,contested,context,no,\bfrom the river to the sea\b,"Slogan read as eliminationist by some, as equal rights by others",Disputed; JDA guideline 12
+intifada,israel,contested,context,no,\bglobali[sz]e the intifada\b|\bintifada\b,'Globalize the intifada' and related slogans,Disputed
+aipac_control,israel,contested,context,no,"\baipac\b.{0,40}\b(?:owns?|controls?|bought|puppets?|runs?)\b|\b(?:owned|bought|controlled|paid) (?:for )?by aipac\b",'AIPAC owns Congress': lobbying criticism vs the control trope,JDA guideline 4; IHRA example 2 (edge)
+holocaust_industry,holocaust_distortion,contested,context,no,\bholocaust industry\b|\bshoah business\b|\bholocaust card\b|\b(?:using|uses|use|exploit\w*|weaponi[sz]\w*|milk\w*)\s+(?:the\s+)?holocaust\b,Holocaust memory exploited for money or for Israel (Finkelstein's thesis; IHRA-UHD lists accusing Jews of 'using' the Holocaust),Finkelstein 2000; IHRA-UHD 2021
+oct7_praise,violence,contested,yes,context,"\b(?:oct(?:ober)?\.?\s*7(?:th)?|10/7)\b.{0,50}\b(?:heroic|glorious|justified|based|beautiful|deserved|good thing|was good)\b|\bheroic resistance\b",Praising or justifying the Oct 7 attack,IHRA example 1 (justifying killing of Jews); Jewish Insider 2024 (Finkelstein)
+armed_group_praise,violence,contested,context,context,"\b(?:hamas|houthis?|hezbollah|ansar allah|sinwar|nasrallah)\b.{0,30}\b(?:based|heroes|heroic|goated|my goat|freedom fighters|legends?|kings?)\b","Praise of Hamas, Hezbollah, the Houthis or their leaders",Context-dependent
+finkelstein,finkelstein,mention,n/a,n/a,\bfinkelstein\b|\bnorm(?:an)? fink\w*\b,Mentions of Norman Finkelstein,-
+fink_oct7_framing,finkelstein,talking_point,context,context,\bwarms? every fiber\b|\b(?:burst|broke)(?: through)? the gates\b|\bconcentration camp inmates\b|\bwarsaw ghetto uprising\b,"Finkelstein's Oct 7 framing: escapees of a concentration camp, a Warsaw Ghetto uprising",Jewish Insider 2024; Mediaite (Piers Morgan interview)
+oct7_sv_denial,finkelstein,talking_point,context,context,"\b(?:rapes?|sexual (?:violence|assault))\b.{0,40}\b(?:(?:oct(?:ober)?\.?\s*7(?:th)?|10/7)|hamas)\b.{0,40}\b(?:never happened|fake|lie|debunked|hoax|propaganda|no evidence)\b|\b(?:mass )?rapes? (?:hoax|lie|propaganda)\b","Denying the Oct 7 sexual violence (UN SRSG-SVC, Mar 2024: 'reasonable grounds to believe' it occurred)","UN SRSG-SVC mission report, Mar 2024"
+mearsheimer,russia,mention,n/a,n/a,\bmearsheimer\b,Mentions of John Mearsheimer,-
+west_fault,russia,talking_point,n/a,n/a,"\b(?:west|nato|us|america)(?:'s)? fault\b|\bnato\b.{0,50}\b(?:provok\w*|caused|forced|pushed)\b.{0,30}\b(?:russia|putin|war|invasion)\b","'The war is the West's fault' (Mearsheimer, Foreign Affairs 2014)","Mearsheimer 2014; critics: McFaul (FA exchange), Stallard (New Statesman)"
+putin_not_imperial,russia,talking_point,n/a,n/a,"\bputin\b.{0,50}\b(?:not (?:an )?imperialist|no imperial ambitions?|doesn'?t want (?:to (?:take|conquer) )?(?:all of )?ukraine|never wanted to (?:take|conquer)|just wants? (?:neutrality|security|a buffer))\b","'Putin has no imperial ambitions' (Mearsheimer, New Yorker 2022; OPR 2023)",New Yorker 2022; Oxford Political Review 2023
+ukraine_pawn,russia,talking_point,n/a,n/a,\bprimrose path\b|\bto the last ukrainian\b|\bukraine(?:'s| is) (?:a |just a )?(?:pawn|puppet|proxy)\b|\bproxy war\b,Ukraine as a Western pawn with no agency of its own ('proxy war' is also mainstream: check),Critics of Mearsheimer on Ukrainian agency; EUvsDisinfo
+amerikkka,anti_us,charged,n/a,n/a,\bamerik+k+a\w*\b,'Amerikkka' spelling,-
+us_worst_terror,anti_us,talking_point,n/a,n/a,"\b(?:america|the us|the u\.s\.|usa|united states)\b.{0,40}\b(?:biggest|greatest|worst|largest|number one|#1)\b.{0,20}\b(?:terroris\w*|evil|threat to (?:world )?peace)\b|\bworse than al[- ]?qa[ei]da\b","The US as the world's worst terrorist or evil (Hasan, Axios 2026: 'pound for pound' worse than al-Qaeda)",Axios interview 2026 (via Fox News)
+deserved_911,anti_us,talking_point,n/a,n/a,"\b(?:america|the us|we|usa)\b.{0,15}\bdeserved\b.{0,10}\b9\s*/?\s*11\b|\bdeserved 9\s*/?\s*11\b","'America deserved 9/11' (Hasan, 2019)",Widely reported 2019; Fox 9
+death_to_america,anti_us,explicit,n/a,n/a,\bdeath to (?:america|amerik+k+a|the us|usa)\b,Slogan,-
+settler_colony_us,anti_us,charged,n/a,n/a,"\bsettler[- ]colon\w*\b.{0,30}\b(?:america|the us|the u\.s\.|usa|united states)\b|\b(?:america|the us|the u\.s\.|usa|united states)\b.{0,30}\bsettler[- ]colon\w*\b",The US as a settler colony,-
+imperial_core,anti_us,charged,n/a,n/a,\bimperial core\b|\b(?:american|us|u\.s\.) empire\b|\bthe empire\b,US as empire / 'imperial core' (Marxist-Leninist framing),socialscope glossary (TankieTheDeprogram marker)
+us_decline_hegemony,anti_us,talking_point,n/a,n/a,"\b(?:us|u\.s\.|american|america'?s) (?:hegemony|decline)\b|\bunipolar\w*\b|\bcolou?r revolutions?\b|\b(?:european|eu|europe)\b.{0,20}\bvassals?\b","Kremlin/Beijing state-media themes: US decline and hegemony, colour revolutions, Europe as a US vassal",EUvsDisinfo cases; DFRLab 2021
+topic_jews,topic,topic,n/a,n/a,\bjew(?:s|ish)?\b|\bjudaism\b|\banti-?semit\w*\b,Any mention of Jews or antisemitism,-
+topic_israel,topic,topic,n/a,n/a,\b(?:israel\w*|zionis\w*|idf|netanyahu|bibi|gaza|palestin\w*|hamas|west bank)\b,Any mention of Israel/Palestine,-
+topic_russia,topic,topic,n/a,n/a,\b(?:russia\w*|putin|ukrain\w*|zelensk\w*|kremlin|nato)\b,Any mention of Russia/Ukraine,-
+topic_us_foreign,topic,topic,n/a,n/a,\b(?:cia|pentagon|state department|us military|imperialis\w*|empire|nato)\b,US foreign-policy vocabulary,-
