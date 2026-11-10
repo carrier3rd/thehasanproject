@@ -83,6 +83,11 @@ Run `python -m pytest` from the repo root (27 tests, no GPU or network needed).
   `X-Forwarded-For` (if not, the search rate limit is shared by all visitors), and that `tailscale serve` on 8443
   stays tailnet-only alongside Funnel on 443. Check both on the laptop.
 
+- **`deploy/laptop/status.sh`** (not in the spec): one read-only report of the laptop for pasting into a cloud session,
+  since those sessions cannot reach the laptop. It also answers two setup questions: whether Funnel forwards visitor
+  addresses (counted from uvicorn's access log, which shows the forwarded address under `--proxy-headers`; addresses
+  are never printed) and whether the admin app is tailnet-only. Tested here for parsing only, not on the laptop.
+
 ## Library versions checked
 Signatures were read from the wheels, not run: whisperx 3.8.6 (`whisperx.diarize.DiarizationPipeline(token=...)`,
 `__call__(..., return_embeddings=True)` returning `(df, {speaker: vector})`), pyannote.audio 4.0.7
