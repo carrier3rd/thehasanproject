@@ -635,8 +635,12 @@ def write_sheet(path: Path, rows: list[dict]) -> None:
     tmp.replace(path)
 
 
-def label(cfg: dict, ask=input, say=print) -> int:
-    """Fill hand_labels.tsv in the terminal, one message at a time; saves after each answer, resumable."""
+QUICK = "(quick)"
+
+
+def label(cfg: dict, ask=input, say=print, quick: bool = False) -> int:
+    """Fill hand_labels.tsv in the terminal, one message at a time; saves after each answer, resumable.
+    quick: one keypress per message (y = sincerely pushes something flagged, n = no, s = skip)."""
     path = out_root(cfg) / "hand_labels.tsv"
     if not path.exists():
         sys.exit("no hand_labels.tsv yet: run `rhetoric.py sheet` first")
@@ -648,6 +652,17 @@ def label(cfg: dict, ask=input, say=print) -> int:
     for r in todo:
         say("\n" + "=" * 70 + f"\n[{rows.index(r) + 1}/{len(rows)}]  chat just before:\n  "
             + (r["chat_before"].replace(" | ", "\n  ") or "(none)") + f"\n\nMESSAGE  {r['message']}\n")
+        if quick:
+            while (a := ask("sincerely pushing something flagged? y/n (s = skip): ").strip().lower()[:1]) not in ("y", "n", "s"):
+                pass
+            if a == "s":
+                continue
+            r["your_stance"] = "endorse" if a == "y" else "not_applicable"
+            r["your_categories"] = QUICK if a == "y" else ""
+            r["your_ihra"] = r["your_jda"] = r["notes"] = ""
+            write_sheet(path, rows)
+            done += 1
+            continue
         say("  ".join(f"{i}={s}" for i, s in enumerate(stances, 1)))
         while True:
             a = ask("stance number: ").strip()
@@ -691,22 +706,29 @@ def agree(cfg: dict) -> str:
     k = Counter()
     for r in rows:
         c = coded[r["item"]]
+        quick = r["your_categories"].strip() == QUICK or (r["your_stance"].strip() == "not_applicable" and not r["your_ihra"].strip())
         me_end = r["your_stance"].strip() == "endorse" and bool(r["your_categories"].strip())
         k["n"] += 1
-        k["stance"] += r["your_stance"].strip() == c["stance"]
         k["endorse"] += me_end == endorsed(c)
+        k["claude_only"] += endorsed(c) and not me_end
+        k["owner_only"] += me_end and not endorsed(c)
+        if quick:
+            k["quick"] += 1
+            continue
+        k["full"] += 1
+        k["stance"] += r["your_stance"].strip() == c["stance"]
         mine = {x.strip() for x in r["your_categories"].split(",") if x.strip()}
         k["cats"] += mine == set(c["categories"]) if me_end and endorsed(c) else 0
         k["both_end"] += me_end and endorsed(c)
         k["ihra"] += yes(r["your_ihra"]) == bool(c["ihra_antisemitic"])
         k["jda"] += yes(r["your_jda"]) == bool(c["jda_antisemitic"])
-        k["claude_only"] += endorsed(c) and not me_end
-        k["owner_only"] += me_end and not endorsed(c)
-    n = max(1, k["n"])
-    text = (f"{k['n']} hand-labelled items. Agreement: endorse-or-not {100 * k['endorse'] / n:.0f}%, exact stance "
-            f"{100 * k['stance'] / n:.0f}%, IHRA {100 * k['ihra'] / n:.0f}%, JDA {100 * k['jda'] / n:.0f}%; same categories "
-            f"on {k['cats']}/{k['both_end']} items both call endorse. Claude-only endorse: {k['claude_only']}; "
-            f"owner-only: {k['owner_only']}.")
+    n, f = max(1, k["n"]), max(1, k["full"])
+    lo, hi = wilson(k["endorse"], k["n"])
+    text = (f"{k['n']} hand-labelled items ({k['quick']} quick). Agreement on endorse-or-not: {100 * k['endorse'] / n:.0f}% "
+            f"(95% CI {100 * lo:.0f}-{100 * hi:.0f}%). Claude-only endorse: {k['claude_only']}; owner-only: {k['owner_only']}.")
+    if k["full"]:
+        text += (f" Full labels ({k['full']}): exact stance {100 * k['stance'] / f:.0f}%, IHRA {100 * k['ihra'] / f:.0f}%, "
+                 f"JDA {100 * k['jda'] / f:.0f}%; same categories on {k['cats']}/{k['both_end']} items both call endorse.")
     print(text)
     return text
 
@@ -715,6 +737,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("step", choices=["scan", "code", "collect", "report", "sheet", "label", "agree"])
     ap.add_argument("--force", action="store_true", help="sheet: overwrite an existing hand_labels.tsv")
+    ap.add_argument("--quick", action="store_true", help="label: one y/n keypress per message")
     ap.add_argument("--unit", action="append", help="only this VOD id / live-YYYYmmdd-HHMM unit (repeatable)")
     ap.add_argument("--yes", action="store_true", help="code: actually submit the batch (spends money)")
     ap.add_argument("--wait", action="store_true", help="collect: wait until batches finish")
@@ -738,7 +761,7 @@ def main():
         sheet(cfg, force=a.force)
     elif a.step == "label":
         try:
-            label(cfg)
+            label(cfg, quick=a.quick)
         except (KeyboardInterrupt, EOFError):
             print("\nstopped; answers so far are saved. Run `rhetoric.py label` again to continue.")
     elif a.step == "agree":

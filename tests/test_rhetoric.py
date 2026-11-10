@@ -145,7 +145,7 @@ def test_tiers_rescan_deleted_and_hand_check(chat_project):
         w = _csv.DictWriter(f, fieldnames=rhetoric.SHEET_COLS, delimiter="\t")
         w.writeheader()
         w.writerows(rows)
-    assert "endorse-or-not 100%" in rhetoric.agree(cfg)
+    assert "endorse-or-not: 100%" in rhetoric.agree(cfg)
 
 
 def test_rescan_after_growth_keeps_coded_sample(chat_project):
@@ -180,3 +180,22 @@ def test_label_in_terminal_then_agree(chat_project):
     assert all(r["your_stance"] == "endorse" and r["your_categories"] == "antisemitism" and r["your_ihra"] == "y" for r in rows)
     assert "6 hand-labelled items" in rhetoric.agree(cfg)
     assert rhetoric.label(cfg, ask=lambda q: "", say=out.append) == 0          # nothing left to do
+
+
+def test_quick_label(chat_project):
+    cfg = chat_project
+    rhetoric.sheet(cfg, n=6, force=True)
+    coded = {}
+    for d in rhetoric.out_root(cfg).glob("*"):
+        for c in rhetoric.read_jsonl(d / "coded.jsonl"):
+            coded[f"{d.name}:{c['n']}"] = c
+    rows = list(csv.DictReader(open(rhetoric.out_root(cfg) / "hand_labels.tsv"), delimiter="\t"))
+    truth = iter(["y" if rhetoric.endorsed(coded[r["item"]]) else "n" for r in rows])
+    out = []
+    asked = []
+    def ask(q):
+        asked.append(q)
+        return "?" if len(asked) == 1 else next(truth)            # first answer is junk and is asked again
+    assert rhetoric.label(cfg, ask=ask, say=out.append, quick=True) == 6
+    text = rhetoric.agree(cfg)
+    assert "6 hand-labelled items (6 quick)" in text and "endorse-or-not: 100%" in text
