@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import re
+import sys
 import time
 from pathlib import Path
 
@@ -309,13 +310,20 @@ class Models:
         if self.device == "cuda":
             self.torch.cuda.empty_cache()
 
-    def run_chunk(self, audio: np.ndarray, want_dim: int | None):
-        """-> (aligned segments with speakers, {local speaker label: unit vector})"""
+    def run_chunk(self, audio: np.ndarray, want_dim: int | None, stage=lambda name: None):
+        """-> (aligned segments with speakers, {local speaker label: unit vector})
+        stage(name) is called as each step starts, for progress reporting."""
         wx, cfg = self.wx, self.cfg
-        result = self.asr.transcribe(audio, batch_size=cfg["batch_size"], language="en")
+        stage("transcribing")
+        try:  # print_progress: whisperx prints "Progress: N%..." as it goes
+            result = self.asr.transcribe(audio, batch_size=cfg["batch_size"], language="en", print_progress=True)
+        except TypeError:  # older whisperx
+            result = self.asr.transcribe(audio, batch_size=cfg["batch_size"], language="en")
+        stage("aligning")
         result = wx.align(result["segments"], self.align_model, self.align_meta, audio, self.device,
                           return_char_alignments=False)
         embs = None
+        stage("separating speakers")
         try:
             df, raw = self.diar(audio, return_embeddings=True)
             if raw and cfg.get("use_diarizer_embeddings", True):
@@ -350,8 +358,11 @@ def process_one(audio_path: Path, dest: Path, models: Models, model_name: str, c
     prints = load_voiceprints(cfg)
     want_dim = next(iter(prints.values())).shape[0] if prints else None
     chunks, embs = [], {}
+    log.info("%s: %.1f h of audio in %d chunks", vid, total / 3600, len(bounds))
     for i, (s, e) in enumerate(bounds):
-        segs, local = models.run_chunk(audio[int(s * SR):int(e * SR)], want_dim)
+        def stage(name, i=i):
+            log.info("%s chunk %d/%d: %s", vid, i + 1, len(bounds), name)
+        segs, local = models.run_chunk(audio[int(s * SR):int(e * SR)], want_dim, stage)
         chunks.append(segs)
         embs.update({f"c{i:03d}:{k}": v for k, v in local.items()})
         models.free()
@@ -406,13 +417,15 @@ def main():
             print(f"{len(todo)} VOD(s) need transcription, but this machine has no NVIDIA GPU. "
                   "Run them on a GPU machine with deploy/gpu/run_remote.sh (or pass --allow-cpu).")
             return 3
+    sys.stdout.reconfigure(line_buffering=True)  # progress lines appear at once even when piped (Colab log)
     if not load_voiceprints(cfg):
         log.warning("no voiceprints found; every speaker will be Unknown_n")
     models = Models(cfg, model_name)
     times = P(cfg, "logs") / "process_times.tsv"
     if not times.exists():
         times.write_text("id\tmodel\taudio_seconds\twall_seconds\trealtime_factor\n")
-    for p in todo:
+    for k, p in enumerate(todo, 1):
+        log.info("VOD %d/%d: %s", k, len(todo), p.stem)
         try:
             audio_s, wall = process_one(p, dest_dir / f"{p.stem}.json", models, model_name, cfg)
             rtf = audio_s / wall if wall else 0
