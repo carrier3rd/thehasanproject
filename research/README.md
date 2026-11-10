@@ -39,6 +39,16 @@ both. Every result table has an IHRA column and a JDA column.
 Categories: `antisemitism`, `holocaust_distortion`, `israel`, `violence`, `finkelstein`, `russia`, `anti_us`, `topic`,
 plus the 18 Kremlin narratives in `kremlin_narratives.csv` (copied from socialscope, each with rating and source).
 
+**Dog-whistle glossary:** `dogwhistles_allen.csv` holds the 73 antisemitic entries of the glossary from Mendelsohn, Le
+Bras, Choi & Sap, "From Dogwhistles to Bullhorns" (ACL 2023; MIT licence, `dogwhistles_allen.LICENSE`;
+github.com/juliamendelsohn/dogwhistles), each with its sources. 46 entries are ordinary words on a politics stream
+("deep state", "Hollywood elite", "Zionist", "bankers", "Israel Lobby"), marked `needs_context`. They count as
+candidates only when the same message also mentions Jews or Israel, and Claude codes them like everything else. A few
+surface forms are dropped outright as unusable ("blue", "echo", "shut it down", "the Fed").
+
+**Works:** `bibliography.md` lists Finkelstein's and Mearsheimer's books and key articles, and which claims from each
+the watchlist tracks.
+
 ### Holocaust distortion
 From the IHRA Working Definition of Holocaust Denial and Distortion (2013): denying the gas chambers, mass shootings or
 the genocide's intent; gross minimisation of the death toll; blaming Jews for their own genocide; casting it as
