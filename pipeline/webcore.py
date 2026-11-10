@@ -1,7 +1,10 @@
 """FastAPI app factory shared by the public app (public.db) and the admin app (archive.db)."""
 from __future__ import annotations
 
+import base64
+import hmac
 import json
+import os
 import sqlite3
 import time
 from collections import defaultdict, deque
@@ -45,9 +48,28 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
     def rows(cur) -> list[dict]:
         return [dict(r) for r in cur]
 
+    need_password = not admin and cfg.get("site_password_required", True)
+    site_user, site_password = os.environ.get("SITE_USER", "viewer"), os.environ.get("SITE_PASSWORD", "")
+
+    def authorized(request: Request) -> bool:
+        header = request.headers.get("authorization", "")
+        if not header.lower().startswith("basic "):
+            return False
+        try:
+            user, _, pw = base64.b64decode(header[6:]).decode().partition(":")
+        except Exception:
+            return False
+        return hmac.compare_digest(user.encode(), site_user.encode()) & hmac.compare_digest(pw.encode(), site_password.encode())
+
     @app.middleware("http")
     async def guard(request: Request, call_next):
         path = request.url.path
+        if need_password:
+            if not site_password:   # fail closed: never serve the site open by accident
+                return JSONResponse({"detail": "site password not configured (SITE_PASSWORD in site.env)"}, status_code=503)
+            if not authorized(request):
+                return JSONResponse({"detail": "password required"}, status_code=401,
+                                    headers={"WWW-Authenticate": 'Basic realm="VOD archive"'})
         if not admin and path.startswith(RATE_LIMITED):
             ip = request.client.host if request.client else "?"
             fwd = request.headers.get("x-forwarded-for")
@@ -69,8 +91,11 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
         return resp
 
     @app.get("/api/config")
-    def config():
-        return {"mode": mode, "site_domain": cfg["site_domain"], "chat_window_seconds": cfg["chat_window_seconds"],
+    def config(request: Request):
+        domain = cfg.get("site_domain") or "auto"
+        if domain == "auto":
+            domain = request.url.hostname or "localhost"
+        return {"mode": mode, "site_domain": domain, "chat_window_seconds": cfg["chat_window_seconds"],
                 "contact_email": cfg.get("contact_email", ""), "semantic": len(app.state.index) > 0}
 
     turn_cols = ("t.speaker_score, t.speaker_raw, "

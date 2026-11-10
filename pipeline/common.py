@@ -167,6 +167,7 @@ def lock(cfg: dict, name: str):
 
 
 def connect_archive(cfg: dict, init: bool = True) -> sqlite3.Connection:
+    P(cfg, "archive_db").parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(P(cfg, "archive_db"), timeout=10)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")
@@ -204,6 +205,12 @@ def parse_ts(text: str) -> float:
     for p in parts:
         out = out * 60 + p
     return out
+
+
+def site_url(cfg: dict) -> str:
+    """Base URL for links printed by the CLI tools."""
+    d = cfg.get("site_domain") or "auto"
+    return "http://localhost:8000/" if d == "auto" else f"https://{d}/"
 
 
 def watch_link(video_id: str, t: float) -> str:

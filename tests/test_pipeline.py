@@ -225,7 +225,7 @@ def test_logger_against_fake_irc_server(tmp_path):
     sent = "".join(received)
     assert "CAP REQ :twitch.tv/tags twitch.tv/commands" in sent and "JOIN #teststreamer" in sent
     assert "NICK justinfan" in sent and "PONG :tmi.twitch.tv" in sent
-    con = sqlite3.connect(tmp_path / "archive.db")
+    con = sqlite3.connect(tmp_path / "archive" / "archive.db")
     con.row_factory = sqlite3.Row
     rows = con.execute("SELECT * FROM live_msgs ORDER BY ts_ms").fetchall()
     assert [(r["author"], r["text"], r["kind"], r["deleted"]) for r in rows] == [
@@ -246,7 +246,7 @@ def test_logger_against_fake_irc_server(tmp_path):
 
 def dbs(project):
     root, _ = project
-    arc, pub = sqlite3.connect(root / "archive.db"), sqlite3.connect(root / "public.db")
+    arc, pub = sqlite3.connect(root / "archive" / "archive.db"), sqlite3.connect(root / "public.db")
     arc.row_factory = pub.row_factory = sqlite3.Row
     return arc, pub
 

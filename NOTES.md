@@ -68,6 +68,21 @@ Run `python -m pytest` from the repo root (27 tests, no GPU or network needed).
   is set, otherwise it reports how many VODs are waiting. `run_remote.sh` was dry-run against a local stand-in for
   SSH (sync, batch limit, token-only `.env`, pull without overwriting local transcripts); never against a real GPU host.
 
+- **Website on the laptop via Tailscale Funnel** (no domain, no port forwarding). `deploy/laptop/install.sh` writes
+  systemd units for the logger, site, admin app, nightly timer and a 10-minute GitHub auto-update
+  (`deploy/laptop/update.sh`, tested against a local git remote with a stand-in systemctl; install.sh itself is
+  syntax-checked only). The old `deploy/*.service` files are replaced by these.
+- **Site password is checked by the public app itself** (`site_password_required`, `SITE_USER`/`SITE_PASSWORD` in
+  `site.env`) because Funnel has no Caddy in front. It fails closed: no password configured means 503, never an open
+  site. Caddyfile kept for a future own-domain setup.
+- **archive.db moved to `archive/archive.db`.** The public site runs as the same user as the pipeline but with
+  systemd `InaccessiblePaths` over `archive/`, `data/`, `voices/`, `voiceprints/` and `.env` (the spec asked for a
+  separate user; a folder mask also covers the `-wal`/`-shm` files that come and go).
+- **`site_domain: auto`** takes the Twitch embed `parent` from the host the visitor used.
+- **Unverified (tailscale.com not reachable from the build container):** that Funnel passes the visitor's IP in
+  `X-Forwarded-For` (if not, the search rate limit is shared by all visitors), and that `tailscale serve` on 8443
+  stays tailnet-only alongside Funnel on 443. Check both on the laptop.
+
 ## Library versions checked
 Signatures were read from the wheels, not run: whisperx 3.8.6 (`whisperx.diarize.DiarizationPipeline(token=...)`,
 `__call__(..., return_embeddings=True)` returning `(df, {speaker: vector})`), pyannote.audio 4.0.7

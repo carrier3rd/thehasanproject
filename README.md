@@ -59,11 +59,29 @@ python pipeline/ask.py "what did he say about rent control"
 ```
 The live chat logger runs separately: `python pipeline/chat_logger.py` (systemd unit in `deploy/`).
 
-## Apps
+## The website (on the laptop)
+After the laptop setup above:
 ```bash
-uvicorn web.app:app --host 127.0.0.1 --port 8000      # public, reads public.db only
-uvicorn admin.app:app --host 127.0.0.1 --port 8001    # private, reads archive.db; never proxy this
+sudo deploy/laptop/install.sh
 ```
+It asks for the site password (user name `viewer`), then installs and starts these services:
+- the chat logger
+- the public site on `127.0.0.1:8000`
+- the admin app on `127.0.0.1:8001`
+- the nightly pipeline at 06:00
+- a check every 10 minutes that pulls new code and settings from GitHub and restarts what changed
+
+So anything pushed to `main` here or in the private repo reaches the laptop within 10 minutes.
+
+To put the site on the internet, use Tailscale Funnel. It's free, gives a fixed `https://<name>.ts.net` address,
+and needs no domain or router changes:
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up
+sudo tailscale funnel --bg 8000
+sudo tailscale serve --bg --https=8443 http://127.0.0.1:8001    # admin: only your own Tailscale devices
+```
+The site is offline whenever the laptop is off or asleep.
 
 ## Tests
 ```bash

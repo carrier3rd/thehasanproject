@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Nightly update. Cron example (06:00 local, after the stream usually ends + skip_if_ended_within_hours):
-#   0 6 * * *  /opt/vod-archive/deploy/nightly.sh
+# Nightly update. On the laptop it runs from vod-nightly.timer at 06:00 (deploy/laptop/install.sh sets that up).
 # Optional: WEB_HOST=user@server WEB_DIR=/opt/vod-archive to push public.db + index/ to a separate web box.
 set -u
 cd "$(dirname "$0")/.."

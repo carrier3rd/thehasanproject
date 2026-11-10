@@ -5,6 +5,8 @@ index/
 logs/
 qa/
 *.db
+archive/
+site.env
 *.db-wal
 *.db-shm
 *.tmp.db
