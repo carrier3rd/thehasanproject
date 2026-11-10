@@ -28,8 +28,8 @@ push_code() {
   git ls-files | rs --files-from=- ./ "$GPU_HOST:$RDIR/"
   [ -f "$PRIV/config.yaml" ] && rs "$PRIV/config.yaml" "$GPU_HOST:$RDIR/private/config.yaml"
   # only HF_TOKEN goes to the rented machine
-  if [ -f .env ] && grep -q '^HF_TOKEN=' .env; then
-    grep '^HF_TOKEN=' .env | $SSH "$GPU_HOST" "cat > $RDIR/.env"
+  if [ -f .env ] && grep -qE '^(export +)?HF_TOKEN=' .env; then
+    grep -E '^(export +)?HF_TOKEN=' .env | sed -E 's/^export +//' | tail -1 | $SSH "$GPU_HOST" "cat > $RDIR/.env"
   elif [ -n "${HF_TOKEN:-}" ]; then
     printf 'HF_TOKEN=%s\n' "$HF_TOKEN" | $SSH "$GPU_HOST" "cat > $RDIR/.env"
   else

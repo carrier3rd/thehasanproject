@@ -14,6 +14,8 @@ info() { printf '[info] %s\n' "$*"; }
 hdr()  { printf '\n== %s ==\n' "$*"; }
 # root-only commands: try without sudo, then passwordless sudo
 priv() { "$@" 2>/dev/null || sudo -n "$@" 2>/dev/null; }
+# journal lines can quote .env lines (systemd prints rejected assignments in full): hide every value
+redact() { sed -E 's/(assignment .)([A-Za-z_ ]*[A-Za-z_]+=)[^'"'"']*/\1\2<hidden>/; s/hf_[A-Za-z0-9]{8,}/hf_<hidden>/g'; }
 
 hdr "machine"
 info "$(date -Is)  up $(uptime -p 2>/dev/null | sed 's/^up //')"
@@ -26,9 +28,9 @@ done
 hdr "code"
 for d in "$REPO" "$REPO/../thehasanprojectprivate"; do
   [ -d "$d/.git" ] || { bad "no git repo at $d"; continue; }
-  dirty=$(git -C "$d" status --porcelain | wc -l)
-  info "$(basename "$(cd "$d" && pwd)"): $(git -C "$d" rev-parse --abbrev-ref HEAD) $(git -C "$d" log -1 --format='%h %cr: %s')" \
-    "$( [ "$dirty" -gt 0 ] && echo "($dirty local change(s): auto-update cannot pull)")"
+  info "$(basename "$(cd "$d" && pwd)"): $(git -C "$d" rev-parse --abbrev-ref HEAD) $(git -C "$d" log -1 --format='%h %cr: %s')"
+  dirty=$(git -C "$d" status --porcelain)
+  [ -z "$dirty" ] || { info "local changes (a pull fails if GitHub changes the same files):"; sed 's/^/       /' <<<"$dirty"; }
 done
 
 hdr "services"
@@ -72,15 +74,16 @@ if row[0]:
 for s in con.execute("SELECT channel, start_ms, end_ms FROM sessions ORDER BY start_ms DESC LIMIT 3"):
     print(f"session {s[0]} {time.strftime('%Y-%m-%d %H:%M', time.localtime(s[1] / 1000))} {(s[2] - s[1]) / 3.6e6:.1f} h")
 PYCODE
-journalctl -u vod-chat-logger -n 5 --no-pager -o cat 2>/dev/null | sed 's/^/       /'
+journalctl -u vod-chat-logger -n 5 --no-pager -o cat 2>/dev/null | redact | sed 's/^/       /'
 
 hdr "tools"
 tdl=/opt/TwitchDownloaderCLI/TwitchDownloaderCLI
 if [ -x "$tdl" ]; then ok "TwitchDownloaderCLI: $("$tdl" --version 2>&1 | head -1)"; else bad "TwitchDownloaderCLI missing at $tdl (chat replay falls back to chat-downloader)"; fi
 for c in ffmpeg ffprobe; do command -v "$c" >/dev/null && ok "$c" || bad "$c missing"; done
 [ -x .venv/bin/yt-dlp ] && ok "yt-dlp $(.venv/bin/yt-dlp --version)" || bad "yt-dlp missing from .venv"
-grep -q '^HF_TOKEN=.' .env 2>/dev/null && ok "HF_TOKEN set in .env" || info "HF_TOKEN not set in .env yet (needed before the GPU run)"
-grep -q '^GPU_HOST=.' .env 2>/dev/null && info "GPU_HOST set in .env: nightly will transcribe" || info "GPU_HOST not set: nightly skips transcription"
+grep -qE '^(export +)?HF_TOKEN=.' .env 2>/dev/null && ok "HF_TOKEN set in .env" || info "HF_TOKEN not set in .env yet (needed before the GPU run)"
+grep -qE '^(export +)?GPU_HOST=.' .env 2>/dev/null && info "GPU_HOST set in .env: nightly will transcribe" || info "GPU_HOST not set: nightly skips transcription"
+grep -qE '^export ' .env 2>/dev/null && bad ".env has 'export NAME=...' lines: systemd ignores them; write NAME=... without 'export'"
 
 hdr "data"
 "$PY" - <<'PYCODE' 2>&1 | sed 's/^/[info] /'
