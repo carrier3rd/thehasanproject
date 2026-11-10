@@ -53,6 +53,9 @@ python pipeline/build_db.py
 python pipeline/publish.py
 python pipeline/embed.py
 python pipeline/ask.py "what did he say about rent control"
+python pipeline/rhetoric.py scan                 # rhetoric study (research/README.md): free, local
+python pipeline/rhetoric.py code                 # shows the cost; add --yes to submit the Claude batch
+python pipeline/rhetoric.py collect --wait       # then: python pipeline/rhetoric.py report
 ```
 The live chat logger runs separately: `python pipeline/chat_logger.py` (systemd unit in `deploy/`).
 
