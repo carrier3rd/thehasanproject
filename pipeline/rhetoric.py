@@ -264,7 +264,7 @@ def user_prompt(item: dict) -> str:
     return "\n\n".join(parts)
 
 
-def pending_items(cfg: dict, only: list[str] | None) -> list[tuple[str, dict]]:
+def pending_items(cfg: dict, only: list[str] | None, kind: str | None = None) -> list[tuple[str, dict]]:
     out = []
     for d in sorted(p for p in out_root(cfg).glob("*") if (p / "candidates.jsonl").exists()):
         if only and d.name not in only:
@@ -278,7 +278,7 @@ def pending_items(cfg: dict, only: list[str] | None) -> list[tuple[str, dict]]:
                 submitted |= {n for u, n in b["items"] if u == d.name}
         for line in open(d / "candidates.jsonl", encoding="utf-8"):
             it = json.loads(line)
-            if it["n"] not in done and it["n"] not in submitted:
+            if it["n"] not in done and it["n"] not in submitted and (not kind or it["kind"] == kind):
                 out.append((d.name, it))
     return out
 
@@ -299,9 +299,19 @@ def estimate(st: dict, system: str, items: list[tuple[str, dict]]) -> tuple[floa
     return usd, in_tok + sys_tok * len(items) + out_tok
 
 
-def code(cfg: dict, only=None, yes=False, client=None, research: Path = RESEARCH) -> str | None:
+def code(cfg: dict, only=None, yes=False, client=None, research: Path = RESEARCH, kind=None) -> str | None:
     st = settings(cfg)
-    items = pending_items(cfg, only)[: st["max_requests"]]
+    items = pending_items(cfg, only, kind)
+    if st.get("sample_per_unit") and kind != "candidate":   # trim the random sample per unit, keeping the seeded order
+        keep, seen = [], Counter()
+        for uid, it in items:
+            if it["kind"] == "sample":
+                seen[uid] += 1
+                if seen[uid] > st["sample_per_unit"]:
+                    continue
+            keep.append((uid, it))
+        items = keep
+    items = items[: st["max_requests"]]
     if not items:
         print("nothing to code (run scan first, or everything is coded or submitted)")
         return None
@@ -496,15 +506,17 @@ def main():
     ap.add_argument("--wait", action="store_true", help="collect: wait until batches finish")
     ap.add_argument("--model", help="code: model id (default rhetoric.model in config.yaml, else claude-opus-5-5)")
     ap.add_argument("--max", type=int, help="code: at most this many messages in this batch")
+    ap.add_argument("--kind", choices=["candidate", "sample"], help="code: only keyword candidates, or only the random sample")
+    ap.add_argument("--sample", type=int, help="code: code at most this many sample messages per stream")
     a = ap.parse_args()
     cfg = load_config()
-    over = {k: v for k, v in (("model", a.model), ("max_requests", a.max)) if v}
+    over = {k: v for k, v in (("model", a.model), ("max_requests", a.max), ("sample_per_unit", a.sample)) if v}
     if over:
         cfg["rhetoric"] = {**(cfg.get("rhetoric") or {}), **over}
     if a.step == "scan":
         scan(cfg, a.unit)
     elif a.step == "code":
-        code(cfg, a.unit, a.yes)
+        code(cfg, a.unit, a.yes, kind=a.kind)
     elif a.step == "collect":
         collect(cfg, wait=a.wait)
     else:

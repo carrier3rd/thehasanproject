@@ -77,11 +77,15 @@ def test_scan_code_collect_report(chat_project, capsys):
     fake = NS(messages=NS(batches=FakeBatches()))
     assert rhetoric.code(cfg, ["v9001"], yes=False, client=fake) is None      # estimate only, nothing sent
     assert fake.messages.batches.requests is None
-    assert rhetoric.code(cfg, ["v9001"], yes=True, client=fake) == "msgbatch_test"
+    assert rhetoric.code(cfg, ["v9001"], yes=True, client=fake, kind="candidate") == "msgbatch_test"
+    assert len(fake.messages.batches.requests) == 24                          # candidates only
+    assert rhetoric.collect(cfg, client=fake) == 24
+    assert rhetoric.code(cfg, ["v9001"], yes=True, client=fake) == "msgbatch_test"   # now the sample
     sent = fake.messages.batches.requests
     assert all("name" not in r["params"]["messages"][0]["content"] for r in sent), "account names must not be sent"
     assert rhetoric.code(cfg, ["v9001"], yes=True, client=fake) is None       # already submitted
 
+    assert len(sent) == stats["sample"]
     assert rhetoric.collect(cfg, client=fake) == len(sent)
     text = rhetoric.report(cfg)
     assert "name" not in text.split("## v9001")[1].split("## ")[0], "report must not name accounts"
