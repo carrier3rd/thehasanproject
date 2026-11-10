@@ -80,6 +80,12 @@ sudo tailscale serve --bg --https=8443 http://127.0.0.1:8001    # admin: only yo
 ```
 The site is offline whenever the laptop is off or asleep.
 
+To check everything at once (services, chat logger, tools, data, site, Tailscale):
+```bash
+deploy/laptop/status.sh          # sudo deploy/laptop/status.sh also shows Funnel/serve status
+```
+It is read-only and prints no secrets or visitor addresses, so its output can be pasted into a Claude session.
+
 ## Tests
 ```bash
 python -m pytest
