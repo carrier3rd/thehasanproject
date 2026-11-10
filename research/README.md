@@ -36,7 +36,8 @@ both. Every result table has an IHRA column and a JDA column.
 | charged | loaded vocabulary ("Amerikkka", "imperial core") | no |
 | mention / topic | names and topic words; used as denominators | no |
 
-Categories: `antisemitism`, `holocaust_distortion`, `israel`, `violence`, `finkelstein`, `russia`, `anti_us`, `topic`,
+Categories: `antisemitism`, `holocaust_distortion`, `israel`, `violence`, `finkelstein`, `russia`, `anti_us`,
+`anti_liberal` (added 2026-11-10 at the owner's request), `topic`,
 plus the 18 Kremlin narratives in `kremlin_narratives.csv` (copied from socialscope, each with rating and source).
 
 **Dog-whistle glossary:** `dogwhistles_allen.csv` holds the 73 antisemitic entries of the glossary from Mendelsohn, Le
@@ -77,6 +78,13 @@ John Mearsheimer is tracked the same way:
 - **Ukraine as a Western pawn** with no agency of its own.
 - The documented false Kremlin narratives (Bucha staged, US biolabs, Ukraine a Nazi regime, ...) come from
   `kremlin_narratives.csv`.
+
+### Anti-liberal framing (from the left)
+Contempt for liberals and liberal democracy: "libs"/"shitlibs"/"liberal Zionist" as insults, "liberals are worse than
+fascists" ("scratch a liberal..."), "uniparty"/"blue MAGA", "electoralism" and "bourgeois democracy". Mostly `charged`
+vocabulary, counted for prevalence. The violent memes ("liberals get the bullet too", "up against the wall") are
+`explicit`. Right-wing anti-liberal insults (soyboy, NPC) are in the Allen glossary's anti-liberal persona and not
+imported, since they mark the other side.
 
 ### Anti-American framing
 Criticising a US policy is not extremism. Following the socialscope commentator-valence study, every US-related segment
