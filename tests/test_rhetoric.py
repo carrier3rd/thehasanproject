@@ -145,3 +145,22 @@ def test_tiers_rescan_deleted_and_hand_check(chat_project):
         w.writeheader()
         w.writerows(rows)
     assert "endorse-or-not 100%" in rhetoric.agree(cfg)
+
+
+def test_rescan_after_growth_keeps_coded_sample(chat_project):
+    cfg = chat_project
+    d = rhetoric.out_root(cfg) / "v9001"
+    coded_sample = {c["n"] for c in rhetoric.read_jsonl(d / "coded.jsonl") if c["kind"] == "sample"}
+    assert coded_sample
+    # simulate an old scan having redrawn the sample: list a different sample in candidates.jsonl
+    items = rhetoric.read_jsonl(d / "candidates.jsonl")
+    with open(d / "candidates.jsonl", "w") as f:
+        for it in items:
+            if it["kind"] != "sample":
+                f.write(json.dumps(it) + "\n")
+    rhetoric.scan(cfg, ["v9001"])
+    now = {it["n"] for it in rhetoric.read_jsonl(d / "candidates.jsonl") if it["kind"] == "sample"}
+    assert coded_sample <= now
+    fake = NS(messages=NS(batches=FakeBatches()))
+    cfg2 = {**cfg, "rhetoric": {"sample_per_unit": len(coded_sample)}}
+    assert rhetoric.code(cfg2, ["v9001"], yes=True, client=fake, kind="sample") is None   # cap already reached

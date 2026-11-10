@@ -179,14 +179,17 @@ def scan(cfg: dict, only: list[str] | None = None, research: Path = RESEARCH) ->
                 rest.append(i)
         d = out_root(cfg) / uid
         d.mkdir(parents=True, exist_ok=True)
-        # keep the sample drawn on an earlier scan, so messages already coded stay in it (live units can grow)
+        # Keep every sample message already coded, plus the sample listed by the last scan, so a growing live unit
+        # doesn't orphan codes. (Fixed 2026-11-10: the first version redrew the sample whenever a live unit grew.)
         rest_set = set(rest)
-        old = [it["n"] for it in read_jsonl(d / "candidates.jsonl") if it["kind"] == "sample"]
-        if old and all(i in rest_set for i in old):
-            sample = sorted(old)
-        else:
+        coded_sample = {c["n"] for c in read_jsonl(d / "coded.jsonl") if c.get("kind") == "sample"}
+        listed = {it["n"] for it in read_jsonl(d / "candidates.jsonl") if it["kind"] == "sample"}
+        keep = sorted((coded_sample | listed) & rest_set)
+        if len(keep) < min(st["sample_size"], len(rest)):
             rng = random.Random(f"{st['seed']}:{uid}")
-            sample = sorted(rng.sample(rest, min(st["sample_size"], len(rest))))
+            pool = [i for i in rest if i not in set(keep)]
+            keep += rng.sample(pool, min(st["sample_size"] - len(keep), len(pool)))
+        sample = sorted(keep)
         # every message mods deleted gets coded too (live units only; replays don't keep deleted messages)
         sample_set = set(sample)
         deleted = [i for i in rest if rows[i]["deleted"] and i not in sample_set]
@@ -337,8 +340,10 @@ def estimate(st: dict, system: str, items: list[tuple[str, dict]]) -> tuple[floa
 def code(cfg: dict, only=None, yes=False, client=None, research: Path = RESEARCH, kind=None) -> str | None:
     st = settings(cfg)
     items = pending_items(cfg, only, kind)
-    if st.get("sample_per_unit") and kind != "candidate":   # trim the random sample per unit, keeping the seeded order
+    if st.get("sample_per_unit") and kind != "candidate":   # at most N sample messages per unit, counting coded ones
         keep, seen = [], Counter()
+        for d in out_root(cfg).glob("*"):
+            seen[d.name] = sum(1 for c in read_jsonl(d / "coded.jsonl") if c.get("kind") == "sample")
         for uid, it in items:
             if it["kind"] == "sample":
                 seen[uid] += 1
