@@ -92,9 +92,8 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
 
     @app.get("/api/config")
     def config(request: Request):
-        domain = cfg.get("site_domain") or "auto"
-        if domain == "auto":
-            domain = request.url.hostname or "localhost"
+        # Twitch's embed `parent` must be the host this page was opened on (ts.net address, 127.0.0.1, ...)
+        domain = request.url.hostname or cfg.get("site_domain") or "localhost"
         return {"mode": mode, "site_domain": domain, "chat_window_seconds": cfg["chat_window_seconds"],
                 "contact_email": cfg.get("contact_email", ""), "semantic": len(app.state.index) > 0}
 
