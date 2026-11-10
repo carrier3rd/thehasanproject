@@ -105,3 +105,43 @@ def test_key_from_dotenv(tmp_path, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY")
     env.write_text("HF_TOKEN=hf_x\n")
     assert not rhetoric.key_from_dotenv(path=env)
+
+
+def test_tiers_rescan_deleted_and_hand_check(chat_project):
+    cfg = chat_project
+    text = rhetoric.report(cfg)
+    row = next(l for l in text.splitlines() if l.startswith("| holocaust_distortion | 3 |"))
+    assert "explicit 3" in row                                  # 'never happened' is explicit-tier denial
+    assert "| anti_liberal | 3 |" in text and "explicit 3" in next(l for l in text.splitlines() if l.startswith("| anti_liberal | 3 |"))
+
+    # a rescan keeps the random sample already coded
+    before = [it["n"] for it in rhetoric.read_jsonl(rhetoric.out_root(cfg) / "v9001" / "candidates.jsonl") if it["kind"] == "sample"]
+    rhetoric.scan(cfg, ["v9001"])
+    after = [it["n"] for it in rhetoric.read_jsonl(rhetoric.out_root(cfg) / "v9001" / "candidates.jsonl") if it["kind"] == "sample"]
+    assert before == after
+
+    # live units: every mod-deleted message is queued for coding
+    live = [u for u in rhetoric.units(cfg) if u.startswith("live-")]
+    stats = rhetoric.scan(cfg, live)[live[0]]
+    assert stats["deleted"] == 1 and stats["deleted_extra"] + stats["sample"] >= 1
+    items = rhetoric.read_jsonl(rhetoric.out_root(cfg) / live[0] / "candidates.jsonl")
+    assert any(it["deleted"] for it in items)
+
+    # blind sheet, then agreement: answer exactly like the fake coder
+    path = rhetoric.sheet(cfg, n=10, force=True)
+    import csv as _csv
+    rows = list(_csv.DictReader(open(path, newline=""), delimiter="\t"))
+    assert rows and set(rows[0]) == set(rhetoric.SHEET_COLS), "sheet must not show Claude's labels"
+    coded = {}
+    for d in rhetoric.out_root(cfg).glob("*"):
+        for c in rhetoric.read_jsonl(d / "coded.jsonl"):
+            coded[f"{d.name}:{c['n']}"] = c
+    for r in rows:
+        c = coded[r["item"]]
+        r.update(your_stance=c["stance"], your_categories=",".join(c["categories"]),
+                 your_ihra="y" if c["ihra_antisemitic"] else "n", your_jda="y" if c["jda_antisemitic"] else "n")
+    with open(path, "w", newline="") as f:
+        w = _csv.DictWriter(f, fieldnames=rhetoric.SHEET_COLS, delimiter="\t")
+        w.writeheader()
+        w.writerows(rows)
+    assert "endorse-or-not 100%" in rhetoric.agree(cfg)
