@@ -393,3 +393,17 @@ def test_private_config_overlay(tmp_path):
     assert cfg["site_domain"] == "example.org" and cfg["paths"]["archive_db"] == "/srv/a.db"
     assert cfg["paths"]["audio"] == "data/audio"
     assert cfg_file(cfg, "optout_file") == priv / "optout.txt"
+
+
+def test_pending_lists_untranscribed_audio_and_muted(project):
+    import pending
+    from common import P
+    root, cfg = project
+    (P(cfg, "audio") / "v1001.opus").write_bytes(b"x")
+    (P(cfg, "audio") / "vNEW.opus").write_bytes(b"x")
+    assert pending.pending(cfg) == ["vNEW"]                       # v1001 already has a transcript
+    assert pending.pending(cfg, model="large-v3-turbo") == ["v1001", "vNEW"]
+    out = run(root, "pending.py", "--model", "large-v3-turbo", "--batch", "1").stdout.split()
+    assert out == ["data/audio/v1001.opus", "data/muted/v1001.json"]
+    for f in ("v1001.opus", "vNEW.opus"):
+        (P(cfg, "audio") / f).unlink()

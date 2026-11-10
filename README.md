@@ -4,15 +4,42 @@ Searchable archive of one streamer's VODs: transcripts with named speakers, chat
 semantic search, and a watch page that keeps video, transcript and chat in sync. See `NOTES.md` for build status and
 decisions.
 
-## Setup (GPU machine)
+## Two machines
+
+| Machine | Runs |
+|---|---|
+| **Laptop** (always on, no GPU needed) | chat logger, inventory, downloads, muted spans, chat replay, alignment, database, publish, search index, web + admin apps |
+| **Rented NVIDIA GPU** (by the hour) | transcription (`process.py`) and voice enrollment, driven from the laptop by `deploy/gpu/run_remote.sh` |
+
+### Laptop setup
 ```bash
 python -m venv .venv && . .venv/bin/activate
+pip install torch --index-url https://download.pytorch.org/whl/cpu   # CPU-only PyTorch, much smaller
 pip install -r requirements.txt
-export HF_TOKEN=...            # after accepting the pyannote model terms on Hugging Face
-python check_env.py            # must be all green
+python check_env.py --role laptop
 ```
 Clone the private settings repo next to this one (`../thehasanprojectprivate`) and fill in its `config.yaml`
-(domain, contact address, sources, TwitchDownloaderCLI path). Put `HF_TOKEN` in `.env` here, never in git.
+(domain, contact address, sources, TwitchDownloaderCLI path). Put `HF_TOKEN=...` in `.env` here, never in git.
+
+Keep the laptop awake around the clock, or the live chat log has gaps. On Linux with systemd:
+```bash
+sudo sed -i 's/^#\?HandleLidSwitch=.*/HandleLidSwitch=ignore/; s/^#\?HandleLidSwitchExternalPower=.*/HandleLidSwitchExternalPower=ignore/' /etc/systemd/logind.conf
+sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
+sudo systemctl restart systemd-logind
+```
+
+### Rented GPU (RunPod, Vast.ai, Lambda, ...)
+Rent a Linux machine with an NVIDIA card of at least 16 GB (24 GB such as an RTX 4090, A10 or L4 is plenty) and a
+PyTorch/CUDA image, add your SSH key, and copy its SSH host and port. Then, from the laptop:
+```bash
+export GPU_HOST=root@<host>  GPU_PORT=<port>
+deploy/gpu/run_remote.sh setup             # installs WhisperX + pyannote there, checks the GPU
+deploy/gpu/run_remote.sh enroll            # voice prints from voices/<Name>/*.wav
+BATCH=20 deploy/gpu/run_remote.sh process  # transcribe up to 20 pending VODs, bring the results back
+```
+It uploads only audio that still needs a transcript (about 30 MB per stream-hour), and every step resumes if the
+connection drops. Run it inside `tmux`. **Stop or delete the rented machine when it finishes**; most providers bill
+until you do, some also for stopped storage.
 
 ## Pipeline (run from the repo root)
 ```bash
@@ -20,8 +47,9 @@ python pipeline/inventory.py
 python pipeline/download.py --limit 5
 python pipeline/muted.py
 python pipeline/chat_replay.py
-python pipeline/enroll_voices.py                 # after putting clips in voices/<Name>/
-python pipeline/process.py --model large-v3      # pilot: repeat with large-v3-turbo
+python pipeline/enroll_voices.py --cut <id> <HH:MM:SS> <seconds> <Name>   # cut clips on the laptop
+deploy/gpu/run_remote.sh enroll                  # build voice prints on the GPU
+deploy/gpu/run_remote.sh process --model large-v3        # pilot: repeat with --model large-v3-turbo
 python pipeline/qa.py                            # report + qa/qa_labels.tsv; then qa.py --score
 python pipeline/align_chat.py
 python pipeline/build_db.py

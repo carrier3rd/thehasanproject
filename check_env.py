@@ -76,21 +76,28 @@ def embed_model(cfg):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--offline", action="store_true", help="skip model download checks")
+    ap.add_argument("--role", choices=["laptop", "gpu", "all"], default="all",
+                    help="laptop: logger/downloads/site; gpu: transcription only")
     a = ap.parse_args()
     cfg = load_config()
     make_dirs(cfg)
     check("python >= 3.11", lambda: sys.version.split()[0] if sys.version_info >= (3, 11) else (_ for _ in ()).throw(RuntimeError(sys.version)))
     check("directories", lambda: "created")
+    laptop, gpu_role = a.role in ("laptop", "all"), a.role in ("gpu", "all")
     check("ffmpeg", lambda: subprocess.run([need("ffmpeg"), "-version"], capture_output=True, text=True).stdout.split("\n")[0])
-    check("yt-dlp", lambda: subprocess.run([need("yt-dlp"), "--version"], capture_output=True, text=True).stdout.strip())
     check("SQLite FTS5", fts5)
-    check("GPU", gpu)
-    check("HF_TOKEN", hf_token)
-    check("TwitchDownloaderCLI", lambda: need(cfg["twitch_downloader_cli"]))
-    check("whisperx import", lambda: __import__("whisperx") and None)
-    if not a.offline:
-        check("pyannote models", lambda: pyannote_models(cfg))
-        check("embedding model", lambda: embed_model(cfg))
+    if laptop:
+        check("yt-dlp", lambda: subprocess.run([need("yt-dlp"), "--version"], capture_output=True, text=True).stdout.strip())
+        check("TwitchDownloaderCLI", lambda: need(cfg["twitch_downloader_cli"]))
+        check("fastapi + uvicorn", lambda: __import__("fastapi") and __import__("uvicorn") and None)
+        if not a.offline:
+            check("embedding model", lambda: embed_model(cfg))
+    if gpu_role:
+        check("GPU", gpu)
+        check("HF_TOKEN", hf_token)
+        check("whisperx import", lambda: __import__("whisperx") and None)
+        if not a.offline:
+            check("pyannote models", lambda: pyannote_models(cfg))
     ok = all(results)
     print(f"\n{GREEN + 'all green' if ok else RED + f'{results.count(False)} check(s) failed'}{END}")
     return 0 if ok else 1

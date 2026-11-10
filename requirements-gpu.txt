@@ -1,0 +1,6 @@
+# Rented / NVIDIA GPU machine: transcription (process.py) and voice enrollment (enroll_voices.py) only.
+whisperx
+pyannote.audio
+numpy
+pyyaml
+tqdm

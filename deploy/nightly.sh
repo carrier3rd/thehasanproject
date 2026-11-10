@@ -20,7 +20,13 @@ step pipeline/inventory.py
 step pipeline/download.py            # refuses (and logs) if more than 5 VODs are pending; run the backfill by hand with --yes
 step pipeline/muted.py
 step pipeline/chat_replay.py
-step pipeline/process.py
+# transcription needs an NVIDIA GPU: only runs when a rented GPU machine is up (GPU_HOST in .env)
+if [ -n "${GPU_HOST:-}" ]; then
+  echo "--- transcribe on $GPU_HOST"
+  deploy/gpu/run_remote.sh process || echo "!!! remote transcription failed"
+else
+  echo "--- transcribe: skipped (no GPU_HOST); waiting: $(python pipeline/pending.py | grep -vc '/muted/' || true) VOD(s)"
+fi
 step pipeline/align_chat.py
 step pipeline/build_db.py
 
