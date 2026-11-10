@@ -15,6 +15,10 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(os.environ.get("VOD_ARCHIVE_ROOT", Path(__file__).resolve().parent.parent))
+# Tools installed in the virtualenv (yt-dlp) must be found even when it isn't activated (systemd, cron).
+_BIN = str(Path(sys.executable).parent)
+if _BIN not in os.environ.get("PATH", "").split(os.pathsep):
+    os.environ["PATH"] = _BIN + os.pathsep + os.environ.get("PATH", "")
 SPEC_VERSION = "4"
 
 ARCHIVE_SCHEMA = """

@@ -69,7 +69,8 @@ def pyannote_models(cfg):
 
 def embed_model(cfg):
     from sentence_transformers import SentenceTransformer
-    dim = SentenceTransformer(cfg["embed_model"]).get_sentence_embedding_dimension()
+    model = SentenceTransformer(cfg["embed_model"])
+    dim = (getattr(model, "get_embedding_dimension", None) or model.get_sentence_embedding_dimension)()
     return f"{cfg['embed_model']} ({dim} dims)"
 
 
