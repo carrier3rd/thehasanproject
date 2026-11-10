@@ -466,3 +466,11 @@ def test_download_check_complete_catches_cut_off_conversion(tmp_path):
     (tmp_path / "v42.mp4").unlink()
     (tmp_path / "v42.opus.incomplete").write_bytes(b"x")
     assert d.leftovers(tmp_path, "v42", "opus") == []
+
+
+def test_load_config_strips_hf_token_whitespace(monkeypatch):
+    import os
+    import common
+    monkeypatch.setenv("HF_TOKEN", "hf_abc123\n ")
+    common.load_config()
+    assert os.environ["HF_TOKEN"] == "hf_abc123"
