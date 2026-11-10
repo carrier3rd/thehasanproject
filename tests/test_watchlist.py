@@ -42,6 +42,13 @@ HITS = [
     ("us_decline_hegemony", "us hegemony is collapsing"),
     ("mearsheimer", "mearsheimer was right"),
     ("finkelstein", "norm finkelstein on the show"),
+    ("lib_insult", "typical shitlib take"),
+    ("liberals_worse", "liberals are worse than fascists"),
+    ("liberals_worse", "scratch a liberal and a fascist bleeds"),
+    ("uniparty", "it's all the uniparty"),
+    ("liberal_democracy_contempt", "electoralism won't save you"),
+    ("libs_violence", "liberals get the bullet too"),
+    ("liberal_zionist", "he's a liberal zionist"),
 ]
 
 BENIGN = [
@@ -49,7 +56,7 @@ BENIGN = [
     "hitler was a monster", "88 points in that game", "zionist", "the holocaust was the worst crime in history",
     "holocaust museum trip", "6 million people watched the debate", "the kids are alright", "proxy server down",
     "OMEGALUL", "KEKW", "that's a W", "yo chat what's up", "free palestine", "israel", "nato summit", "putin is a dictator",
-    "the US bombed another country today", "imperialism is bad", "jewelry", "jewel", "kikeriki", "doors",
+    "the US bombed another country today", "imperialism is bad", "liberal arts degree", "library card", "i'm a liberal", "jewelry", "jewel", "kikeriki", "doors",
 ]
 
 
