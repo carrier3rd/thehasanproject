@@ -178,15 +178,24 @@ with open(out + ".tmp", "wb") as o:
         b = open(p, "rb").read(); h.update(b); o.write(b); os.remove(p)
 os.replace(out + ".tmp", out)
 print("@@ " + json.dumps({{"sha": h.hexdigest(), "size": os.path.getsize(out)}}))
-""")
+""", timeout=600, tries=1)   # deletes the pieces as it joins them: never repeat
     if res["sha"] != digest.hexdigest() or res["size"] != size:
         raise RuntimeError(f"upload of {local.name} arrived damaged ({res['size']} of {size} bytes)")
 
 
-def rpy(code: str, timeout: int = 300) -> dict:
-    """Run Python in the session's kernel; the code must print one line '@@ <json>'."""
+def rpy(code: str, timeout: int = 120, tries: int = 3) -> dict:
+    """Run Python in the session's kernel; the code must print one line '@@ <json>'.
+    Retried on a hang (a fresh runtime once hung 5 min on its first exec): pass tries=1 for code that must not repeat."""
     compile(code, "<runtime code>", "exec")   # fail here, with a traceback, rather than as a silent remote error
-    out = colab("exec", "-s", SESSION, stdin=code, timeout=timeout, both=True)
+    for attempt in range(1, tries + 1):
+        try:
+            out = colab("exec", "-s", SESSION, stdin=code, timeout=timeout, both=True)
+            break
+        except subprocess.TimeoutExpired:
+            if attempt == tries:
+                raise RuntimeError(f"the runtime did not answer within {timeout} s, {tries} times")
+            print(time.strftime("%H:%M:%S"), f"runtime slow to answer; retry {attempt}/{tries - 1}", flush=True)
+            time.sleep(20)
     for line in reversed(out.splitlines()):
         if line.startswith("@@ "):
             return json.loads(line[3:])
@@ -212,7 +221,7 @@ for f in ("{name}.exit", "{name}.log"):
 p = subprocess.Popen(["bash", "-c", {script!r}], start_new_session=True, stdin=subprocess.DEVNULL,
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 print("@@ " + json.dumps({{"pid": p.pid}}))
-""")
+""", tries=1)
 
 
 def job_state(name: str, log_tail: int = 0) -> dict:
@@ -300,6 +309,7 @@ def run_batch(ids: list[str], gpu: str, label: str) -> int:
     if not resume:
         say(f"{label}: starting a {gpu} runtime")
         colab("new", "-s", SESSION, "--gpu", gpu, timeout=600)
+        rpy("print('@@ {}')", timeout=180, tries=5)   # wait until the fresh kernel answers
     state = rpy(f"""
 import json, os
 print("@@ " + json.dumps({{"setup": os.path.exists("{REMOTE}/logs/setup.exit"),
