@@ -482,3 +482,25 @@ def test_load_config_rescues_messy_hf_token(monkeypatch):
     monkeypatch.setenv("HF_TOKEN", "HF_TOKEN=hf_" + "a1B2" * 8 + "\nsomething else")
     common.load_config()
     assert os.environ["HF_TOKEN"] == "hf_" + "a1B2" * 8
+
+
+def test_qa_label_and_score(project):
+    root, c = project
+    import qa
+    run(root, "qa.py", "--force")
+    rows = qa.read_tsv(root / "qa" / "qa_labels.tsv")
+    # first turn: replay once, then call it the opposite of the prediction; the rest: agree with the prediction
+    answers = []
+    for i, r in enumerate(rows):
+        hasan = qa.is_hasan(r["predicted_speaker"])
+        answers += (["r", "x"] if i == 0 else []) + [("o" if hasan else "h") if i == 0 else ("h" if hasan else "o"), "y"]
+    it = iter(answers)
+    played = []
+    assert qa.label(c, ask=lambda q: next(it), say=lambda *a: None, play=played.append) == len(rows)
+    assert len(played) == len(rows) + 1
+    labelled = qa.read_tsv(root / "qa" / "qa_labels.tsv")
+    assert all(r["true_speaker"] in ("Hasan", "other") and r["transcript_ok"] == "y" for r in labelled)
+    out = run(root, "qa.py", "--score").stdout
+    assert f"{len(rows) - 1}/{len(rows)}" in out and "wrong:" in out and "transcript ok 100%" in out
+    assert qa.speaker_correct("other", "Unknown_3") and not qa.speaker_correct("other", "Hasan")
+    assert qa.speaker_correct("Hasan", "hasan") and not qa.speaker_correct("Hasan", "Unknown_1")

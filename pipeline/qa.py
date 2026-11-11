@@ -1,10 +1,12 @@
-"""Quality checks: pilot report + labeling sheet (default), --score, --health."""
+"""Quality checks: pilot report + labeling sheet (default), --label, --score, --health."""
 from __future__ import annotations
 
 import argparse
 import csv
 import json
 import random
+import shutil
+import subprocess
 import time
 from collections import defaultdict
 
@@ -12,9 +14,23 @@ import numpy as np
 
 from build_db import media_flags, merge_turns
 from common import P, connect_archive, fmt_ts, load_config, make_dirs, read_tsv, site_url, watch_link
+from rhetoric import wilson
 
 LABEL_FIELDS = ["model", "video_id", "start", "end", "link", "predicted_speaker", "text", "true_speaker", "transcript_ok"]
 YES = {"y", "yes", "1", "true", "ok"}
+OTHER = "other"   # true_speaker for "not Hasan" from --label; matches any non-Hasan prediction
+
+
+def is_hasan(name: str) -> bool:
+    return name.strip().lower() == "hasan"
+
+
+def speaker_correct(true: str, predicted: str) -> bool:
+    """Hasan vs not: 'other' (or any other name) is right for any non-Hasan prediction, and vice versa."""
+    t = true.strip().lower()
+    if t == OTHER or t.startswith("unknown"):
+        return not is_hasan(predicted)
+    return t == predicted.strip().lower()
 
 
 def model_dirs(cfg: dict) -> dict[str, list]:
@@ -94,6 +110,61 @@ def write_sheet(cfg: dict, n: int, force: bool) -> None:
     print(f"\nwrote {len(rows)} turns to {dest}; fill true_speaker and transcript_ok (y/n), then run qa.py --score")
 
 
+def save_sheet(path, rows: list[dict]) -> None:
+    tmp = path.with_suffix(".tmp")
+    with open(tmp, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=LABEL_FIELDS, delimiter="\t")
+        w.writeheader()
+        w.writerows(rows)
+    tmp.replace(path)
+
+
+def play_clip(cfg: dict, vid: str, start: float, end: float) -> None:
+    """Play [start-0.5, end+0.5] (at most 25 s) of the VOD audio with ffplay; blocks until done."""
+    audio = next((f for ext in ("opus", "m4a", "mp3", "wav", "flac") if (f := P(cfg, "audio") / f"{vid}.{ext}").exists()), None)
+    if audio is None or not shutil.which("ffplay"):
+        print(f"  (can't play: {'no audio for ' + vid if audio is None else 'ffplay not installed'})")
+        return
+    s = max(0.0, start - 0.5)
+    subprocess.run(["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", "-ss", f"{s:.1f}",
+                    "-t", f"{min(end + 0.5 - s, 25):.1f}", str(audio)], stdin=subprocess.DEVNULL)
+
+
+def label(cfg: dict, ask=input, say=print, play=None) -> int:
+    """Fill qa_labels.tsv in the terminal: play each turn, one keypress for the speaker, one for the text.
+    Saves after each turn, so Ctrl+C and rerunning picks up where it stopped."""
+    play = play or (lambda r: play_clip(cfg, r["video_id"], float(r["start"]), float(r["end"])))
+    path = P(cfg, "qa") / "qa_labels.tsv"
+    rows = read_tsv(path)
+    if not rows:
+        say("qa/qa_labels.tsv not found; run qa.py first")
+        return 0
+    todo = [r for r in rows if not (r["true_speaker"].strip() and r["transcript_ok"].strip())]
+    say(f"{len(rows) - len(todo)} of {len(rows)} done. Keys then Enter. Ctrl+C stops; answers so far are saved.")
+    done = 0
+    for r in todo:
+        say("\n" + "=" * 70 + f"\n[{rows.index(r) + 1}/{len(rows)}]  {r['video_id']} at {fmt_ts(float(r['start']))}"
+            f"  ({float(r['end']) - float(r['start']):.0f} s)\nTRANSCRIPT  {r['text']}\n")
+        play(r)
+        while (a := ask("who is speaking?  h = Hasan, o = someone else, r = replay, s = skip: ").strip().lower()[:1]) != "s":
+            if a == "r":
+                play(r)
+            elif a in ("h", "o"):
+                break
+        if a == "s":
+            continue
+        r["true_speaker"] = "Hasan" if a == "h" else OTHER
+        while (a := ask("transcript right (small slips OK)?  y / n / r = replay: ").strip().lower()[:1]) not in ("y", "n"):
+            if a == "r":
+                play(r)
+        r["transcript_ok"] = a
+        save_sheet(path, rows)
+        done += 1
+    left = sum(not (r["true_speaker"].strip() and r["transcript_ok"].strip()) for r in rows)
+    say(f"\n{len(rows) - left} of {len(rows)} labelled." + (" Now run: qa.py --score" if not left else ""))
+    return done
+
+
 def score(cfg: dict) -> int:
     rows = read_tsv(P(cfg, "qa") / "qa_labels.tsv")
     if not rows:
@@ -109,10 +180,24 @@ def score(cfg: dict) -> int:
     for model, rs in by.items():
         sp = [r for r in rs if r["true_speaker"].strip()]
         ok = [r for r in rs if r["transcript_ok"].strip()]
-        acc = sum(r["true_speaker"].strip().lower() == r["predicted_speaker"].lower() for r in sp)
+        acc = sum(speaker_correct(r["true_speaker"], r["predicted_speaker"]) for r in sp)
         good = sum(r["transcript_ok"].strip().lower() in YES for r in ok)
         print(f"{model:<18}{f'{acc}/{len(sp)}' if sp else 'unlabeled':>14}{f'{good}/{len(ok)}' if ok else 'unlabeled':>16}"
               f"{(f'{np.mean(rtf[model]):.1f}' if rtf[model] else 'n/a'):>12}")
+        if sp:
+            lo, hi = wilson(acc, len(sp))
+            th = [r for r in sp if is_hasan(r["true_speaker"])]
+            ph = [r for r in sp if is_hasan(r["predicted_speaker"])]
+            both = sum(is_hasan(r["predicted_speaker"]) for r in th)
+            print(f"  speaker accuracy {acc / len(sp):.0%} (95% CI {lo:.0%}-{hi:.0%}); Hasan found {both}/{len(th)} "
+                  f"of his turns; {len(ph) - both}/{len(ph)} turns labelled Hasan were someone else")
+            for r in sp:
+                if not speaker_correct(r["true_speaker"], r["predicted_speaker"]):
+                    print(f"  wrong: {r['video_id']} {fmt_ts(float(r['start']))} predicted {r['predicted_speaker']}, "
+                          f"heard {r['true_speaker']}")
+        if ok:
+            lo, hi = wilson(good, len(ok))
+            print(f"  transcript ok {good / len(ok):.0%} (95% CI {lo:.0%}-{hi:.0%})")
     return 0
 
 
@@ -156,6 +241,7 @@ def health(cfg: dict) -> int:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--label", action="store_true", help="label the sheet in the terminal, playing each turn's audio")
     ap.add_argument("--score", action="store_true")
     ap.add_argument("--health", action="store_true")
     ap.add_argument("--turns", type=int, default=20, help="turns per model in the labeling sheet")
@@ -163,6 +249,9 @@ def main():
     a = ap.parse_args()
     cfg = load_config()
     make_dirs(cfg)
+    if a.label:
+        label(cfg)
+        return 0
     if a.score:
         return score(cfg)
     if a.health:
