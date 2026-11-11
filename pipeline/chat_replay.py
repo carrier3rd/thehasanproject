@@ -31,7 +31,7 @@ def via_twitchdownloader(vod_id: str, cfg: dict) -> list[dict]:
                            capture_output=True, text=True)
         if r.returncode != 0 or not out.exists():
             raise RuntimeError((r.stderr or r.stdout).strip()[-300:] or "TwitchDownloaderCLI failed")
-        return convert_twitchdownloader(json.loads(out.read_text()))
+        return convert_twitchdownloader(json.loads(out.read_text(), strict=False))  # chat bodies can hold raw control characters
 
 
 def via_chat_downloader(vod_id: str) -> list[dict]:
