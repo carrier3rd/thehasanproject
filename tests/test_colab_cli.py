@@ -61,3 +61,16 @@ def test_every_snippet_sent_to_the_runtime_compiles(monkeypatch):
     assert len(sent) == 3
     for code in sent:
         compile(code, "<runtime>", "exec")
+
+
+def test_a_crashed_cli_call_is_retried(monkeypatch):
+    calls = []
+
+    def flaky(*a, **k):
+        calls.append(a)
+        if len(calls) == 1:
+            raise cli_run.CliCrashed("colab exec -s crashed (signal 11)")
+        return '@@ {"exit": null, "log": "", "done": []}'
+    monkeypatch.setattr(cli_run, "colab", flaky)
+    monkeypatch.setattr(cli_run.time, "sleep", lambda s: None)
+    assert cli_run.job_state("job")["exit"] is None and len(calls) == 2
