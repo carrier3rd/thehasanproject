@@ -27,6 +27,7 @@ import tarfile
 import tempfile
 import threading
 import time
+import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -176,16 +177,28 @@ def upload(local: Path, remote: str, progress=lambda done: None) -> None:
             parts.append(rp)
             i += 1
             progress(min(i * PART, size))
+    # safe to repeat (a join once hung 10 min): the pieces are deleted only after the joined file checks out
+    want = digest.hexdigest()
     res = rpy(f"""
 import hashlib, json, os
-parts, out, h = {parts!r}, {remote!r}, hashlib.sha256()
-with open(out + ".tmp", "wb") as o:
+parts, out, want = {parts!r}, {remote!r}, {want!r}
+def sha(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while b := f.read(1 << 24): h.update(b)
+    return h.hexdigest()
+if not (os.path.exists(out) and sha(out) == want):
+    with open(out + ".tmp", "wb") as o:
+        for p in parts:
+            with open(p, "rb") as f: o.write(f.read())
+    os.replace(out + ".tmp", out)
+got = sha(out)
+if got == want:
     for p in parts:
-        b = open(p, "rb").read(); h.update(b); o.write(b); os.remove(p)
-os.replace(out + ".tmp", out)
-print("@@ " + json.dumps({{"sha": h.hexdigest(), "size": os.path.getsize(out)}}))
-""", timeout=600, tries=1)   # deletes the pieces as it joins them: never repeat
-    if res["sha"] != digest.hexdigest() or res["size"] != size:
+        if os.path.exists(p): os.remove(p)
+print("@@ " + json.dumps({{"sha": got, "size": os.path.getsize(out)}}))
+""", timeout=300, tries=3)
+    if res["sha"] != want or res["size"] != size:
         raise RuntimeError(f"upload of {local.name} arrived damaged ({res['size']} of {size} bytes)")
 
 
@@ -220,16 +233,21 @@ def start_job(name: str, shell: str) -> None:
     """Start a detached shell job on the runtime; it survives this CLI call. Exit code lands in logs/<name>.exit."""
     script = (f"cd {REMOTE} && set -a && . ./.env && set +a && export VOD_ARCHIVE_PRIVATE_DIR=private "
               f"PYTHONUNBUFFERED=1 && {{ {shell} ; }} > logs/{name}.log 2>&1; echo $? > logs/{name}.exit")
+    # safe to repeat: a retried call finds this call's token and does not start a second copy
+    token = uuid.uuid4().hex
     rpy(f"""
 import subprocess, json, os
-os.makedirs({REMOTE!r} + "/logs", exist_ok=True)
-for f in ("{name}.exit", "{name}.log"):
-    p = {REMOTE!r} + "/logs/" + f
-    if os.path.exists(p): os.remove(p)
-p = subprocess.Popen(["bash", "-c", {script!r}], start_new_session=True, stdin=subprocess.DEVNULL,
+d = {REMOTE!r} + "/logs/"
+os.makedirs(d, exist_ok=True)
+tok = d + "{name}.token"
+if not (os.path.exists(tok) and open(tok).read() == "{token}"):
+    for f in ("{name}.exit", "{name}.log"):
+        if os.path.exists(d + f): os.remove(d + f)
+    subprocess.Popen(["bash", "-c", {script!r}], start_new_session=True, stdin=subprocess.DEVNULL,
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-print("@@ " + json.dumps({{"pid": p.pid}}))
-""", tries=1)
+    open(tok, "w").write("{token}")
+print("@@ {{}}")
+""", tries=3)
 
 
 def job_state(name: str, log_tail: int = 0) -> dict:
@@ -333,8 +351,11 @@ print("@@ " + json.dumps({{"setup": os.path.exists("{REMOTE}/logs/setup.exit"),
         colab("upload", "-s", SESSION, str(tar), f"{REMOTE}/code.tar.gz")
         tar.unlink()
         tar.parent.rmdir()
-        rpy(f"import subprocess, json; subprocess.run(['tar', '-xzf', 'code.tar.gz'], cwd='{REMOTE}', check=True); "
-            f"import os; os.chmod('{REMOTE}/.env', 0o600); os.remove('{REMOTE}/code.tar.gz'); print('@@ {{}}')")
+        rpy(f"import subprocess, json, os\n"      # a retry finds the archive already unpacked and removed
+            f"if os.path.exists('{REMOTE}/code.tar.gz'):\n"
+            f"    subprocess.run(['tar', '-xzf', 'code.tar.gz'], cwd='{REMOTE}', check=True)\n"
+            f"    os.chmod('{REMOTE}/.env', 0o600); os.remove('{REMOTE}/code.tar.gz')\n"
+            f"print('@@ {{}}')")
         if not state["setup"]:
             # same check as the notebook: skip pip when every pinned version is already there
             start_job("setup", "pip install --dry-run --no-deps -r requirements-gpu.txt 2>&1 | grep -q 'Would install' "

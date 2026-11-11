@@ -51,14 +51,21 @@ def test_redact_hides_proxy_tokens():
     assert "eyJh" not in out and out.endswith("colab-runtime-proxy-token=<redacted>")
 
 
-def test_every_snippet_sent_to_the_runtime_compiles(monkeypatch):
+def test_every_snippet_sent_to_the_runtime_compiles(monkeypatch, tmp_path):
     sent = []
     monkeypatch.setattr(cli_run, "colab", lambda *a, **k: sent.append(k.get("stdin")) or '@@ {"pid": 1, "exit": null, '
                         '"log": "", "done": [], "sha": "x", "size": 0}')
     cli_run.start_job("job", "python pipeline/process.py")
     cli_run.job_state("setup", log_tail=300)
     cli_run.job_state("job")
-    assert len(sent) == 3
+    f = tmp_path / "a.opus"
+    f.write_bytes(b"abc")
+    try:
+        cli_run.upload(f, "/content/vod/data/audio/a.opus")
+    except RuntimeError:
+        pass                                    # the fake runtime's sha never matches
+    sent = [c for c in sent if c is not None]
+    assert len(sent) == 4
     for code in sent:
         compile(code, "<runtime>", "exec")
 
