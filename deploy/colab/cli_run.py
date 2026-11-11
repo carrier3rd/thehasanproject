@@ -363,7 +363,10 @@ print("@@ " + json.dumps({{"setup": os.path.exists("{REMOTE}/logs/setup.exit"),
         # follow the job's own VOD list, not the laptop's next batch
         remote = rpy(f"import json, glob, os; print('@@ ' + json.dumps(sorted(os.path.basename(p)[:-5] "
                      f"for p in glob.glob('{REMOTE}/data/audio/*.opus'))))")
-        ids = [v for v in remote if (ROOT / f"data/audio/{v}.opus").exists()]
+        # the runtime keeps earlier batches' audio: keep this job's VODs (in its log) and any not yet on the laptop
+        in_log = set(re.findall(r"VOD \d+/\d+: (\S+)", job_state("job")["log"]))
+        ids = [v for v in remote if (ROOT / f"data/audio/{v}.opus").exists()
+               and (v in in_log or not (ROOT / f"data/transcripts/{v}.json").exists())]
         hours = {v: audio_hours(v) for v in ids}
         say(f"{label}: found the runtime still transcribing {len(ids)} VOD(s); following it")
     else:
