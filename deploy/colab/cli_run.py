@@ -204,17 +204,19 @@ print("@@ " + json.dumps({{"sha": got, "size": os.path.getsize(out)}}))
 
 def rpy(code: str, timeout: int = 120, tries: int = 3) -> dict:
     """Run Python in the session's kernel; the code must print one line '@@ <json>'.
-    Retried on a hang (a fresh runtime once hung 5 min on its first exec) or a CLI crash:
-    pass tries=1 for code that must not repeat."""
+    Retried on a hang (a fresh runtime once hung 5 min on its first exec) or any CLI failure: the laptop's CLI has
+    segfaulted and once failed to import its own charset_normalizer, both while the runtime was fine. Every snippet
+    sent must therefore be safe to run twice."""
     compile(code, "<runtime code>", "exec")   # fail here, with a traceback, rather than as a silent remote error
     for attempt in range(1, tries + 1):
         try:
             out = colab("exec", "-s", SESSION, stdin=code, timeout=timeout, both=True)
             break
-        except (subprocess.TimeoutExpired, CliCrashed) as e:
+        except (subprocess.TimeoutExpired, RuntimeError) as e:   # every call is safe to repeat
             if attempt == tries:
                 raise RuntimeError(f"the runtime did not answer ({timeout} s limit), {tries} times: {e}") from e
-            why = "colab CLI crashed" if isinstance(e, CliCrashed) else "runtime slow to answer"
+            why = ("colab CLI crashed" if isinstance(e, CliCrashed) else "runtime slow to answer"
+                   if isinstance(e, subprocess.TimeoutExpired) else f"colab CLI failed ({str(e)[-120:].strip()})")
             print(time.strftime("%H:%M:%S"), f"{why}; retry {attempt}/{tries - 1}", flush=True)
             time.sleep(20)
     for line in reversed(out.splitlines()):
@@ -329,6 +331,22 @@ def merge_logs() -> None:
         tmp.unlink()
 
 
+def stop_runtime(tries: int = 5) -> bool:
+    """Stop the session and check it is gone; a stop once failed silently because the CLI itself crashed."""
+    for attempt in range(tries):
+        try:
+            subprocess.run([CLI, "--auth=oauth2", "stop", "-s", SESSION], input="", capture_output=True, text=True,
+                           timeout=300)
+            r = subprocess.run([CLI, "--auth=oauth2", "sessions"], input="", capture_output=True, text=True,
+                               timeout=120)
+            if r.returncode == 0 and f"[{SESSION}]" not in r.stdout:   # positively gone, not a crashed check
+                return True
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+        time.sleep(20)
+    return False
+
+
 def run_batch(ids: list[str], gpu: str, label: str) -> int:
     hours = {v: audio_hours(v) for v in ids}
     resume = session_alive()
@@ -342,7 +360,12 @@ print("@@ " + json.dumps({{"setup": os.path.exists("{REMOTE}/logs/setup.exit"),
   "job": os.path.exists("{REMOTE}/logs/job.log"), "job_done": os.path.exists("{REMOTE}/logs/job.exit")}}))
 """)
     if resume and state["job"] and not state["job_done"]:
-        say(f"{label}: found the runtime still transcribing; following it")
+        # follow the job's own VOD list, not the laptop's next batch
+        remote = rpy(f"import json, glob, os; print('@@ ' + json.dumps(sorted(os.path.basename(p)[:-5] "
+                     f"for p in glob.glob('{REMOTE}/data/audio/*.opus'))))")
+        ids = [v for v in remote if (ROOT / f"data/audio/{v}.opus").exists()]
+        hours = {v: audio_hours(v) for v in ids}
+        say(f"{label}: found the runtime still transcribing {len(ids)} VOD(s); following it")
     else:
         say(f"{label}: sending code, config, voiceprint")
         tar = code_bundle()
@@ -422,9 +445,9 @@ def main() -> int:
     ap.add_argument("--stop", action="store_true", help="stop the runtime and exit")
     a = ap.parse_args()
     if a.stop:
-        colab("stop", "-s", SESSION, check=False)
-        say("runtime stopped")
-        return 0
+        ok = stop_runtime()
+        say("runtime stopped" if ok else "✖ could not stop the runtime")
+        return 0 if ok else 1
     status, n = 0, 0
     threading.Thread(target=_heartbeat, daemon=True).start()
     try:
@@ -446,9 +469,8 @@ def main() -> int:
         status = 1
     finally:
         if not a.keep:
-            subprocess.run([CLI, "--auth=oauth2", "stop", "-s", SESSION], input="", capture_output=True, text=True,
-                           timeout=300)
-            print("runtime stopped", flush=True)
+            print("runtime stopped" if stop_runtime() else "✖ COULD NOT STOP THE RUNTIME: run cli_run.py --stop",
+                  flush=True)
     return status
 
 
