@@ -141,9 +141,15 @@ def measured_rtf() -> float:
 
 # ---------------------------------------------------------------- Colab CLI wrappers
 
+class CliCrashed(RuntimeError):
+    """The colab CLI process itself died on a signal (it once segfaulted, -11, mid-batch): the runtime is fine."""
+
+
 def colab(*args: str, check: bool = True, timeout: int = 900, stdin: str | None = None, both: bool = False) -> str:
     cmd = [CLI, "--auth=oauth2", *args]
     r = subprocess.run(cmd, input=stdin if stdin is not None else "", capture_output=True, text=True, timeout=timeout)
+    if check and r.returncode < 0:
+        raise CliCrashed(f"colab {' '.join(args[:2])} crashed (signal {-r.returncode}): {redact((r.stderr or r.stdout)[-800:])}")
     if check and r.returncode:
         raise RuntimeError(f"colab {' '.join(args[:2])} failed ({r.returncode}): {redact((r.stderr or r.stdout)[-800:])}")
     return r.stdout + ("\n" + r.stderr if both and r.stderr else "")
@@ -185,16 +191,18 @@ print("@@ " + json.dumps({{"sha": h.hexdigest(), "size": os.path.getsize(out)}})
 
 def rpy(code: str, timeout: int = 120, tries: int = 3) -> dict:
     """Run Python in the session's kernel; the code must print one line '@@ <json>'.
-    Retried on a hang (a fresh runtime once hung 5 min on its first exec): pass tries=1 for code that must not repeat."""
+    Retried on a hang (a fresh runtime once hung 5 min on its first exec) or a CLI crash:
+    pass tries=1 for code that must not repeat."""
     compile(code, "<runtime code>", "exec")   # fail here, with a traceback, rather than as a silent remote error
     for attempt in range(1, tries + 1):
         try:
             out = colab("exec", "-s", SESSION, stdin=code, timeout=timeout, both=True)
             break
-        except subprocess.TimeoutExpired:
+        except (subprocess.TimeoutExpired, CliCrashed) as e:
             if attempt == tries:
-                raise RuntimeError(f"the runtime did not answer within {timeout} s, {tries} times")
-            print(time.strftime("%H:%M:%S"), f"runtime slow to answer; retry {attempt}/{tries - 1}", flush=True)
+                raise RuntimeError(f"the runtime did not answer ({timeout} s limit), {tries} times: {e}") from e
+            why = "colab CLI crashed" if isinstance(e, CliCrashed) else "runtime slow to answer"
+            print(time.strftime("%H:%M:%S"), f"{why}; retry {attempt}/{tries - 1}", flush=True)
             time.sleep(20)
     for line in reversed(out.splitlines()):
         if line.startswith("@@ "):
@@ -225,7 +233,7 @@ print("@@ " + json.dumps({{"pid": p.pid}}))
 
 
 def job_state(name: str, log_tail: int = 0) -> dict:
-    return rpy(f"""
+    return rpy(tries=5, code=f"""
 import json, os, glob
 d = {REMOTE!r} + "/logs/"
 ex = open(d + "{name}.exit").read().strip() if os.path.exists(d + "{name}.exit") else None
