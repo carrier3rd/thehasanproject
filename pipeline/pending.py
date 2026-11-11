@@ -7,10 +7,16 @@ from common import P, load_config
 from process import in_shard, out_dir
 
 
+def downloading(audio_dir, vid: str) -> bool:
+    """download.py is still at work on this VOD: the .opus grows while its .mp4 (or yt-dlp's .part/.ytdl) exists."""
+    return any(audio_dir.glob(f"{vid}.mp4")) or any(audio_dir.glob(f"{vid}*.part")) or any(audio_dir.glob(f"{vid}*.ytdl"))
+
+
 def pending(cfg: dict, model: str | None = None, only: str | None = None, shard: str | None = None) -> list[str]:
-    dest = out_dir(cfg, model)
-    return [p.stem for p in sorted(P(cfg, "audio").glob(f"*.{cfg['audio_format']}"))
-            if not (dest / f"{p.stem}.json").exists() and in_shard(p.stem, shard) and (not only or p.stem == only)]
+    dest, audio = out_dir(cfg, model), P(cfg, "audio")
+    return [p.stem for p in sorted(audio.glob(f"*.{cfg['audio_format']}"))
+            if not (dest / f"{p.stem}.json").exists() and in_shard(p.stem, shard) and (not only or p.stem == only)
+            and not downloading(audio, p.stem)]
 
 
 def main():

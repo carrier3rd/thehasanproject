@@ -406,6 +406,10 @@ def test_pending_lists_untranscribed_audio_and_muted(project):
     assert pending.pending(cfg, model="large-v3-turbo") == ["v1001", "vNEW"]
     out = run(root, "pending.py", "--model", "large-v3-turbo", "--batch", "1").stdout.split()
     assert out == ["data/audio/v1001.opus", "data/muted/v1001.json"]
+    for leftover in ("vNEW.mp4", "vNEW.f160.mp4.part", "vNEW.mp4.ytdl"):   # still downloading/converting: not ready
+        (P(cfg, "audio") / leftover).write_bytes(b"x")
+        assert pending.pending(cfg) == []
+        (P(cfg, "audio") / leftover).unlink()
     for f in ("v1001.opus", "vNEW.opus"):
         (P(cfg, "audio") / f).unlink()
 
