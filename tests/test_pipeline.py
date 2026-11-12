@@ -508,3 +508,42 @@ def test_qa_label_and_score(project):
     assert f"{len(rows) - 1}/{len(rows)}" in out and "wrong:" in out and "transcript ok 100%" in out
     assert qa.speaker_correct("other", "Unknown_3") and not qa.speaker_correct("other", "Hasan")
     assert qa.speaker_correct("Hasan", "hasan") and not qa.speaker_correct("Hasan", "Unknown_1")
+
+
+# ---------- older streams: precomputed start + anchors (deploy/pc/older_export.py) ----------
+
+def test_older_stream_meta_anchors_and_gzip_chat(tmp_path):
+    import gzip
+    from conftest import build_project, transcript, seg
+    from common import P
+    cfg = build_project(tmp_path)
+    audio, tr, chat = P(cfg, "audio"), P(cfg, "transcripts"), P(cfg, "chat")
+    vid, s0 = "ytOLDER0001", 1700000000
+    (audio / f"{vid}.info.json").write_text(json.dumps({"title": "HasanAbi November 14, 2023", "upload_date": "20231114",
+                                                        "duration": 400}))
+    (audio / f"{vid}.meta.json").write_text(json.dumps(
+        {"platform": "youtube", "embed_type": "youtube", "embed_id": vid, "stream_start_unix": s0,
+         "stream_start_source": "caption_sync", "chat_anchors": [[0.0, 0.5, 0.9], [200.0, 100.5, 0.9]]}))
+    (tr / f"{vid}.json").write_text(json.dumps(transcript(vid, [
+        seg(1, 5, "Auto-captions", "good morning chat", score=None), seg(250, 255, "Auto-captions", "back again", score=None)])))
+    rows = [{"t": 10.5, "user_id": "7", "author": "erin", "text": "hi", "badges": "subscriber/1", "subscriber": 1, "kind": "msg"},
+            {"t": 60.5, "user_id": "8", "author": "frank", "text": "removed words", "badges": "", "kind": "msg", "deleted": 1},
+            {"t": 61.0, "user_id": "8", "author": "frank", "text": "timeout 60s", "kind": "mod_action"},
+            {"t": 250.0, "user_id": "7", "author": "erin", "text": "during the cut", "badges": "", "kind": "msg"},
+            {"t": 320.5, "user_id": "7", "author": "erin", "text": "after the cut", "badges": "", "kind": "msg"}]
+    with gzip.open(chat / f"{vid}.jsonl.gz", "wt") as f:
+        f.writelines(json.dumps(r) + "\n" for r in rows)
+    run(tmp_path, "align_chat.py", "--only", vid)
+    run(tmp_path, "build_db.py", "--only", vid)
+    run(tmp_path, "publish.py")
+    arc, pub = sqlite3.connect(tmp_path / "archive" / "archive.db"), sqlite3.connect(tmp_path / "public.db")
+    assert arc.execute("SELECT stream_start_unix, stream_start_source, chat_source FROM videos WHERE id=?",
+                       (vid,)).fetchone() == (s0, "caption_sync", "replay")
+    assert arc.execute("SELECT transcript_t, offset, method FROM chat_anchors WHERE video_id=? ORDER BY 1",
+                       (vid,)).fetchall() == [(0.0, 0.5, "caption_sync"), (200.0, 100.5, "caption_sync")]
+    assert arc.execute("SELECT t, deleted, kind, subscriber FROM chat WHERE video_id=? ORDER BY t", (vid,)).fetchall()[:3] == [
+        (10.5, 0, "msg", 1), (60.5, 1, "msg", 0), (61.0, 0, "mod_action", 0)]
+    got = pub.execute("SELECT t, text FROM chat WHERE video_id=? ORDER BY t", (vid,)).fetchall()
+    assert got == [(10.0, "hi"), (60.0, cfg["deleted_placeholder"]), (60.5, "timeout 60s"), (220.0, "after the cut")]
+    assert {r[0] for r in pub.execute("SELECT speaker FROM turns WHERE video_id=?", (vid,))} == {"Auto-captions"}
+    assert pub.execute("SELECT embed_type, embed_id FROM videos WHERE id=?", (vid,)).fetchone() == ("youtube", vid)
