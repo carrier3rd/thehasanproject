@@ -547,3 +547,41 @@ def test_older_stream_meta_anchors_and_gzip_chat(tmp_path):
     assert got == [(10.0, "hi"), (60.0, cfg["deleted_placeholder"]), (60.5, "timeout 60s"), (220.0, "after the cut")]
     assert {r[0] for r in pub.execute("SELECT speaker FROM turns WHERE video_id=?", (vid,))} == {"Auto-captions"}
     assert pub.execute("SELECT embed_type, embed_id FROM videos WHERE id=?", (vid,)).fetchone() == ("youtube", vid)
+
+def test_whisper_filler_is_dropped_only_when_isolated():
+    from common import hallucinated, spoken
+    cfg = {"hallucination_isolation_seconds": 8,
+           "hallucination_phrases": ["you", "thank you", "so", "thanks for watching", "music"]}
+    s = lambda a, b, t: {"start": a, "end": b, "text": t}
+    segs = [s(17, 18, " you"), s(101, 103, "Thank you."), s(221, 222, "so"), s(359, 360, "[Music]"),
+            s(361, 362, "..."),                                                 # pre-stream screen: all filler
+            s(600, 605, "Welcome back everybody."), s(606, 607, "Thank you."),  # real thanks inside speech
+            s(608, 615, "Let's get into the news."),
+            s(900, 901, "Thanks for watching!"),                                # filler after the stream ends
+            s(1200, 1206, "So, you know what I mean?")]                         # contains stock words, not stock
+    assert hallucinated(segs, cfg) == {0, 1, 2, 3, 4, 8}
+    assert [x["text"] for x in spoken(segs, cfg)] == ["Welcome back everybody.", "Thank you.",
+                                                      "Let's get into the news.", "So, you know what I mean?"]
+    assert hallucinated([s(0, 1, "you")], cfg) == {0}
+    assert hallucinated([s(0, 1, "you"), s(5, 9, "real words here")], cfg) == set()   # 4 s from speech
+
+
+def test_build_db_reloads_turns_but_not_chat_when_the_filter_changes(project, tmp_path):
+    import shutil, sqlite3, yaml
+    root, _ = project
+    alt = tmp_path / "alt"
+    shutil.copytree(root, alt)
+    out = run(alt, "build_db.py").stdout
+    assert "reloaded 0 VOD(s)" in out
+    c = yaml.safe_load((alt / "config.yaml").read_text())
+    c["hallucination_phrases"] = c["hallucination_phrases"] + ["okay chat that was the glacier video"]
+    (alt / "config.yaml").write_text(yaml.safe_dump(c))
+    con = sqlite3.connect(alt / "archive" / "archive.db")
+    chat_ids = [r[0] for r in con.execute("SELECT id FROM chat ORDER BY id")]
+    out = run(alt, "build_db.py").stdout
+    assert "reloaded 2 VOD(s)" in out
+    texts = [r[0] for r in con.execute("SELECT text FROM turns WHERE video_id='v1001'")]
+    assert not any("glacier video" in t for t in texts) and any("housing" in t for t in texts)
+    assert [r[0] for r in con.execute("SELECT id FROM chat ORDER BY id")] == chat_ids     # chat not reloaded
+    fts = lambda q: con.execute("SELECT COUNT(*) FROM turns_fts WHERE turns_fts MATCH ?", (q,)).fetchone()[0]
+    assert fts("glacier") == 0 and fts("glaciers") == 2          # search index follows the filtered turns

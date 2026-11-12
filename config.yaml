@@ -29,6 +29,13 @@ speaker_match_threshold: 0.55     # recalibrated at the pilot
 unknown_cluster_threshold: 0.60   # cosine for merging unknown speakers across chunks
 low_confidence_margin: 0.05       # score within this of the threshold => "?" on the public site
 hallucination_repeat_n: 3
+# Whisper invents stock phrases over music and silence (pre-stream screens, breaks). A segment whose whole text is one
+# of these, with no other speech within hallucination_isolation_seconds, is left out of the database and search.
+# The transcript JSON keeps it, so changing this list and re-running build_db.py brings lines back.
+hallucination_isolation_seconds: 8
+hallucination_phrases: [you, thank you, thank you so much, thank you very much, thanks, thanks for watching,
+  thank you for watching, thanks for watching bye, thank you for watching bye, please subscribe, subscribe,
+  like and subscribe, bye, bye bye, so, okay, oh, ah, uh, um, hmm, mm, yeah, the end, music, applause, laughter]
 mute_min_seconds: 20              # digital silence at least this long counts as muted
 mute_noise_db: -70
 media_segment_min_seconds: 4      # unknown-speaker segment at least this long => is_media
