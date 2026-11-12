@@ -102,32 +102,97 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
                  if admin else "t.low_confidence")
     video_filter = " AND v.transcript_hash IS NOT NULL" if admin else ""
 
-    @app.get("/api/search")
-    def search(q: str = "", speaker: str = "", from_: str = Query("", alias="from"), to: str = "",
-               include_media: int = 0, limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
-        if not q.strip():
-            return {"hits": []}
+    def date_filters(from_: str, to: str, video: str) -> tuple[str, list]:
         where, params = "", []
-        if speaker:
-            where += " AND t.speaker = ?"
-            params.append(speaker)
         if _date(from_):
             where += " AND v.upload_date >= ?"
             params.append(_date(from_))
         if _date(to):
             where += " AND v.upload_date <= ?"
             params.append(_date(to))
+        if video:
+            where += " AND v.id = ?"
+            params.append(video)
+        return where, params
+
+    def turn_filters(speaker: str, from_: str, to: str, include_media: int, video: str) -> tuple[str, list]:
+        where, params = date_filters(from_, to, video)
+        if speaker:
+            where += " AND t.speaker = ?"
+            params.append(speaker)
         if not include_media:
             where += " AND t.is_media = 0"
+        return where, params
+
+    def chat_filters(author: str, user_id: str, from_: str, to: str, first_msg: int, video: str) -> tuple[str, list]:
+        where, params = date_filters(from_, to, video)
+        if author.strip():
+            where += " AND c.author = ? COLLATE NOCASE"
+            params.append(author.strip().lstrip("@"))
+        if user_id.strip():
+            where += " AND c.user_id = ?"
+            params.append(user_id.strip())
+        if first_msg:
+            where += " AND c.first_msg = 1"
+        return where, params
+
+    SORTS = {"newest": "v.upload_date DESC, v.id DESC, {t}", "oldest": "v.upload_date, v.id, {t}"}
+
+    @app.get("/api/search")
+    def search(q: str = "", speaker: str = "", from_: str = Query("", alias="from"), to: str = "",
+               include_media: int = 0, video: str = "", sort: str = "relevance",
+               limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
+        if not q.strip():
+            return {"hits": []}
+        where, params = turn_filters(speaker, from_, to, include_media, video)
+        order = SORTS[sort].format(t="t.start") if sort in SORTS else "bm25(turns_fts)"
         con = db()
         try:
             got = fts_execute(con, f"""
                 SELECT t.id, t.video_id, t.start, t.speaker, t.is_media, {turn_cols},
                        snippet(turns_fts, 0, '[[', ']]', ' … ', 32) AS snippet, v.title, v.upload_date
                 FROM turns_fts JOIN turns t ON t.id = turns_fts.rowid JOIN videos v ON v.id = t.video_id
-                WHERE turns_fts MATCH ? {where} ORDER BY bm25(turns_fts) LIMIT ? OFFSET ?""",
+                WHERE turns_fts MATCH ? {where} ORDER BY {order} LIMIT ? OFFSET ?""",
                               q, (*params, limit, offset))
             return {"hits": rows(got)}
+        finally:
+            con.close()
+
+    @app.get("/api/search/timeline")
+    def search_timeline(q: str = "", speaker: str = "", author: str = "", user_id: str = "",
+                        from_: str = Query("", alias="from"), to: str = "", include_media: int = 0, first_msg: int = 0):
+        """Matches per stream, on stream (turns) and in chat, for the strip chart and the tab counts.
+        Every stream in the date range is listed, with zeros, so gaps show on the chart."""
+        if not admin:
+            user_id = ""
+        if not (q.strip() or author.strip() or user_id.strip()):
+            return {"videos": [], "totals": {"stream": 0, "chat": 0}}
+        con = db()
+        try:
+            dwhere, dparams = date_filters(from_, to, "")
+            per = {r["id"]: {"video_id": r["id"], "title": r["title"], "upload_date": r["upload_date"], "stream": 0, "chat": 0}
+                   for r in con.execute(f"SELECT v.id, v.title, v.upload_date FROM videos v WHERE 1=1{video_filter}{dwhere} "
+                                        "ORDER BY v.upload_date, v.id", dparams)}
+            if q.strip() and not (author.strip() or user_id.strip()):
+                where, params = turn_filters(speaker, from_, to, include_media, "")
+                for vid, n in fts_execute(con, f"""
+                        SELECT t.video_id, COUNT(*) FROM turns_fts JOIN turns t ON t.id = turns_fts.rowid
+                        JOIN videos v ON v.id = t.video_id WHERE turns_fts MATCH ? {where} GROUP BY t.video_id""", q, tuple(params)):
+                    if vid in per:
+                        per[vid]["stream"] = n
+            where, params = chat_filters(author, user_id, from_, to, first_msg, "")
+            if q.strip():
+                got = fts_execute(con, f"""
+                    SELECT c.video_id, COUNT(*) FROM chat_fts JOIN chat c ON c.id = chat_fts.rowid
+                    JOIN videos v ON v.id = c.video_id WHERE chat_fts MATCH ? {where} GROUP BY c.video_id""", q, tuple(params))
+            else:
+                got = con.execute(f"SELECT c.video_id, COUNT(*) FROM chat c JOIN videos v ON v.id = c.video_id "
+                                  f"WHERE 1=1 {where} GROUP BY c.video_id", params).fetchall()
+            for vid, n in got:
+                if vid in per:
+                    per[vid]["chat"] = n
+            out = list(per.values())
+            return {"videos": out, "totals": {"stream": sum(r["stream"] for r in out), "chat": sum(r["chat"] for r in out)}}
         finally:
             con.close()
 
@@ -239,27 +304,16 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
 
     @app.get("/api/chat/search")
     def chat_search(q: str = "", author: str = "", user_id: str = "", from_: str = Query("", alias="from"), to: str = "",
-                    first_msg: int = 0, limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
+                    first_msg: int = 0, video: str = "", sort: str = "",
+                    limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
         if not admin:
             user_id = ""
         if not (q.strip() or author.strip() or user_id.strip()):
             return {"hits": []}
-        where, params = "", []
-        if author.strip():
-            where += " AND c.author = ? COLLATE NOCASE"
-            params.append(author.strip().lstrip("@"))
-        if user_id.strip():
-            where += " AND c.user_id = ?"
-            params.append(user_id.strip())
-        if _date(from_):
-            where += " AND v.upload_date >= ?"
-            params.append(_date(from_))
-        if _date(to):
-            where += " AND v.upload_date <= ?"
-            params.append(_date(to))
-        if first_msg:
-            where += " AND c.first_msg = 1"
+        where, params = chat_filters(author, user_id, from_, to, first_msg, video)
         extra = ", c.user_id, c.source" if admin else ""
+        # text search ranks by relevance unless a time order is asked for; author-only lists run newest first
+        order = SORTS[sort].format(t="c.t") if sort in SORTS else ("bm25(chat_fts)" if q.strip() else SORTS["newest"].format(t="c.t"))
         con = db()
         try:
             if q.strip():
@@ -267,14 +321,14 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
                     SELECT c.id, c.video_id, c.t, c.author, c.badges, c.first_msg, c.deleted, c.kind{extra},
                            snippet(chat_fts, 0, '[[', ']]', ' … ', 32) AS snippet, v.title, v.upload_date
                     FROM chat_fts JOIN chat c ON c.id = chat_fts.rowid JOIN videos v ON v.id = c.video_id
-                    WHERE chat_fts MATCH ? {where} ORDER BY bm25(chat_fts) LIMIT ? OFFSET ?""",
+                    WHERE chat_fts MATCH ? {where} ORDER BY {order} LIMIT ? OFFSET ?""",
                                   q, (*params, limit, offset))
             else:
                 got = con.execute(f"""
                     SELECT c.id, c.video_id, c.t, c.author, c.badges, c.first_msg, c.deleted, c.kind{extra},
                            c.text AS snippet, v.title, v.upload_date
                     FROM chat c JOIN videos v ON v.id = c.video_id
-                    WHERE 1=1 {where} ORDER BY v.upload_date DESC, c.video_id, c.t LIMIT ? OFFSET ?""",
+                    WHERE 1=1 {where} ORDER BY {order} LIMIT ? OFFSET ?""",
                                   (*params, limit, offset)).fetchall()
             out = rows(got)
             if admin:   # archive chat is on the chat clock; report transcript-clock time
