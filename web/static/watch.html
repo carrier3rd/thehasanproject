@@ -1,7 +1,11 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Watch · VOD archive</title><link rel="stylesheet" href="style.css"></head>
-<body><main class="watch">
+<body><main class="watch" data-pane="transcript">
+  <nav id="panes" class="tabs" aria-label="Show">
+    <button type="button" data-pane="transcript" class="on">Transcript</button>
+    <button type="button" data-pane="chat">Chat<span class="n" id="chatrate"></span></button>
+  </nav>
   <div class="col">
     <div id="player"></div>
     <div id="slider" hidden>
@@ -9,7 +13,7 @@
       <input type="range" id="range" min="0" value="0" step="1" aria-label="Position">
       <div class="bar"><button id="play">Play</button><span id="clock" class="num"></span></div>
     </div>
-    <div class="bar">
+    <div class="bar info">
       <h1 id="title"></h1>
       <label><input type="checkbox" id="hidemedia"> hide media</label>
       <button id="resume" hidden>Resume auto-scroll</button>
@@ -174,6 +178,7 @@ function showTerms(t) {
   const m = minutes.find(m => m.minute === Math.floor(t / 60));
   $('#terms').textContent = m ? `${m.msgs} msgs/min · ${m.distinct_chatters} chatters` +
     (m.top_terms && m.top_terms.length ? ' · ' + m.top_terms.map(x => x[0]).join('  ') : '') : '';
+  $('#chatrate').textContent = m ? `${m.msgs}/min` : '';
 }
 
 // ---------- wiring ----------
@@ -185,6 +190,17 @@ function seek(t) {
   currentTurn = -2;
   tick();
 }
+// ---------- phone layout: one pane at a time under the player ----------
+function setPane(p) {
+  const main = $('main.watch');
+  main.dataset.pane = p;
+  for (const b of document.querySelectorAll('#panes button')) b.classList.toggle('on', b.dataset.pane === p);
+  try { localStorage.setItem('watch.pane', p); } catch (e) { /* storage unavailable */ }
+  lastChatKey = '';      // redraw chat and scroll it to the newest message
+  currentTurn = -2;      // re-highlight, which scrolls the transcript back to the current turn
+  tick();
+}
+
 function tick() {
   const t = player.getTime();
   if (typeof t === 'number' && isFinite(t)) now = t;
@@ -210,6 +226,8 @@ function tick() {
     minutes = (await api(`/api/videos/${encodeURIComponent(VID)}/chat_stats`)).minutes;
     maxMsgs = Math.max(1, ...minutes.map(m => m.msgs));
   } catch (e) { /* no chat stats */ }
+  for (const b of document.querySelectorAll('#panes button')) b.addEventListener('click', () => setPane(b.dataset.pane));
+  try { if (localStorage.getItem('watch.pane') === 'chat') setPane('chat'); } catch (e) { /* default pane */ }
   $('#hidemedia').addEventListener('change', e => $('#transcript').classList.toggle('hide-media', e.target.checked));
   $('#resume').addEventListener('click', () => { autoScroll = true; $('#resume').hidden = true; currentTurn = -2; tick(); });
   $('#copy').addEventListener('click', async () => {
