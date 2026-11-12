@@ -13,7 +13,7 @@ from collections import defaultdict
 import numpy as np
 
 from build_db import media_flags, merge_turns
-from common import P, connect_archive, fmt_ts, load_config, make_dirs, read_tsv, site_url, watch_link
+from common import P, connect_archive, fmt_ts, load_config, make_dirs, read_tsv, site_url, watch_link, spoken
 from rhetoric import wilson
 
 LABEL_FIELDS = ["model", "video_id", "start", "end", "link", "predicted_speaker", "text", "true_speaker", "transcript_ok"]
@@ -63,7 +63,7 @@ def report(cfg: dict) -> None:
         named, unknown = [], []
         for jp in files:
             doc = json.loads(jp.read_text())
-            segs = doc["segments"]
+            segs = spoken(doc["segments"], cfg)
             for key, score in doc["speaker_scores"].items():
                 if score is not None:
                     (unknown if doc["speaker_map"][key].startswith("Unknown_") else named).append(score)
@@ -94,7 +94,7 @@ def write_sheet(cfg: dict, n: int, force: bool) -> None:
     for model, files in model_dirs(cfg).items():
         turns = []
         for jp in files:
-            segs = json.loads(jp.read_text())["segments"]
+            segs = spoken(json.loads(jp.read_text())["segments"], cfg)
             for t in merge_turns(segs, media_flags(segs, cfg), cfg["turn_merge_gap_seconds"], cfg.get("turn_max_seconds", 1e9)):
                 if len(t["text"].split()) >= 4:
                     turns.append((jp.stem, t))

@@ -8,7 +8,7 @@ import json
 import time
 from collections import defaultdict
 
-from common import Anchors, P, connect_archive, get_logger, load_config, log_failure, make_dirs
+from common import Anchors, P, connect_archive, get_logger, load_config, log_failure, make_dirs, spoken
 
 log = get_logger("build_db")
 
@@ -49,11 +49,16 @@ def merge_turns(segments: list[dict], flags: list[int], gap: float, max_len: flo
     return turns
 
 
+def filter_settings(cfg: dict) -> dict:
+    return {"filler": 1, "phrases": sorted(cfg.get("hallucination_phrases") or []),
+            "gap": cfg.get("hallucination_isolation_seconds", 8)}
+
+
 def load_turns(con, cfg: dict, vid: str, doc: dict) -> int:
     con.execute("INSERT INTO turns_fts(turns_fts, rowid, text, speaker) "
                 "SELECT 'delete', id, text, speaker FROM turns WHERE video_id=?", (vid,))
     con.execute("DELETE FROM turns WHERE video_id=?", (vid,))
-    segs = doc["segments"]
+    segs = spoken(doc["segments"], cfg)
     turns = merge_turns(segs, media_flags(segs, cfg), cfg["turn_merge_gap_seconds"], cfg.get("turn_max_seconds", float("inf")))
     for t in turns:
         cur = con.execute("INSERT INTO turns(video_id, start, end, speaker, speaker_raw, speaker_score, is_media, text) "
@@ -118,7 +123,8 @@ def load_chat(con, cfg: dict, vid: str, source: str, arg) -> int:
 def build_one(con, cfg: dict, jp) -> tuple[bool, bool]:
     vid = jp.stem
     raw = jp.read_bytes()
-    digest = hashlib.sha1(raw).hexdigest()
+    # the filler filter's settings are part of the hash, so changing them reloads every VOD's turns (not its chat)
+    digest = hashlib.sha1(raw + json.dumps(filter_settings(cfg), sort_keys=True).encode()).hexdigest()
     audio = P(cfg, "audio")
     ip, mp = audio / f"{vid}.info.json", audio / f"{vid}.meta.json"
     info = json.loads(ip.read_text()) if ip.exists() else {}

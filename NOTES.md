@@ -108,6 +108,13 @@ Run `python -m pytest` from the repo root (27 tests, no GPU or network needed).
   names accounts (owner's choice; never commit or publish it). Tested with a fake Batches client
   (`tests/test_rhetoric.py`); never run against the real API from the cloud session.
 
+- **Whisper filler lines are filtered at load time** (`hallucinated()` in `common.py`, settings
+  `hallucination_phrases` / `hallucination_isolation_seconds`). A segment whose whole text is a stock phrase ("you",
+  "Thank you.", "so", "[Music]", ...) or has no letters, with no real speech within 8 s, is left out of `turns`, search,
+  QA and the rhetoric study. The transcript JSON is untouched. The filter settings are part of `transcript_hash`, so
+  changing them makes `build_db.py` reload every VOD's turns (not its chat). A real "Thank you." said with 8 s of
+  silence on both sides would also be dropped; lower the gap if that shows up.
+
 ## Library versions checked
 Signatures were read from the wheels, not run: whisperx 3.8.6 (`whisperx.diarize.DiarizationPipeline(token=...)`,
 `__call__(..., return_embeddings=True)` returning `(df, {speaker: vector})`), pyannote.audio 4.0.7

@@ -222,6 +222,40 @@ def parse_ts(text: str) -> float:
     return out
 
 
+_PHRASE_NORM = re.compile(r"[^a-z0-9 ]")
+
+
+def phrase_key(text: str) -> str:
+    """Lowercase, punctuation and brackets removed, spaces collapsed: '[Music]' -> 'music', 'Thank you.' -> 'thank you'."""
+    return " ".join(_PHRASE_NORM.sub(" ", (text or "").lower()).split())
+
+
+def hallucinated(segments: list[dict], cfg: dict) -> set[int]:
+    """Indexes of segments that are Whisper filler over music/silence: the whole text is a stock phrase (or has no
+    letters or digits) and no other speech is within `hallucination_isolation_seconds`. Neighbouring filler doesn't
+    count as speech, so a run of 'you' / 'Thank you.' / 'so' in a pre-stream screen goes as a whole."""
+    phrases = {phrase_key(p) for p in cfg.get("hallucination_phrases") or []}
+    gap = float(cfg.get("hallucination_isolation_seconds", 8))
+    stock = [phrase_key(s.get("text")) in phrases or not phrase_key(s.get("text")) for s in segments]
+    speech = sorted((s["start"], s["end"]) for s, k in zip(segments, stock) if not k)
+    starts = [a for a, _ in speech]
+    out = set()
+    for i, (s, k) in enumerate(zip(segments, stock)):
+        if not k:
+            continue
+        j = bisect.bisect_left(starts, s["start"])
+        near = speech[max(j - 2, 0):j + 2]
+        if all(max(a - s["end"], s["start"] - b) >= gap for a, b in near):
+            out.add(i)
+    return out
+
+
+def spoken(segments: list[dict], cfg: dict) -> list[dict]:
+    """Segments without Whisper filler (see hallucinated)."""
+    drop = hallucinated(segments, cfg)
+    return [s for i, s in enumerate(segments) if i not in drop]
+
+
 def site_url(cfg: dict) -> str:
     """Base URL for links printed by the CLI tools."""
     d = cfg.get("site_domain") or "auto"

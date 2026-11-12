@@ -23,7 +23,7 @@ import time
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from common import ROOT, P, connect_archive, get_logger, load_config
+from common import ROOT, P, connect_archive, get_logger, load_config, spoken
 
 log = get_logger("rhetoric")
 RESEARCH = ROOT / "research"
@@ -138,7 +138,7 @@ def transcript_segments(cfg: dict, vid: str | None) -> list[dict]:
     if not vid:
         return []
     for path in sorted(P(cfg, "transcripts").glob(f"**/{vid}.json")):
-        return json.loads(path.read_text())["segments"]
+        return spoken(json.loads(path.read_text())["segments"], cfg)
     return []
 
 
