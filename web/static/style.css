@@ -4,7 +4,8 @@
   :root { --bg:#151517; --panel:#1e1e21; --ink:#ecebe7; --muted:#9a978f; --line:#313136; --accent:#b58cff; --mark:#6b5a12;
           --media:#85827b; --band:#2a2a2e; --warn:#ff8a80; } }
 * { box-sizing: border-box; }
-html, body { margin:0; height:100%; }
+html, body { margin:0; } html { height:100%; } body { min-height:100%; }
+body:has(main.watch) { height:100%; }   /* only the watch page is a fixed-height app; other pages scroll, footer at the end */
 body { background:var(--bg); color:var(--ink); font:15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; display:flex; flex-direction:column; }
 a { color:var(--accent); text-decoration:none; } a:hover { text-decoration:underline; }
 header { display:flex; gap:20px; align-items:baseline; padding:10px 16px; border-bottom:1px solid var(--line); background:var(--panel); flex-wrap:wrap; }
@@ -29,6 +30,19 @@ mark { background:var(--mark); color:inherit; border-radius:2px; padding:0 1px; 
 table { border-collapse:collapse; width:100%; } td, th { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); }
 th { color:var(--muted); font-weight:500; font-size:13px; }
 .num { font-variant-numeric:tabular-nums; white-space:nowrap; }
+
+header .hsearch { margin-left:auto; flex:0 1 280px; min-width:160px; }
+header .hsearch input { width:100%; padding:4px 10px; }
+.tabs .n { font-size:12px; color:var(--muted); margin-left:4px; font-variant-numeric:tabular-nums; }
+#timeline { margin:10px 0 2px; }
+#timeline svg { width:100%; height:72px; display:block; background:var(--panel); border:1px solid var(--line); border-radius:6px; }
+#timeline rect.b { fill:var(--accent); opacity:.75; cursor:pointer; } #timeline rect.b:hover, #timeline rect.b.sel { opacity:1; }
+#timeline rect.z { fill:var(--line); }
+#timeline .cap { display:flex; justify-content:space-between; color:var(--muted); font-size:12px; margin-top:2px; }
+.chip { display:inline-flex; gap:6px; align-items:center; font-size:13px; background:var(--band); border-radius:12px; padding:2px 4px 2px 10px; }
+.chip button { border:0; background:none; padding:0 6px; }
+.hit .acts { float:right; display:flex; gap:4px; }
+.hit .acts button { font-size:12px; padding:1px 8px; }
 
 /* watch page */
 main.watch { max-width:none; display:grid; grid-template-columns:minmax(0,1fr) 360px; gap:14px; padding:12px; }

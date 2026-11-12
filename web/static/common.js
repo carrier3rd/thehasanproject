@@ -53,9 +53,13 @@ async function loadConfig() {
 async function chrome(active) {
   const cfg = await loadConfig();
   const link = (href, text) => el('a', { href, text, style: active === href ? 'font-weight:600' : null });
+  // every page but the search page itself gets a search box in the header; it opens the search page
+  const box = active === 'index.html' ? null : el('form', { class: 'hsearch', action: 'index.html', role: 'search' },
+    el('input', { type: 'search', name: 'q', placeholder: 'Search stream and chat…', 'aria-label': 'Search' }),
+    el('input', { type: 'hidden', name: 'tab', value: 'transcripts' }));
   document.body.prepend(el('header', {},
     el('a', { href: 'index.html', class: 'brand', text: 'VOD archive' }),
-    link('index.html', 'Search'), link('videos.html', 'Videos'), link('about.html', 'About'),
+    link('index.html', 'Search'), link('videos.html', 'Videos'), link('about.html', 'About'), box,
     cfg.mode === 'admin' ? el('span', { class: 'badge', text: 'ADMIN · private' }) : null));
   document.body.append(el('footer', { text: 'Transcripts and speaker labels are machine-generated and may contain errors. ' +
     'The linked video is the authoritative record.' }));

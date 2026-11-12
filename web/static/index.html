@@ -3,11 +3,11 @@
 <title>Search · VOD archive</title><link rel="stylesheet" href="style.css"></head>
 <body><main>
   <form id="form">
-    <div class="row"><input type="search" id="q" placeholder="Search…" autofocus><button>Search</button></div>
+    <div class="row"><input type="search" id="q" placeholder="Search what was said on stream and in chat…" autofocus><button>Search</button></div>
     <div class="tabs" id="tabs">
-      <button type="button" data-tab="transcripts">Transcripts</button>
-      <button type="button" data-tab="chat">Chat</button>
-      <button type="button" data-tab="semantic">Semantic</button>
+      <button type="button" data-tab="transcripts">Stream<span class="n" id="n-transcripts"></span></button>
+      <button type="button" data-tab="chat">Chat<span class="n" id="n-chat"></span></button>
+      <button type="button" data-tab="semantic">By meaning</button>
     </div>
     <div class="row" id="filters">
       <select id="speaker" data-for="transcripts"><option value="">Any speaker</option></select>
@@ -17,17 +17,32 @@
       <label data-for="transcripts chat">From <input type="date" id="from"></label>
       <label data-for="transcripts chat">To <input type="date" id="to"></label>
       <label data-for="transcripts"><input type="checkbox" id="include_media"> include media</label>
+      <select id="sort" data-for="transcripts chat" aria-label="Sort">
+        <option value="">Best match</option><option value="newest">Newest first</option><option value="oldest">Oldest first</option>
+      </select>
       <select id="mode" data-for="semantic"><option value="hybrid">Hybrid</option><option value="semantic">Semantic only</option></select>
+      <input type="hidden" id="video">
     </div>
   </form>
+  <div id="timeline" hidden></div>
+  <div class="row" id="scope" hidden></div>
+  <div class="row" id="tools" hidden><span class="note" id="count" style="padding:0;flex:1"></span>
+    <button type="button" id="csv">Download CSV</button></div>
   <div id="results"></div>
   <div class="row" id="pager" hidden><button id="prev">← Previous</button><span id="pageno" class="note"></span><button id="next">Next →</button></div>
 </main>
 <script src="common.js"></script>
 <script>
 const LIMIT = 50;
-const state = { tab: 'transcripts', offset: 0 };
-const fields = ['q', 'speaker', 'author', 'user_id', 'from', 'to', 'mode'];
+const state = { tab: 'transcripts', offset: 0, rows: [], timeline: null };
+const fields = ['q', 'speaker', 'author', 'user_id', 'from', 'to', 'mode', 'sort', 'video'];
+const svg = (tag, attrs = {}) => {
+  const n = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+  return n;
+};
+const plain = s => String(s || '').replace(/\[\[|\]\]/g, '');
+const absUrl = rel => new URL(rel, location.href).href;
 
 function setTab(tab) {
   state.tab = tab;
@@ -50,60 +65,143 @@ function readUrl() {
 function writeUrl() {
   const p = new URLSearchParams({ tab: state.tab });
   for (const f of fields) if ($('#' + f).value && !$('#' + f).hidden) p.set(f, $('#' + f).value);
+  if ($('#video').value) p.set('video', $('#video').value);
   if ($('#include_media').checked) p.set('include_media', '1');
   if ($('#first_msg').checked) p.set('first_msg', '1');
   if (state.offset) p.set('offset', state.offset);
   history.replaceState(null, '', '?' + p);
 }
 
-function hitRow(link, metaParts, bodyNodes, tags = []) {
-  const meta = el('div', { class: 'meta' }, el('a', { href: link, text: metaParts[0] }), ' · ' + metaParts.slice(1).join(' · '));
+// A ready-to-paste citation: quote, who, stream, date, timestamp, link.
+function citation(r) {
+  return `"${r.text}" (${r.who}, ${r.title}, ${r.date}, ${r.time}) ${absUrl(r.link)}`;
+}
+
+async function copy(text, btn) {
+  try { await navigator.clipboard.writeText(text); btn.textContent = 'Copied'; }
+  catch (e) { window.prompt('Copy this:', text); }
+  setTimeout(() => { btn.textContent = 'Copy citation'; }, 1500);
+}
+
+function hitRow(r, bodyNodes, tags = []) {
+  const btn = el('button', { type: 'button', text: 'Copy citation', title: 'Copy quote, stream, date, time and link' });
+  btn.addEventListener('click', () => copy(citation(r), btn));
+  const meta = el('div', { class: 'meta' }, el('span', { class: 'acts' }, btn),
+    el('a', { href: r.link, text: `${r.date} ${r.title}` }), ` · ${r.time}` + (r.who ? ` · ${r.who}` : ''));
   for (const t of tags) meta.append(el('span', { class: 'tag' + (t === 'deleted by mods' ? ' del' : ''), text: t }));
   return el('div', { class: 'hit' }, meta, el('p', {}, ...bodyNodes));
+}
+
+function downloadCsv() {
+  const cols = ['date', 'title', 'time', 'who', 'text', 'link'];
+  const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const lines = [cols.join(','), ...state.rows.map(r => cols.map(c => esc(c === 'link' ? absUrl(r.link) : r[c])).join(','))];
+  const a = el('a', { href: URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' })),
+    download: `search-${($('#q').value || $('#author').value || 'results').replace(/\W+/g, '_').slice(0, 40)}.csv` });
+  document.body.append(a); a.click(); a.remove();
+}
+
+// Strip chart: one bar per stream (oldest left), height = matches in the current tab. Click a bar to search only that stream.
+function drawTimeline() {
+  const box = $('#timeline'), t = state.timeline;
+  const key = state.tab === 'chat' ? 'chat' : 'stream';
+  if (!t || !t.videos.length || state.tab === 'semantic') { box.hidden = true; return; }
+  const vs = t.videos, max = Math.max(1, ...vs.map(v => v[key])), W = 1000, H = 72, gap = vs.length > 120 ? 0 : 1;
+  const bw = W / vs.length, chart = svg('svg', { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: 'none', role: 'img',
+    'aria-label': `Matches per stream, ${vs.length} streams` });
+  vs.forEach((v, i) => {
+    const n = v[key], h = n ? Math.max(3, (n / max) * (H - 8)) : 2;
+    const r = svg('rect', { x: i * bw + gap / 2, y: H - h, width: Math.max(bw - gap, 0.5), height: h,
+      class: (n ? 'b' : 'z') + (v.video_id === $('#video').value ? ' sel' : '') });
+    const tip = svg('title'); tip.textContent = `${fmtDate(v.upload_date)} · ${v.title} · ${n.toLocaleString()} match${n === 1 ? '' : 'es'}`;
+    r.append(tip);
+    if (n) r.addEventListener('click', () => { $('#video').value = v.video_id; state.offset = 0; run(); });
+    chart.append(r);
+  });
+  const hitStreams = vs.filter(v => v[key]).length;
+  box.replaceChildren(chart, el('div', { class: 'cap' }, el('span', { text: fmtDate(vs[0].upload_date) }),
+    el('span', { text: `${hitStreams} of ${vs.length} streams · click a bar to see only that stream` }),
+    el('span', { text: fmtDate(vs.at(-1).upload_date) })));
+  box.hidden = false;
+}
+
+function drawScope() {
+  const id = $('#video').value, box = $('#scope');
+  if (!id) { box.hidden = true; return; }
+  const v = (state.timeline?.videos || []).find(x => x.video_id === id);
+  const x = el('button', { type: 'button', text: '×', 'aria-label': 'Search all streams' });
+  x.addEventListener('click', () => { $('#video').value = ''; state.offset = 0; run(); });
+  box.replaceChildren(el('span', { class: 'chip' }, 'Only: ' + (v ? `${fmtDate(v.upload_date)} ${v.title}` : id), x));
+  box.hidden = false;
+}
+
+async function loadTimeline(params) {
+  try {
+    state.timeline = await api('/api/search/timeline', params);
+    const fmt = n => ` ${n.toLocaleString()}`;
+    $('#n-transcripts').textContent = $('#author').value.trim() ? '' : fmt(state.timeline.totals.stream);
+    $('#n-chat').textContent = fmt(state.timeline.totals.chat);
+  } catch (e) { state.timeline = null; }
+  drawTimeline(); drawScope();
 }
 
 async function run() {
   const box = $('#results');
   writeUrl();
-  const q = $('#q').value.trim();
+  const q = $('#q').value.trim(), author = $('#author').value.trim(), user_id = $('#user_id').value.trim();
   const dates = { from: $('#from').value, to: $('#to').value };
+  const common = { ...dates, video: $('#video').value, sort: $('#sort').value };
   box.replaceChildren(el('div', { class: 'note', text: 'Searching…' }));
-  $('#pager').hidden = true;
+  $('#pager').hidden = $('#tools').hidden = true;
+  state.rows = [];
+  if (q || author || user_id) {
+    loadTimeline({ q, author: state.tab === 'chat' ? author : '', user_id: state.tab === 'chat' ? user_id : '',
+      speaker: $('#speaker').value, include_media: $('#include_media').checked ? 1 : 0,
+      first_msg: state.tab === 'chat' && $('#first_msg').checked ? 1 : 0, ...dates });
+  } else {
+    state.timeline = null; drawTimeline(); drawScope();
+    $('#n-transcripts').textContent = $('#n-chat').textContent = '';
+  }
   try {
     let n = 0;
     if (state.tab === 'transcripts') {
-      if (!q) return box.replaceChildren(el('div', { class: 'note', text: 'Type something to search the transcripts.' }));
-      const r = await api('/api/search', { q, speaker: $('#speaker').value, ...dates,
+      if (!q) return box.replaceChildren(el('div', { class: 'note', text: 'Type something to search what was said on stream.' }));
+      const r = await api('/api/search', { q, speaker: $('#speaker').value, ...common,
         include_media: $('#include_media').checked ? 1 : 0, limit: LIMIT, offset: state.offset });
       n = r.hits.length;
-      box.replaceChildren(...r.hits.map(h => hitRow(watchUrl(h.video_id, h.start),
-        [`${fmtDate(h.upload_date)} ${h.title}`, fmtTime(h.start), h.speaker + (h.low_confidence ? ' ?' : '')],
-        snippetNodes(h.snippet), h.is_media ? ['media'] : [])));
+      state.rows = r.hits.map(h => ({ date: fmtDate(h.upload_date), title: h.title, time: fmtTime(h.start),
+        who: h.speaker + (h.low_confidence ? ' ?' : ''), text: plain(h.snippet), link: watchUrl(h.video_id, h.start), h }));
+      box.replaceChildren(...state.rows.map(r => hitRow(r, snippetNodes(r.h.snippet), r.h.is_media ? ['media'] : [])));
     } else if (state.tab === 'chat') {
-      const author = $('#author').value.trim(), user_id = $('#user_id').value.trim();
       if (!q && !author && !user_id) return box.replaceChildren(el('div', { class: 'note', text: 'Enter text or an author.' }));
-      const r = await api('/api/chat/search', { q, author, user_id, ...dates,
+      const r = await api('/api/chat/search', { q, author, user_id, ...common,
         first_msg: $('#first_msg').checked ? 1 : 0, limit: LIMIT, offset: state.offset });
       n = r.hits.length;
-      box.replaceChildren(...r.hits.map(h => {
-        const tags = [];
+      state.rows = r.hits.map(h => ({ date: fmtDate(h.upload_date), title: h.title, time: h.t === null ? 'not in video' : fmtTime(h.t),
+        who: (h.author || '') + ' (chat)', text: plain(h.snippet),
+        link: h.t === null ? watchUrl(h.video_id, 0) : watchUrl(h.video_id, Math.max(h.t - 5, 0)), h }));
+      box.replaceChildren(...state.rows.map(r => {
+        const h = r.h, tags = [];
         if (h.deleted) tags.push('deleted by mods');
         if (h.kind === 'mod_action') tags.push('mod action');
         if (h.first_msg) tags.push('first message');
         if (h.user_id) tags.push('id ' + h.user_id);
-        const when = h.t === null ? 'not in video' : fmtTime(h.t);
-        return hitRow(h.t === null ? watchUrl(h.video_id, 0) : watchUrl(h.video_id, Math.max(h.t - 5, 0)),
-          [`${fmtDate(h.upload_date)} ${h.title}`, when, h.author || ''], snippetNodes(h.snippet), tags);
+        return hitRow(r, snippetNodes(h.snippet), tags);
       }));
     } else {
       if (!q) return box.replaceChildren(el('div', { class: 'note', text: 'Ask a question or describe a topic.' }));
       const r = await api('/api/semantic', { q, mode: $('#mode').value });
       n = -r.hits.length;
-      box.replaceChildren(...r.hits.map(h => hitRow(watchUrl(h.video_id, h.start),
-        [`${fmtDate(h.upload_date)} ${h.title}`, fmtTime(h.start)],
-        h.turns.flatMap(t => [el('b', { text: t.speaker + ': ' }), document.createTextNode(t.text + ' ')]))));
+      state.rows = r.hits.map(h => ({ date: fmtDate(h.upload_date), title: h.title, time: fmtTime(h.start), who: '',
+        text: h.turns.map(t => `${t.speaker}: ${t.text}`).join(' '), link: watchUrl(h.video_id, h.start), h }));
+      box.replaceChildren(...state.rows.map(r => hitRow(r,
+        r.h.turns.flatMap(t => [el('b', { text: t.speaker + ': ' }), document.createTextNode(t.text + ' ')]))));
     }
     if (!box.children.length) box.replaceChildren(el('div', { class: 'note', text: 'No results.' }));
+    if (state.rows.length) {
+      $('#count').textContent = n >= 0 ? `Results ${state.offset + 1}–${state.offset + state.rows.length}` : `${state.rows.length} closest passages`;
+      $('#tools').hidden = false;
+    }
     if (n >= 0) {
       $('#pager').hidden = !(state.offset > 0 || n === LIMIT);
       $('#prev').disabled = state.offset === 0;
@@ -122,7 +220,8 @@ async function run() {
   } catch (e) { /* dropdown stays at "Any speaker" */ }
   readUrl();
   for (const b of document.querySelectorAll('#tabs button')) b.addEventListener('click', () => { setTab(b.dataset.tab); state.offset = 0; run(); });
-  $('#form').addEventListener('submit', e => { e.preventDefault(); state.offset = 0; run(); });
+  $('#form').addEventListener('submit', e => { e.preventDefault(); state.offset = 0; $('#video').value = ''; run(); });
+  $('#csv').addEventListener('click', downloadCsv);
   $('#prev').addEventListener('click', () => { state.offset = Math.max(state.offset - LIMIT, 0); run(); scrollTo(0, 0); });
   $('#next').addEventListener('click', () => { state.offset += LIMIT; run(); scrollTo(0, 0); });
   if ($('#q').value || $('#author').value || $('#user_id').value) run();

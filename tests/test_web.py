@@ -89,6 +89,32 @@ def test_public_chat(apps):
     assert pub.get("/api/export").status_code == 404
 
 
+def test_search_timeline_sort_and_video_filter(apps):
+    pub, adm = apps
+    t = pub.get("/api/search/timeline", params={"q": "glaciers", "include_media": 1}).json()
+    by = {v["video_id"]: v for v in t["videos"]}
+    assert by["v1001"]["stream"] == 2 and t["totals"]["stream"] == 2
+    assert [v["upload_date"] for v in t["videos"]] == sorted(v["upload_date"] for v in t["videos"])   # oldest first
+    assert all(v["stream"] == 0 for k, v in by.items() if k != "v1001")                              # zero rows kept
+    assert pub.get("/api/search/timeline", params={"q": "glaciers"}).json()["totals"]["stream"] == 0  # media hidden by default
+    assert pub.get("/api/search/timeline", params={"q": "rent"}).json()["totals"]["chat"] == 1
+    assert pub.get("/api/search/timeline", params={"q": "removed"}).json()["totals"]["chat"] == 0     # deleted text stays hidden
+    who = pub.get("/api/search/timeline", params={"author": "alice"}).json()
+    assert who["totals"] == {"stream": 0, "chat": 3}
+    assert pub.get("/api/search/timeline", params={"user_id": "1"}).json()["totals"] == {"stream": 0, "chat": 0}  # public: no ids
+    assert pub.get("/api/search/timeline", params={"q": "*"}).status_code == 200
+    # time sorts and the one-stream filter
+    hits = pub.get("/api/search", params={"q": "glaciers", "include_media": 1, "sort": "oldest"}).json()["hits"]
+    assert [h["start"] for h in hits] == sorted(h["start"] for h in hits)
+    assert pub.get("/api/search", params={"q": "glaciers", "include_media": 1, "video": "nope"}).json()["hits"] == []
+    assert len(pub.get("/api/search", params={"q": "glaciers", "include_media": 1, "video": "v1001"}).json()["hits"]) == 2
+    alice = pub.get("/api/chat/search", params={"author": "alice", "sort": "oldest"}).json()["hits"]
+    assert len(alice) == 3 and alice[0]["upload_date"] <= alice[-1]["upload_date"]
+    assert {h["video_id"] for h in pub.get("/api/chat/search", params={"author": "alice", "video": "v1001"}).json()["hits"]} == {"v1001"}
+    assert pub.get("/api/search", params={"q": "housing", "sort": "drop table"}).status_code == 200   # unknown sort = relevance
+    assert adm.get("/api/search/timeline", params={"user_id": "3"}).json()["totals"]["chat"] >= 1
+
+
 def test_semantic_and_hybrid(apps):
     pub, _ = apps
     for mode in ("semantic", "hybrid"):
