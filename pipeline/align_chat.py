@@ -138,6 +138,8 @@ def build_anchors(yt_env: np.ndarray, tw_env: np.ndarray, cfg: dict) -> list[tup
 def stream_start(con, cfg: dict, vid: str, meta: dict, info: dict, row) -> tuple[int | None, str | None]:
     if row and row["stream_start_source"] == "manual":
         return row["stream_start_unix"], "manual"
+    if meta.get("stream_start_unix"):   # measured elsewhere (deploy/pc/older_export.py: captions vs public chat logs)
+        return int(meta["stream_start_unix"]), meta.get("stream_start_source") or "meta"
     if meta.get("platform") == "twitch" and info.get("timestamp"):
         return int(info["timestamp"]), "twitch_info"
     if meta.get("twitch_timestamp"):
@@ -188,6 +190,10 @@ def align_one(con, cfg: dict, vid: str, force: bool = False) -> str:
     if existing and not force:
         return "kept"
     has_replay = (P(cfg, "chat") / f"{vid}.jsonl").exists()
+    if meta.get("chat_anchors"):        # precomputed with the start time above (re-uploads with cuts)
+        method = meta.get("stream_start_source") or "meta"
+        set_anchors(con, vid, [tuple(a) for a in meta["chat_anchors"]], method)
+        return f"{method} ({len(meta['chat_anchors'])} anchor(s))"
     if meta.get("platform") == "twitch":
         set_anchors(con, vid, [(0.0, 0.0, 1.0)], "same_source")
         return "same_source"

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
 import time
@@ -78,10 +79,10 @@ def chat_plan(con, cfg: dict, vid: str, duration: float):
                            (cfg["channel_name"], lo * 1000, hi * 1000)).fetchone()
         if n:
             return "live", f"live:{start}:{int(lo)}:{int(hi)}:{n}:{d}", (start, lo, hi)
-    rp = P(cfg, "chat") / f"{vid}.jsonl"
-    if rp.exists():
-        st = rp.stat()
-        return "replay", f"replay:{st.st_size}:{st.st_mtime_ns}", rp
+    for rp in (P(cfg, "chat") / f"{vid}.jsonl", P(cfg, "chat") / f"{vid}.jsonl.gz"):  # .gz: older streams' public logs
+        if rp.exists():
+            st = rp.stat()
+            return "replay", f"replay:{st.st_size}:{st.st_mtime_ns}", rp
     return "none", "none", None
 
 
@@ -97,12 +98,15 @@ def load_chat(con, cfg: dict, vid: str, source: str, arg) -> int:
                                      (cfg["channel_name"], lo * 1000, hi * 1000))]
     elif source == "replay":
         rows = []
-        with open(arg) as f:
+        opener = gzip.open if str(arg).endswith(".gz") else open
+        with opener(arg, "rt", encoding="utf-8") as f:
             for line in f:
                 m = json.loads(line)
                 badges = m.get("badges") or ""
-                rows.append((vid, m["t"], m.get("user_id"), m.get("author"), m.get("text"), 0, "msg", badges,
-                             None, None, int("subscriber/" in badges), "replay"))
+                sub = m.get("subscriber")
+                rows.append((vid, m["t"], m.get("user_id"), m.get("author"), m.get("text"), int(m.get("deleted") or 0),
+                             m.get("kind") or "msg", badges, m.get("first_msg"), m.get("returning_chatter"),
+                             int("subscriber/" in badges) if sub is None else int(sub), "replay"))
     else:
         rows = []
     con.executemany("INSERT INTO chat(video_id, t, user_id, author, text, deleted, kind, badges, first_msg, "

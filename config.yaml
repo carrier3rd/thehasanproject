@@ -54,7 +54,8 @@ embed_window_seconds: 60
 embed_window_overlap_seconds: 15
 llm_model: claude-opus-5-5        # used only by `ask.py --llm`
 
-public_speakers: [Hasan]          # voiceprint names shown publicly; others -> "Guest"
+public_speakers: [Hasan, Auto-captions]   # voiceprint names shown publicly; others -> "Guest". Auto-captions: older
+                                  # streams' interim transcript from YouTube captions (no speaker labels) until transcribed
 publish_min_distinct_chatters: 5  # a term/emote appears in public aggregates only if >= N distinct chatters used it that minute
 publish_top_terms: 10
 publish_deleted_text: false       # true shows mod-deleted text publicly
