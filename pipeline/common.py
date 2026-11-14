@@ -3,7 +3,11 @@ from __future__ import annotations
 
 import bisect
 import csv
-import fcntl
+try:
+    import fcntl
+except ImportError:  # Windows: msvcrt locks one byte of the file instead
+    fcntl = None
+    import msvcrt
 import logging
 import os
 import re
@@ -170,14 +174,21 @@ def lock(cfg: dict, name: str):
     path.parent.mkdir(parents=True, exist_ok=True)
     f = open(path, "w")
     try:
-        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
+        if fcntl:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        else:
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+    except OSError:  # BlockingIOError on Linux, PermissionError on Windows
         print(f"{name}: another run holds {path}; exiting", file=sys.stderr)
         sys.exit(0)
     try:
         yield
     finally:
-        fcntl.flock(f, fcntl.LOCK_UN)
+        if fcntl:
+            fcntl.flock(f, fcntl.LOCK_UN)
+        else:
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
         f.close()
 
 
