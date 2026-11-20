@@ -1,0 +1,8 @@
+[Unit]
+Description=VOD archive hourly check: fetch finished streams, publish when something new arrived
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/thehasanproject
+Environment=QUICK=1
+ExecStart=%h/thehasanproject/deploy/nightly.sh

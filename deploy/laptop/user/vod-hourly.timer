@@ -1,0 +1,9 @@
+[Unit]
+Description=Run the VOD archive quick check every hour (new streams first, 2026-11-20)
+
+[Timer]
+OnCalendar=*-*-* *:20:00
+Persistent=false
+
+[Install]
+WantedBy=timers.target

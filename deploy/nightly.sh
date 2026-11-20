@@ -26,6 +26,13 @@ if [ -n "${GPU_HOST:-}" ]; then
 else
   echo "--- transcribe: skipped (no GPU_HOST); waiting: $(python pipeline/pending.py | grep -vc '/muted/' || true) VOD(s)"
 fi
+# Hourly runs (QUICK=1, from the vod-hourly user timer, 2026-11-20): new streams are fetched every hour, but the
+# rebuild and publish below only run when a download or a transcript arrived since the last publish.
+sig=$(ls -l --time-style=+%s data/audio data/transcripts 2>/dev/null | md5sum | cut -c1-32)
+if [ "${QUICK:-0}" = 1 ] && [ -f logs/published.sig ] && [ "$sig" = "$(cat logs/published.sig)" ]; then
+  echo "=== quick run: nothing new since the last publish; end $(date -Is) ==="
+  exit 0
+fi
 step pipeline/align_chat.py
 step pipeline/build_db.py
 
@@ -33,6 +40,7 @@ step pipeline/build_db.py
 echo "--- publish"
 if python pipeline/publish.py; then
   step pipeline/embed.py
+  echo "$sig" > logs/published.sig
   if [ -n "${WEB_HOST:-}" ]; then
     rsync -a --delay-updates public.db index "${WEB_HOST}:${WEB_DIR:-/opt/vod-archive}/" \
       && ssh "$WEB_HOST" sudo systemctl restart web.service

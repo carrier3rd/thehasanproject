@@ -150,6 +150,14 @@ def scp_up_new(local: Path, remote_dir: str) -> bool:
     return ssh(f"mv -n {tmp} {remote_dir}/{local.name}").returncode == 0
 
 
+def new_streams() -> list[str]:
+    """Livestream VODs on the laptop with audio but no transcript yet (what backfill() would do), newest first."""
+    r = ssh(f"cd {REMOTE} && .venv/bin/python pipeline/pending.py 2>/dev/null")
+    if r.returncode != 0:
+        return []
+    return sorted({m[:-5] for m in re.findall(r"v[0-9]+\.opus", r.stdout)}, reverse=True)
+
+
 def backfill() -> None:
     say = lambda m: log("pc-backfill.log", m, "pc-status.txt")
     for d in ("audio", "muted", "transcripts"):
@@ -290,7 +298,19 @@ def older() -> None:
     dl.start()
     done = lambda y: (OLDER / "transcripts" / f"yt_{y}.json").exists()
     ready = lambda y: (OLDER / "audio" / f"yt_{y}.opus").exists() or (DATA / "audio" / f"yt_{y}.opus").exists()
+    tried: set[str] = set()
     while not stop.is_set():
+        # new livestreams always come first (owner, 2026-11-20): before every older video, ask the laptop whether a
+        # new stream is waiting and transcribe it first. A stream that backfill could not finish is not retried in
+        # this run, so a broken copy can't stall the older queue.
+        fresh = [v for v in new_streams() if v not in tried]
+        if fresh:
+            say(f"new livestream(s) waiting on the laptop: {' '.join(fresh)}; doing them first")
+            tried.update(fresh)
+            backfill()
+            if stop.is_set():
+                return
+            continue
         # the next video, in queue order, that has audio; a failed download no longer holds up the ones after it
         y = next((y for y in ids if not done(y) and ready(y)), None)
         if y is None:
