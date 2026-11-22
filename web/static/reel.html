@@ -8,7 +8,12 @@
     <span id="count" class="num"></span>
     <button id="next" aria-label="Next clip">→</button>
   </div>
+  <nav class="tabs" id="views">
+    <button type="button" data-view="clips" class="on">Clips</button>
+    <button type="button" data-view="facts">Fact-checks</button>
+  </nav>
   <div id="empty" class="note" hidden></div>
+  <div id="facts" hidden></div>
   <div id="stage" hidden>
     <div class="rcol">
       <div id="player"></div>
@@ -35,8 +40,9 @@
       <div id="lines" hidden></div>
     </div>
   </div>
-  <p class="note small">Clips are picked and described by Claude (AI) from machine-made transcripts, using a fixed rubric
-    that counts only Hasan's own words. Transcripts can mishear; watch the clip before relying on it.</p>
+  <p class="note small">Clips and fact-checks are by Claude (AI) from machine-made transcripts. Clips use a fixed rubric
+    that counts only Hasan's own words; fact-checks use web search and judge accuracy as of the day he spoke, not whether
+    he believed it. Transcripts can mishear; watch the moment before relying on it.</p>
 </main>
 <script src="common.js"></script>
 <script>
@@ -98,7 +104,9 @@ function renderCard(c) {
     el('div', { class: 'cwhen', text: `${fmtDate(c.date)} · ${c.stream_title} · ${fmtTime(c.start)}–${fmtTime(c.end)}` }),
     c.quote ? el('blockquote', { text: `“${c.quote}”` }) : null,
     ...sec('What he said', c.summary), ...sec('Why it’s here', c.why_notable),
-    ...sec('Context and nuance', c.nuance), ...sec('Chat’s reaction', c.chat_reaction), ex);
+    ...sec('Context and nuance', c.nuance), ...sec('Chat’s reaction', c.chat_reaction), ex,
+    c.segment_reason ? el('p', { class: 'cwhen', style: 'margin-top:10px',
+      text: `Segment: ${fmtTime(c.end - c.start)}. ${c.segment_reason}` }) : null);
   $('#full').href = watchUrl(c.video_id, c.start);
   $('#lines').replaceChildren(...c.lines.map(l => el('div', { class: 'turn' + (l.speaker === 'Media' ? ' media' : ''), 'data-t': l.t,
     onclick: () => { player && player.seek(l.t); } },
@@ -136,6 +144,59 @@ function renderChat(now) {
   if (!all) box.scrollTop = box.scrollHeight;
 }
 
+// ---------- fact-checks ----------
+const VERDICT = { false: 'False', misleading: 'Misleading', unsupported: 'Unsupported', mostly_accurate: 'Mostly accurate', accurate: 'Accurate' };
+const vbadge = v => el('span', { class: `verdict v-${v}`, text: VERDICT[v] || v });
+const safeUrl = u => /^https?:\/\//i.test(u || '') ? u : null;
+function tally(counts, order) {
+  return el('div', { class: 'tally' }, ...order.map(v => el('span', { class: `verdict v-${v}`, text: `${VERDICT[v]} ${counts[v] || 0}` })));
+}
+let totals = null;
+async function renderFacts() {
+  const box = $('#facts');
+  const fs = (reel && reel.fact_checks) || [];
+  const order = ['false', 'misleading', 'unsupported', 'mostly_accurate', 'accurate'];
+  if (!totals) { try { totals = await api('/api/factchecks'); } catch (e) { totals = null; } }
+  const nodes = [];
+  nodes.push(el('h2', { class: 'fh', text: reel ? `Week of ${reel.week} – ${reel.week_end}: ${fs.length} claim${fs.length === 1 ? '' : 's'} checked` : 'This week' }));
+  if (reel && reel.fact_summary) nodes.push(tally(reel.fact_summary.by_verdict, order));
+  if (totals && totals.weeks.length) {
+    const topics = Object.entries(totals.by_topic).sort((a, b) => order.slice(0, 2).reduce((n, v) => n + b[1][v] - a[1][v], 0));
+    nodes.push(el('details', { class: 'alltime' },
+      el('summary', { text: `All weeks: ${order.map(v => `${totals.total[v]} ${VERDICT[v].toLowerCase()}`).join(' · ')}` }),
+      el('table', {},
+        el('thead', {}, el('tr', {}, el('th', { text: 'Topic' }), ...order.map(v => el('th', { class: 'num', text: VERDICT[v] })))),
+        el('tbody', {}, ...topics.map(([t, c]) => el('tr', {}, el('td', { text: t.replace(/_/g, ' ') }),
+          ...order.map(v => el('td', { class: 'num', text: String(c[v]) }))))))));
+  }
+  if (!fs.length) nodes.push(el('div', { class: 'note', text: 'No fact-checks for this week.' }));
+  for (const f of fs) {
+    const src = (f.sources || []).filter(x => safeUrl(x.url));
+    nodes.push(el('article', { class: 'fact' },
+      el('div', { class: 'cmeta' }, vbadge(f.verdict), el('span', { class: 'tag', text: f.topic.replace(/_/g, ' ') }),
+        el('span', { class: 'tag', text: `${f.confidence} confidence` })),
+      el('h3', { text: f.claim }),
+      el('div', { class: 'cwhen' }, el('a', { href: watchUrl(f.video_id, Math.max(f.t - 5, 0)), text: `${fmtDate(f.date)} · ${fmtTime(f.t)}` }),
+        document.createTextNode(` · ${f.stream_title}`)),
+      el('blockquote', { text: `“${f.quote}”` }),
+      f.correction ? el('p', {}, el('b', { text: 'What’s accurate: ' }), document.createTextNode(f.correction)) : null,
+      f.explanation ? el('p', { class: 'fx', text: f.explanation }) : null,
+      src.length ? el('ul', { class: 'cex' }, ...src.map(x => el('li', {}, el('a', { href: safeUrl(x.url), target: '_blank', rel: 'noopener noreferrer nofollow', text: x.title || x.url })))) : null));
+  }
+  box.replaceChildren(...nodes);
+}
+let view = 'clips';
+function setView(v) {
+  view = v;
+  for (const b of document.querySelectorAll('#views button')) b.classList.toggle('on', b.dataset.view === v);
+  $('#facts').hidden = v !== 'facts';
+  const hasClips = reel && reel.clips.length;
+  $('#stage').hidden = v !== 'clips' || !hasClips;
+  $('#empty').hidden = v !== 'clips' || hasClips;
+  for (const id of ['#prev', '#next', '#count']) $(id).hidden = v !== 'clips';
+  if (v === 'facts') { if (player && playing) { player.pause(); playing = false; } renderFacts(); }
+}
+
 // ---------- flipping ----------
 async function show(i) {
   if (!reel || !reel.clips.length) return;
@@ -153,13 +214,14 @@ async function show(i) {
 async function loadWeek(week) {
   try { reel = await api('/api/reels/' + encodeURIComponent(week)); }
   catch (e) { reel = null; }
+  if (view === 'facts') renderFacts();
   if (!reel || !reel.clips.length) {
-    $('#stage').hidden = true; $('#empty').hidden = false;
+    $('#stage').hidden = true; $('#empty').hidden = view !== 'clips';
     $('#empty').textContent = reel ? `Nothing from this week met the bar (${reel.candidates_judged} moments were judged).` : 'This week’s reel is not available.';
     $('#count').textContent = '';
     return;
   }
-  $('#empty').hidden = true; $('#stage').hidden = false;
+  $('#empty').hidden = true; $('#stage').hidden = view !== 'clips';
   const want = Math.max((+qs.get('clip') || 1) - 1, 0);
   show(reel.week === qs.get('week') ? Math.min(want, reel.clips.length - 1) : 0);
 }
@@ -184,7 +246,7 @@ function tick() {
   if (!weeks.length) {
     $('#empty').hidden = false;
     $('#empty').textContent = 'No weekly reel yet. The first one is built after a full week (Sunday to Saturday) has streamed.';
-    $('.reelbar').hidden = true;
+    $('.reelbar').hidden = true; $('#views').hidden = true;
     return;
   }
   $('#week').replaceChildren(...weeks.map(w => el('option', { value: w.week,
@@ -214,6 +276,7 @@ function tick() {
     else { player.play(); playing = true; $('#play').textContent = 'Pause'; }
   });
   $('#allchat').addEventListener('change', () => { lastKey = ''; });
+  for (const b of document.querySelectorAll('#views button')) b.addEventListener('click', () => setView(b.dataset.view));
   for (const b of document.querySelectorAll('#rtabs button')) b.addEventListener('click', () => {
     for (const o of document.querySelectorAll('#rtabs button')) o.classList.toggle('on', o === b);
     $('#chatbox').hidden = b.dataset.pane !== 'chat';

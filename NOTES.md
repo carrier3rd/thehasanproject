@@ -127,6 +127,16 @@ Run `python -m pytest` from the repo root (27 tests, no GPU or network needed).
   week's transcripts change. `max_usd_per_week` (15) caps what auto submits. Clips are the Twitch/YouTube embed cued to
   the clip and paused at its end (no video is downloaded); when the VOD is gone the page plays transcript and chat on a
   clock. Tested with a fake API client; the real prompts have not yet run.
+- **Reel segments are Claude's choice** (2026-11-22): 15 s to 15 min (`clip_min_s`/`clip_max_s`), with a stated reason;
+  the judge pass sees ±10 min of transcript (`context_s` 600) and up to 400 chat messages sampled from 2 min before to
+  8 min after the moment.
+- **Fact-checks** (2026-11-22): pass 1 also lists checkable factual claims Hasan states as fact (topic, importance 1-5);
+  the top 40 by importance (`max_facts`) are checked by Claude with the `web_search_20260209` tool (max 5 searches each),
+  as of the day he spoke. Verdicts: accurate, mostly_accurate, misleading, false, unsupported (not_checkable is dropped).
+  Deliberately **not "lies"**: a transcript can show a claim is wrong, not that he knew it. Citations can't be combined
+  with a JSON schema, so the answer ends in a JSON object parsed from text; only source URLs that the search tool
+  actually returned are kept, and a negative verdict with no such source is not published. Shown in the reel page's
+  "Fact-checks" view with all-weeks totals by topic (`/api/factchecks`). Estimated ~$8/week in total with the reel.
 - The watch page's phone CSS now targets `main.watch #player` / `#slider` instead of the bare ids; the unscoped rules
   reordered the reel page's player on phones.
 

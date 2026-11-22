@@ -357,6 +357,30 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
                         "streams": len(r["streams"]), "generated_at": r["generated_at"]})
         return {"weeks": out}
 
+    @app.get("/api/factchecks")
+    def factchecks():
+        """Every week's fact-checks added up: totals by verdict and topic, and per week."""
+        verdicts = ["false", "misleading", "unsupported", "mostly_accurate", "accurate"]
+        total, topics, weeks = {v: 0 for v in verdicts}, {}, []
+        if reels is not None and reels.is_dir():
+            for p in sorted(reels.glob("????-??-??.json")):
+                try:
+                    r = json.loads(p.read_text())
+                except (OSError, ValueError):
+                    continue
+                fs = r.get("fact_checks") or []
+                row = {"week": r["week"], **{v: 0 for v in verdicts}}
+                for f in fs:
+                    v = f.get("verdict")
+                    if v not in total:
+                        continue
+                    total[v] += 1
+                    row[v] += 1
+                    topics.setdefault(f.get("topic", "other"), {x: 0 for x in verdicts})[v] += 1
+                if fs:
+                    weeks.append(row)
+        return {"verdicts": verdicts, "total": total, "by_topic": topics, "weeks": weeks}
+
     @app.get("/api/reels/{week}")
     def reel_week(week: str):
         if reels is None or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", week) or not (reels / f"{week}.json").is_file():

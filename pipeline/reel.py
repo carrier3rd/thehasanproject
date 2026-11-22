@@ -10,9 +10,11 @@ Two passes, both through the Message Batches API (half price):
   1. screen: every transcript line of the week's streams, in ~12-minute windows (all speakers labelled, so Claude can
      tell Hasan from clips and guests), returns candidate moments where Hasan himself may have said something
      egregious;
-  2. judge: the strongest candidates, each with 6 minutes of transcript and the chat at that time, get a final call:
+  2. judge: the strongest candidates, each with 20 minutes of transcript and the chat at that time, get a final call:
      own view or reading/joke/condemnation, severity on a fixed rubric, context and nuance, the chat's reaction, and
-     clip boundaries.
+     a segment as long as the point needs (15 seconds to 15 minutes);
+  3. fact-check: pass 1 also lists the checkable factual claims he states as fact; the most consequential are checked
+     with web search, as of the day he said them, and get a verdict with sources.
 Results are cached per stream window and per candidate, so a late transcript only costs its own stream.
 Reads public.db only (public speaker labels; chat without opt-outs or mod-deleted text) and writes reels/<week>.json,
 which the site serves on reel.html.
@@ -35,7 +37,9 @@ from rhetoric import api_client, norm, read_jsonl
 log = get_logger("reel")
 DEFAULTS = {"model": "claude-opus-5-5", "screen_effort": "low", "judge_effort": "high",
             "window_s": 720, "overlap_s": 60, "screen_min_severity": 5, "max_judge": 30, "max_clips": 10,
-            "min_severity": 5, "context_s": 180, "chat_max": 400, "clip_min_s": 15, "clip_max_s": 150,
+            "min_severity": 5, "context_s": 600, "chat_max": 400, "clip_min_s": 15, "clip_max_s": 900,
+            "fact_effort": "medium", "max_facts": 40, "fact_min_importance": 3, "fact_search_uses": 5,
+            "fact_context_s": 90, "search_usd": 0.01,   # web search: $10 per 1,000 searches
             "build_after_hour": 10,          # local hour on Sunday after which the finished week is built
             "max_usd_per_week": 15.0,        # auto never submits more than this per week (estimate)
             "prices": {"claude-opus-5-5": [4.0, 20.0], "claude-sonnet-5-5": [2.0, 10.0]}}
@@ -44,6 +48,10 @@ CATEGORIES = ["antisemitism", "nazi_or_holocaust_comparison", "justifying_or_glo
               "misinformation", "other"]
 STANCES = ["own_view", "joke_or_bait", "reading_or_quoting", "condemning", "unclear"]
 WEEK_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+TOPICS = ["israel_palestine", "us_politics", "elections_and_polls", "economy", "war_and_foreign_policy",
+          "other_countries", "media_and_public_figures", "himself_and_his_critics", "history", "science_and_health",
+          "other"]
+VERDICTS = ["accurate", "mostly_accurate", "misleading", "false", "unsupported", "not_checkable"]
 
 RUBRIC = """You review machine transcripts of HasanAbi's (Hasan Piker's) Twitch streams for a weekly reel of the most
 egregious things HE said that week. The reel is read by people on all sides, so it must be fair, accurate and
@@ -89,7 +97,7 @@ Accuracy
 - Quotes must be copied exactly from the lines you are given."""
 
 SCREEN_SCHEMA = {
-    "type": "object", "additionalProperties": False, "required": ["moments"],
+    "type": "object", "additionalProperties": False, "required": ["moments", "claims"],
     "properties": {"moments": {"type": "array", "items": {
         "type": "object", "additionalProperties": False,
         "required": ["start", "end", "stance", "category", "severity", "quote", "why"],
@@ -100,12 +108,22 @@ SCREEN_SCHEMA = {
             "category": {"type": "string", "enum": CATEGORIES},
             "severity": {"type": "integer", "minimum": 1, "maximum": 10},
             "quote": {"type": "string", "description": "exact words from one line"},
-            "why": {"type": "string"}}}}}}
+            "why": {"type": "string"}}}},
+        "claims": {"type": "array", "items": {
+            "type": "object", "additionalProperties": False,
+            "required": ["start", "quote", "claim", "topic", "importance"],
+            "properties": {
+                "start": {"type": "number", "description": "seconds, from the line's timestamp"},
+                "quote": {"type": "string", "description": "exact words from one Hasan line"},
+                "claim": {"type": "string", "description": "the factual claim, restated neutrally and self-contained"},
+                "topic": {"type": "string", "enum": TOPICS},
+                "importance": {"type": "integer", "minimum": 1, "maximum": 5,
+                               "description": "5 = a central factual claim about events, numbers or people; 1 = trivial"}}}}}}
 
 JUDGE_SCHEMA = {
     "type": "object", "additionalProperties": False,
     "required": ["keep", "stance", "severity", "confidence", "categories", "title", "summary", "why_notable",
-                 "nuance", "chat_reaction", "chat_examples", "quote", "clip_start", "clip_end"],
+                 "nuance", "chat_reaction", "chat_examples", "quote", "clip_start", "clip_end", "segment_reason"],
     "properties": {
         "keep": {"type": "boolean", "description": "true if this belongs in a reel of his most egregious statements"},
         "stance": {"type": "string", "enum": STANCES},
@@ -120,8 +138,34 @@ JUDGE_SCHEMA = {
         "chat_examples": {"type": "array", "items": {"type": "string"},
                           "description": "up to 4 chat messages copied exactly, the clearest echoes or pushback"},
         "quote": {"type": "string", "description": "his key words, copied exactly from one line"},
-        "clip_start": {"type": "number", "description": "seconds; a line timestamp a little before the key words"},
-        "clip_end": {"type": "number", "description": "seconds; after he finishes the point"}}}
+        "clip_start": {"type": "number", "description": "seconds; a line timestamp where the segment should start"},
+        "clip_end": {"type": "number", "description": "seconds; where it should end"},
+        "segment_reason": {"type": "string", "description": "why this length: one line, a short exchange, or a whole argument"}}}
+
+FACT_RUBRIC = """You fact-check factual claims HasanAbi (Hasan Piker) made on his Twitch stream, for a weekly breakdown
+read by people on all sides. Be fair, precise and sourced.
+
+- Judge the claim as of the date he said it, with the information available then. Note later developments
+  separately.
+- Check the claim he actually made, read charitably: the plain meaning a reasonable listener would take, not a
+  stretched one. Rounding and loose wording are fine if the substance holds.
+- Use web search. Prefer primary sources (official data, court records, original reporting, the person's own words)
+  and reputable outlets across the spectrum. Do not rely on a single partisan source.
+- Opinions, value judgements, predictions, rhetorical hyperbole and jokes are not factual claims: mark them
+  not_checkable.
+- You cannot know whether he believed it. Never call a claim a lie; assess only accuracy.
+- The transcript is machine-made and may mishear words. If the claim depends on a likely mishearing, say so and mark
+  it not_checkable.
+
+Verdicts: accurate | mostly_accurate (true with minor errors) | misleading (technically true or partly true but gives
+a false impression, or omits context that changes the meaning) | false | unsupported (no good evidence either way, or
+the evidence is contested) | not_checkable.
+
+Finish your answer with one JSON object and nothing after it:
+{"verdict": "...", "claim": "the claim as you understood it", "correction": "what is accurate, in one or two
+sentences (empty if accurate)", "explanation": "how you checked and what you found", "confidence": "low|medium|high",
+"sources": [{"url": "...", "title": "..."}]}
+Use only URLs that your searches returned."""
 
 
 # ---------------------------------------------------------------- helpers
@@ -223,15 +267,19 @@ def in_flight(cfg) -> set[str]:
     return {k for b in read_jsonl(root(cfg) / "batches.jsonl") if not b["collected"] for k in b["keys"]}
 
 
-def submit(cfg, st: dict, kind: str, reqs: list[tuple[str, str, str, dict]], client) -> str:
-    """reqs: (cache key, system, user prompt, schema)."""
-    effort = st["screen_effort"] if kind == "screen" else st["judge_effort"]
-    requests = [{"custom_id": f"{kind[0]}{i}-{key}", "params": {
-        "model": st["model"], "max_tokens": 8192 if kind == "screen" else 16000,
-        "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
-        "messages": [{"role": "user", "content": user}],
-        "output_config": {"effort": effort, "format": {"type": "json_schema", "schema": schema}}}}
-        for i, (key, system, user, schema) in enumerate(reqs)]
+def submit(cfg, st: dict, kind: str, reqs: list[tuple[str, str, str, dict | None]], client) -> str:
+    """reqs: (cache key, system, user prompt, JSON schema or None)."""
+    effort = {"screen": st["screen_effort"], "judge": st["judge_effort"], "fact": st["fact_effort"]}[kind]
+    requests = []
+    for i, (key, system, user, schema) in enumerate(reqs):
+        params = {"model": st["model"], "max_tokens": 8192 if kind == "screen" else 16000,
+                  "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+                  "messages": [{"role": "user", "content": user}], "output_config": {"effort": effort}}
+        if schema is not None:
+            params["output_config"]["format"] = {"type": "json_schema", "schema": schema}
+        if kind == "fact":   # web search; citations can't be combined with a JSON schema, so the answer ends in JSON
+            params["tools"] = [{"type": "web_search_20260209", "name": "web_search", "max_uses": st["fact_search_uses"]}]
+        requests.append({"custom_id": f"{kind[0]}{i}-{key}", "params": params})
     batch = client.messages.batches.create(requests=requests)
     rec = {"batch_id": batch.id, "kind": kind, "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
            "custom_ids": [r["custom_id"] for r in requests], "keys": [k for k, *_ in reqs], "collected": False}
@@ -269,8 +317,17 @@ def collect(cfg, client, wait: bool = False) -> int:
                     usage[k] += getattr(msg.usage, k, 0) or 0
                 if msg.stop_reason == "refusal":
                     value["status"] = "refused"
-                elif msg.stop_reason == "max_tokens":
-                    value["status"] = "truncated"
+                elif msg.stop_reason in ("max_tokens", "pause_turn"):
+                    value["status"] = "truncated" if msg.stop_reason == "max_tokens" else "paused"
+                elif b["kind"] == "fact":
+                    text = "".join(blk.text for blk in msg.content if blk.type == "text")
+                    urls = []
+                    for blk in msg.content:          # URLs its searches actually returned
+                        if blk.type == "web_search_tool_result" and isinstance(blk.content, list):
+                            urls += [getattr(x, "url", None) for x in blk.content]
+                    value["result"], value["urls"] = last_json(text), [u for u in urls if u]
+                    if value["result"] is None:
+                        value["status"] = "unparsed"
                 else:
                     text = next((blk.text for blk in msg.content if blk.type == "text"), "")
                     try:
@@ -289,35 +346,42 @@ def collect(cfg, client, wait: bool = False) -> int:
     return done
 
 
-def estimate(st: dict, reqs: list[tuple[str, str, str, dict]], out_per_req: int) -> float:
+def estimate(st: dict, reqs: list[tuple[str, str, str, dict | None]], out_per_req: int, extra_in: int = 0,
+             extra_usd: float = 0.0) -> float:
     p_in, p_out = st["prices"].get(st["model"], [4.0, 20.0])
     if not reqs:
         return 0.0
     sys_tok = len(reqs[0][1]) // 4
-    in_tok = sum(len(u) // 4 for _, _, u, _ in reqs) + sys_tok * (1 + 0.1 * len(reqs))
-    return 0.5 * (in_tok * p_in + out_per_req * len(reqs) * p_out) / 1e6
+    in_tok = sum(len(u) // 4 + extra_in for _, _, u, _ in reqs) + sys_tok * (1 + 0.1 * len(reqs))
+    return 0.5 * (in_tok * p_in + out_per_req * len(reqs) * p_out) / 1e6 + extra_usd * len(reqs)
 
 
 # ---------------------------------------------------------------- pass 1: screen
-def screen_requests(cfg, st, con, streams) -> tuple[list, list]:
-    """-> (requests still needed, cached screen results with their window turns)."""
-    need, have, flying = [], [], in_flight(cfg)
+def screen_requests(cfg, st, con, streams) -> tuple[list, list, bool]:
+    """-> (requests still needed, cached results with their window turns, whether some are still in flight)."""
+    need, have, flying, waiting = [], [], in_flight(cfg), False
     for v in streams:
         turns = turns_of(con, v["id"])
         for w in windows(turns, st["window_s"], st["overlap_s"]):
             text = lines_text(w)
-            key = h("screen", 1, st["model"], v["id"], text)
+            key = h("screen", 2, st["model"], v["id"], text)
             got = cache_get(cfg, "screen", key)
             if got is not None:
                 have.append((v, w, got))
-            elif key not in flying:
+            elif key in flying:
+                waiting = True
+            else:
                 user = (f"Stream: {v['title']} ({v['upload_date']}). Transcript window "
-                        f"{fmt(w[0]['start'])}-{fmt(w[-1]['end'])}.\n\nList every moment in this window where Hasan "
-                        f"himself may have said something egregious under the rubric (severity 4 or more), with the "
-                        f"stance you can tell from this window. Most windows have none: return an empty list then.\n\n"
+                        f"{fmt(w[0]['start'])}-{fmt(w[-1]['end'])}.\n\n"
+                        f"1. moments: every moment in this window where Hasan himself may have said something egregious "
+                        f"under the rubric (severity 4 or more), with the stance you can tell from this window. Most "
+                        f"windows have none: return an empty list then.\n"
+                        f"2. claims: the checkable factual claims Hasan himself states as fact in this window (events, "
+                        f"numbers, what someone said or did, history, science). Not opinions, predictions, hyperbole, "
+                        f"jokes, or things he is reading aloud. Rate how consequential each is. Often there are none.\n\n"
                         f"{text}")
                 need.append((key, RUBRIC, user, SCREEN_SCHEMA))
-    return need, have
+    return need, have, waiting
 
 
 def candidates(st, screened) -> list[dict]:
@@ -344,33 +408,38 @@ def candidates(st, screened) -> list[dict]:
 # ---------------------------------------------------------------- pass 2: judge
 def judge_input(st, con, v, m) -> tuple[str, list[dict], list[dict]]:
     turns = [t for t in turns_of(con, v["id"]) if m["start"] - st["context_s"] <= t["start"] <= m["end"] + st["context_s"]]
-    chat = chat_window(con, v["id"], m["start"] - 10, m["end"] + 120, st["chat_max"])
+    chat = chat_window(con, v["id"], m["start"] - 120, m["end"] + 480, st["chat_max"])
     return lines_text(turns), turns, chat
 
 
-def judge_requests(cfg, st, con, streams, cands) -> tuple[list, list]:
+def judge_requests(cfg, st, con, streams, cands) -> tuple[list, list, bool]:
     by_id = {v["id"]: v for v in streams}
-    need, have, flying = [], [], in_flight(cfg)
+    need, have, flying, waiting = [], [], in_flight(cfg), False
     for m in cands:
         v = by_id[m["vid"]]
         text, turns, chat = judge_input(st, con, v, m)
         chat_text = "\n".join(f"[{c['t']:.0f}s {fmt(c['t'])}] {c['text']}" for c in chat)
-        key = h("judge", 1, st["model"], v["id"], m["start"], text, chat_text)
+        key = h("judge", 2, st["model"], v["id"], m["start"], text, chat_text)
         got = cache_get(cfg, "judge", key)
         if got is not None:
             have.append((v, m, turns, chat, got))
-        elif key not in flying:
+        elif key in flying:
+            waiting = True
+        else:
             user = (f"Stream: {v['title']} ({v['upload_date']}).\nThe first pass flagged this moment: "
                     f"{fmt(m['start'])}-{fmt(m['end'])}, {m['category']}, stance {m['stance']}, severity {m['severity']}: "
                     f"\"{m['quote']}\" ({m['why']}).\n\nMake the final call with the full context below. Decide again "
                     f"whose words they are and whether he means them; score severity on the rubric; write the nuance a "
-                    f"fair reader would need; describe the chat's reaction from the chat lines (no usernames); pick "
-                    f"clip boundaries from line timestamps that show the point with enough lead-in.\n\n"
+                    f"fair reader would need; describe the chat's reaction from the chat lines (no usernames).\n"
+                    f"Then choose the segment for the reel from line timestamps. Make it as long as the point needs and "
+                    f"no longer: 15-30 seconds for a one-liner, a few minutes for an exchange, up to 15 minutes when he "
+                    f"builds an argument and the full run is what a viewer needs to judge it fairly. Include enough "
+                    f"lead-in to show what he is responding to, and the caveats he gives if any.\n\n"
                     f"TRANSCRIPT ({fmt(turns[0]['start']) if turns else ''} onward):\n{text}\n\n"
                     f"CHAT AT THE TIME ({len(chat)} messages{', evenly sampled' if len(chat) >= st['chat_max'] else ''}):\n"
                     f"{chat_text or '(no chat)'}")
             need.append((key, RUBRIC, user, JUDGE_SCHEMA))
-    return need, have
+    return need, have, waiting
 
 
 def clip_from(st, v, m, turns, chat, got) -> dict | None:
@@ -393,7 +462,91 @@ def clip_from(st, v, m, turns, chat, got) -> dict | None:
             "severity": r["severity"], "confidence": r["confidence"], "stance": r["stance"],
             "categories": r["categories"], "title": r["title"], "summary": r["summary"],
             "why_notable": r["why_notable"], "nuance": r["nuance"], "chat_reaction": r["chat_reaction"],
-            "chat_examples": examples, "quote": r["quote"], "lines": lines}
+            "chat_examples": examples, "quote": r["quote"], "segment_reason": r.get("segment_reason", ""),
+            "lines": lines}
+
+
+# ---------------------------------------------------------------- pass 3: fact-check
+def claims_from(st, screened) -> list[dict]:
+    out = []
+    for v, w, got in screened:
+        if got.get("status") != "succeeded":
+            continue
+        text = norm(" ".join(t["text"] for t in w if t["speaker"] in ("Hasan", "Auto-captions")))
+        for c in got["result"].get("claims", []):
+            if c["importance"] < st["fact_min_importance"] or not c["quote"] or norm(c["quote"]) not in text:
+                continue
+            out.append({**c, "vid": v["id"]})
+    out.sort(key=lambda c: (-c["importance"], c["vid"], c["start"]))
+    kept = []
+    for c in out:                            # windows overlap; the same claim is often listed twice
+        if any(k["vid"] == c["vid"] and norm(k["quote"]) == norm(c["quote"]) for k in kept):
+            continue
+        kept.append(c)
+    return kept[: st["max_facts"]]
+
+
+def fact_requests(cfg, st, con, streams, claims) -> tuple[list, list, bool]:
+    by_id = {v["id"]: v for v in streams}
+    need, have, flying, waiting = [], [], in_flight(cfg), False
+    for c in claims:
+        v = by_id[c["vid"]]
+        turns = [t for t in turns_of(con, v["id"]) if abs(t["start"] - c["start"]) <= st["fact_context_s"]]
+        text = lines_text(turns)
+        key = h("fact", 1, st["model"], v["id"], c["start"], c["claim"], text)
+        got = cache_get(cfg, "fact", key)
+        if got is not None:
+            have.append((v, c, turns, got))
+        elif key in flying:
+            waiting = True
+        else:
+            user = (f"Stream: {v['title']}, {v['upload_date'][:4]}-{v['upload_date'][4:6]}-{v['upload_date'][6:]}.\n"
+                    f"Claim to check (as restated by a first pass): {c['claim']}\n"
+                    f"His words: \"{c['quote']}\" at {fmt(c['start'])}.\n\nTranscript around it:\n{text}")
+            need.append((key, FACT_RUBRIC, user, None))
+    return need, have, waiting
+
+
+def fact_from(v, c, turns, got) -> dict | None:
+    if got.get("status") != "succeeded" or not isinstance(got.get("result"), dict):
+        return None
+    r = got["result"]
+    if r.get("verdict") not in VERDICTS or r["verdict"] == "not_checkable":
+        return None
+    seen = set(got.get("urls", []))
+    sources = [s for s in r.get("sources", []) if isinstance(s, dict) and s.get("url") in seen][:5]
+    if r["verdict"] != "accurate" and not sources:
+        return None                          # never publish a negative verdict without a source it actually found
+    return {"video_id": v["id"], "stream_title": v["title"], "date": v["upload_date"], "t": c["start"],
+            "quote": c["quote"], "claim": r.get("claim") or c["claim"], "topic": c["topic"], "verdict": r["verdict"],
+            "correction": r.get("correction", ""), "explanation": r.get("explanation", ""),
+            "confidence": r.get("confidence", "medium"), "sources": sources}
+
+
+def last_json(text: str):
+    """The last top-level {...} object in a text (the fact-check answer ends with one). Uses the JSON decoder, so
+    braces inside strings don't confuse it; nested objects are skipped over, not returned."""
+    dec, found, i = json.JSONDecoder(), None, text.find("{")
+    while i != -1:
+        try:
+            obj, end = dec.raw_decode(text, i)
+        except json.JSONDecodeError:
+            i = text.find("{", i + 1)
+            continue
+        if isinstance(obj, dict):
+            found = obj
+        i = text.find("{", end)
+    return found
+
+
+def summarise(facts: list[dict]) -> dict:
+    by_verdict = {v: 0 for v in VERDICTS if v != "not_checkable"}
+    by_topic = {}
+    for f in facts:
+        by_verdict[f["verdict"]] += 1
+        t = by_topic.setdefault(f["topic"], {v: 0 for v in by_verdict})
+        t[f["verdict"]] += 1
+    return {"checked": len(facts), "by_verdict": by_verdict, "by_topic": by_topic}
 
 
 # ---------------------------------------------------------------- build
@@ -406,36 +559,46 @@ def build(cfg, week: str, client=None, yes: bool = False, wait: bool = False, bu
     if not streams:
         log.info("week %s: no streams in public.db", week)
         return "empty"
+
+    def send(batches: list[tuple[str, list, float]]) -> str | None:
+        """batches: (kind, requests, estimated usd). Returns a status to stop with, or None after submitting."""
+        nonlocal client
+        todo = [(k, r, u) for k, r, u in batches if r]
+        if not todo:
+            return None
+        usd = sum(u for *_, u in todo)
+        print(f"week {week}: " + "; ".join(f"{k} {len(r)} requests" for k, r, _ in todo) +
+              f" with {st['model']}: about ${usd:.2f}")
+        if not yes:
+            return "estimate"
+        if budget is not None and usd > budget:
+            log.error("week %s: estimate $%.2f is over the $%.2f budget; not submitted", week, usd, budget)
+            return "over_budget"
+        client = client or api_client()
+        for kind, reqs, _ in todo:
+            submit(cfg, st, kind, reqs, client)
+        return None
+
     while True:
         if client is not None:
             collect(cfg, client, wait=False)
-        need, screened = screen_requests(cfg, st, con, streams)
-        if need:
-            usd = estimate(st, need, 400)
-            print(f"week {week}: screening {len(need)} transcript windows with {st['model']}: about ${usd:.2f}")
-            if not yes:
-                return "estimate"
-            if budget is not None and usd > budget:
-                log.error("week %s: screening estimate $%.2f is over the $%.2f budget; not submitted", week, usd, budget)
-                return "over_budget"
-            submit(cfg, st, "screen", need, client or (client := api_client()))
-        if need or _screen_pending(cfg, st, con, streams):
+        need, screened, waiting = screen_requests(cfg, st, con, streams)
+        stop = send([("screen", need, estimate(st, need, 600))])
+        if stop:
+            return stop
+        if need or waiting:
             if not wait:
                 return "waiting"
             collect(cfg, client, wait=True)
             continue
-        cands = candidates(st, screened)
-        jneed, judged = judge_requests(cfg, st, con, streams, cands)
-        if jneed:
-            usd = estimate(st, jneed, 1500)
-            print(f"week {week}: judging {len(jneed)} candidate moments: about ${usd:.2f}")
-            if not yes:
-                return "estimate"
-            if budget is not None and usd > budget:
-                log.error("week %s: judging estimate $%.2f is over the $%.2f budget; not submitted", week, usd, budget)
-                return "over_budget"
-            submit(cfg, st, "judge", jneed, client or (client := api_client()))
-        if jneed or _judge_pending(cfg, st, con, streams, cands):
+        jneed, judged, jwait = judge_requests(cfg, st, con, streams, candidates(st, screened))
+        fneed, checked, fwait = fact_requests(cfg, st, con, streams, claims_from(st, screened))
+        stop = send([("judge", jneed, estimate(st, jneed, 2000)),
+                     ("fact", fneed, estimate(st, fneed, 2500, extra_in=20000,
+                                              extra_usd=st["search_usd"] * st["fact_search_uses"]))])
+        if stop:
+            return stop
+        if jneed or fneed or jwait or fwait:
             if not wait:
                 return "waiting"
             collect(cfg, client, wait=True)
@@ -444,46 +607,29 @@ def build(cfg, week: str, client=None, yes: bool = False, wait: bool = False, bu
     clips = [c for c in (clip_from(st, *x) for x in judged) if c]
     clips.sort(key=lambda c: (-c["severity"], {"high": 0, "medium": 1, "low": 2}[c["confidence"]], c["date"], c["start"]))
     clips = clips[: st["max_clips"]]
-    lo, hi = week_bounds(week)
+    facts = [f for f in (fact_from(*x) for x in checked) if f]
+    order = {"false": 0, "misleading": 1, "unsupported": 2, "mostly_accurate": 3, "accurate": 4}
+    facts.sort(key=lambda f: (order[f["verdict"]], f["date"], f["t"]))
     out = {"week": week, "week_end": (dt.date.fromisoformat(week) + dt.timedelta(days=6)).isoformat(),
            "generated_at": (now or dt.datetime.now()).isoformat(timespec="seconds"), "model": st["model"],
            "streams": [{"video_id": v["id"], "title": v["title"], "date": v["upload_date"]} for v in streams],
            "fingerprint": fingerprint(con, streams), "candidates_judged": len(judged), "clips": clips,
+           "fact_checks": facts, "fact_summary": summarise(facts),
            "method": "Claude read every transcript line of the week's streams, flagged moments where Hasan himself "
-                     "may have said something egregious, then re-judged the strongest with 6 minutes of context and "
+                     "may have said something egregious, then re-judged the strongest with 20 minutes of context and "
                      "the chat at the time, against a fixed rubric (own words only; readings, condemnations and "
-                     "mainstream criticism excluded)."}
+                     "mainstream criticism excluded), choosing each segment's length. The same first pass listed the "
+                     "factual claims he stated as fact; the most consequential were checked with web search as of the "
+                     "day he said them. Verdicts assess accuracy only: nobody can tell from a transcript whether he "
+                     "believed a claim."}
     d = reels_dir(cfg)
     d.mkdir(parents=True, exist_ok=True)
     tmp = d / f"{week}.json.tmp"
     tmp.write_text(json.dumps(out, ensure_ascii=False, indent=1))
     tmp.replace(d / f"{week}.json")
-    print(f"week {week}: wrote {len(clips)} clip(s) from {len(judged)} judged candidate(s) -> {d / (week + '.json')}")
+    print(f"week {week}: wrote {len(clips)} clip(s) from {len(judged)} judged, {len(facts)} fact-check(s) -> "
+          f"{d / (week + '.json')}")
     return "written"
-
-
-def _screen_pending(cfg, st, con, streams) -> bool:
-    flying = in_flight(cfg)
-    if not flying:
-        return False
-    for v in streams:
-        for w in windows(turns_of(con, v["id"]), st["window_s"], st["overlap_s"]):
-            if h("screen", 1, st["model"], v["id"], lines_text(w)) in flying:
-                return True
-    return False
-
-
-def _judge_pending(cfg, st, con, streams, cands) -> bool:
-    flying = in_flight(cfg)
-    if not flying:
-        return False
-    by_id = {v["id"]: v for v in streams}
-    for m in cands:
-        text, _, chat = judge_input(st, con, by_id[m["vid"]], m)
-        chat_text = "\n".join(f"[{c['t']:.0f}s {fmt(c['t'])}] {c['text']}" for c in chat)
-        if h("judge", 1, st["model"], m["vid"], m["start"], text, chat_text) in flying:
-            return True
-    return False
 
 
 def fingerprint(con, streams) -> str:

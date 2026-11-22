@@ -28,6 +28,9 @@ class FakeBatches:
     def results(self, bid):
         for r in self.store[bid]:
             user = r["params"]["messages"][0]["content"]
+            if r["custom_id"].startswith("f"):
+                yield self.fact(r)
+                continue
             if r["custom_id"].startswith("s"):
                 moments = []
                 if "rent control" in user:
@@ -35,17 +38,50 @@ class FakeBatches:
                                     "severity": 6, "quote": "the housing market and rent control", "why": "test"})
                     moments.append({"start": 300, "end": 310, "stance": "own_view", "category": "other",
                                     "severity": 9, "quote": "words that were never said", "why": "invented"})
-                body = {"moments": moments}
+                claims = []
+                if "rent control" in user:
+                    claims = [{"start": 6.5, "quote": "the housing market and rent control", "topic": "economy",
+                               "claim": "Rent control is today's topic", "importance": 4},
+                              {"start": 1, "quote": "Welcome back everybody", "topic": "other",
+                               "claim": "He welcomed viewers back", "importance": 3},
+                              {"start": 300, "quote": "Okay chat that was the glacier video", "topic": "science_and_health",
+                               "claim": "Glaciers are retreating", "importance": 5},
+                              {"start": 2, "quote": "never said this", "topic": "other", "claim": "x", "importance": 5},
+                              {"start": 5, "quote": "Welcome back", "topic": "other", "claim": "dup", "importance": 1}]
+                body = {"moments": moments, "claims": claims}
             else:
                 body = {"keep": True, "stance": "own_view", "severity": 7, "confidence": "high",
                         "categories": ["misinformation"], "title": "Rent control segment", "summary": "s",
                         "why_notable": "w", "nuance": "n", "chat_reaction": "c",
                         "chat_examples": ["rent is too damn high https://example.com/x", "a message nobody sent"],
-                        "quote": "housing market and rent control", "clip_start": 0, "clip_end": 9999}
+                        "quote": "housing market and rent control", "clip_start": 0, "clip_end": 9999,
+                        "segment_reason": "the whole opening"}
             stop = "refusal" if self.refuse and r["custom_id"].startswith("j") else "end_turn"
             msg = NS(stop_reason=stop, content=[NS(type="text", text=json.dumps(body))],
                      usage=NS(input_tokens=10, output_tokens=5, cache_read_input_tokens=0))
             yield NS(custom_id=r["custom_id"], result=NS(type="succeeded", message=msg))
+
+
+    def fact(self, r):
+        user = r["params"]["messages"][0]["content"]
+        assert r["params"]["tools"][0]["type"] == "web_search_20260209" and "format" not in r["params"]["output_config"]
+        found = [NS(type="web_search_result", url="https://example.org/real", title="Real")]
+        if "Glaciers" in user:      # a false verdict citing only a source the search never returned: must be dropped
+            body = {"verdict": "false", "claim": "c", "correction": "x", "explanation": "e", "confidence": "high",
+                    "sources": [{"url": "https://invented.example/none", "title": "made up"}]}
+        elif "welcomed" in user:
+            body = {"verdict": "not_checkable", "claim": "c", "correction": "", "explanation": "greeting",
+                    "confidence": "high", "sources": []}
+        else:
+            body = {"verdict": "misleading", "claim": "Rent control is the topic", "correction": "Partly.",
+                    "explanation": "Checked.", "confidence": "medium",
+                    "sources": [{"url": "https://example.org/real", "title": "Real"},
+                                {"url": "https://invented.example/x", "title": "not searched"}]}
+        content = [NS(type="server_tool_use"), NS(type="web_search_tool_result", content=found),
+                   NS(type="text", text="I searched. Here is my verdict:\n" + json.dumps(body))]
+        msg = NS(stop_reason="end_turn", content=content,
+                 usage=NS(input_tokens=10, output_tokens=5, cache_read_input_tokens=0))
+        return NS(custom_id=r["custom_id"], result=NS(type="succeeded", message=msg))
 
 
 class FakeClient:
@@ -78,9 +114,11 @@ def test_build_estimates_then_screens_judges_and_writes(reel_project):
     client = FakeClient()
     assert reel.build(cfg, WEEK, client=client, yes=True) == "waiting"          # screen batch submitted
     assert len(client.messages.batches.created) == 1
-    assert reel.build(cfg, WEEK, client=client, yes=True) == "waiting"          # collected; judge batch submitted
-    assert len(client.messages.batches.created) == 2
+    assert reel.build(cfg, WEEK, client=client, yes=True) == "waiting"          # collected; judge + fact batches
+    assert len(client.messages.batches.created) == 3
     judge_reqs = client.messages.batches.created[1]
+    fact_reqs = client.messages.batches.created[2]
+    assert len(fact_reqs) == 3        # invented quote dropped, near-duplicate merged
     assert len(judge_reqs) == 1                                                  # invented-quote moment dropped
     assert "rent is too damn high" in judge_reqs[0]["params"]["messages"][0]["content"]   # chat went to Claude
     assert reel.build(cfg, WEEK, client=client, yes=True) == "written"
@@ -89,11 +127,16 @@ def test_build_estimates_then_screens_judges_and_writes(reel_project):
     [c] = out["clips"]
     assert c["video_id"] == "v1001" and c["severity"] == 7 and c["embed_type"] == "twitch"
     assert c["chat_examples"] == ["rent is too damn high https://example.com/x"]  # invented chat line dropped
-    assert c["end"] - c["start"] <= 150 and c["start"] >= 0                       # clip clamped to context
+    assert c["start"] >= 0 and c["end"] - c["start"] <= 900                       # long segment kept, capped at 15 min
+    assert c["end"] - c["start"] > 150 and c["segment_reason"] == "the whole opening"
+    [f] = out["fact_checks"]                       # not_checkable and the unsourced 'false' are not published
+    assert f["verdict"] == "misleading" and f["topic"] == "economy" and f["t"] == 6.5
+    assert [x["url"] for x in f["sources"]] == ["https://example.org/real"]       # unsearched URL dropped
+    assert out["fact_summary"]["checked"] == 1 and out["fact_summary"]["by_verdict"]["misleading"] == 1
     assert any("rent control" in l["text"] for l in c["lines"])
     # nothing changed: rebuilding uses the cache, no new batches
     assert reel.build(cfg, WEEK, client=client, yes=True) == "written"
-    assert len(client.messages.batches.created) == 2
+    assert len(client.messages.batches.created) == 3
 
 
 def test_build_wait_runs_through_and_refusals_are_skipped(reel_project):
@@ -104,7 +147,7 @@ def test_build_wait_runs_through_and_refusals_are_skipped(reel_project):
     assert out["clips"] == [] and out["candidates_judged"] == 1
     # a refused moment is cached as a failure, so the next run doesn't resubmit it
     assert reel.build(cfg, WEEK, client=client, yes=True) == "written"
-    assert len(client.messages.batches.created) == 2
+    assert len(client.messages.batches.created) == 3
 
 
 def test_build_respects_budget_and_empty_weeks(reel_project):
@@ -141,3 +184,13 @@ def test_reel_api(reel_project):
     for bad in ("2026-11-02", "..%2fconfig.yaml", "%2e%2e%2f..%2fconfig", "nope"):
         assert c.get(f"/api/reels/{bad}").status_code == 404
     assert c.get("/reel.html").status_code == 200
+    fc = c.get("/api/factchecks").json()
+    assert fc["total"]["misleading"] == 1 and fc["by_topic"]["economy"]["misleading"] == 1
+    assert fc["weeks"] == [{"week": WEEK, "false": 0, "misleading": 1, "unsupported": 0, "mostly_accurate": 0,
+                            "accurate": 0}]
+
+
+def test_last_json():
+    assert reel.last_json('text {"a": 1} more {"b": {"c": 2}}') == {"b": {"c": 2}}
+    assert reel.last_json('{"a": "brace } inside"}') == {"a": "brace } inside"}
+    assert reel.last_json("no json here") is None
