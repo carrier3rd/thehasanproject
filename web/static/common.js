@@ -59,7 +59,7 @@ async function chrome(active) {
     el('input', { type: 'hidden', name: 'tab', value: 'transcripts' }));
   document.body.prepend(el('header', {},
     el('a', { href: 'index.html', class: 'brand', text: 'VOD archive' }),
-    link('index.html', 'Search'), link('videos.html', 'Videos'), link('about.html', 'About'), box,
+    link('index.html', 'Search'), link('videos.html', 'Videos'), link('reel.html', 'Weekly'), link('about.html', 'About'), box,
     cfg.mode === 'admin' ? el('span', { class: 'badge', text: 'ADMIN · private' }) : null));
   document.body.append(el('footer', { text: 'Transcripts and speaker labels are machine-generated and may contain errors. ' +
     'The linked video is the authoritative record.' }));

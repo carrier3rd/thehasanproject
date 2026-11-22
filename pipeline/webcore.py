@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import hmac
 import json
+import re
 import os
 import sqlite3
 import time
@@ -339,6 +340,28 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
             return {"hits": out}
         finally:
             con.close()
+
+    reels = P(cfg, "reels") if "reels" in cfg.get("paths", {}) else None
+
+    @app.get("/api/reels")
+    def reel_list():
+        if reels is None or not reels.is_dir():
+            return {"weeks": []}
+        out = []
+        for p in sorted(reels.glob("????-??-??.json"), reverse=True):
+            try:
+                r = json.loads(p.read_text())
+            except (OSError, ValueError):
+                continue
+            out.append({"week": r["week"], "week_end": r["week_end"], "clips": len(r["clips"]),
+                        "streams": len(r["streams"]), "generated_at": r["generated_at"]})
+        return {"weeks": out}
+
+    @app.get("/api/reels/{week}")
+    def reel_week(week: str):
+        if reels is None or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", week) or not (reels / f"{week}.json").is_file():
+            raise HTTPException(404, "no reel for that week")
+        return json.loads((reels / f"{week}.json").read_text())
 
     @app.get("/api/speakers")
     def speakers():

@@ -115,6 +115,21 @@ Run `python -m pytest` from the repo root (27 tests, no GPU or network needed).
   changing them makes `build_db.py` reload every VOD's turns (not its chat). A real "Thank you." said with 8 s of
   silence on both sides would also be dropped; lower the gap if that shows up.
 
+- **Weekly reel** (`pipeline/reel.py`, `web/static/reel.html`, `/api/reels`): the week's most egregious things Hasan
+  said, chosen and explained by Claude (`claude-opus-5-5`, Batches API). Pass 1 screens every transcript line of the
+  Sunday-Saturday week in 12-minute windows (all speakers labelled; effort low); pass 2 re-judges the strongest 30 with
+  6 minutes of transcript and up to 400 chat messages (effort high) against a fixed rubric in `reel.py` (own words only;
+  readings, condemnations, mainstream policy criticism excluded; same standard for every group). Quotes and chat
+  examples not found verbatim in the input are dropped, so nothing invented is published. Results are cached per stream
+  window and per candidate, so a late transcript costs only its own stream. Reads public.db only and writes
+  `reels/<week>.json` (public). `nightly.sh` runs `reel.py auto` every hour, including quick runs; it does nothing until
+  Sunday `build_after_hour` (10:00), then submits, collects on later hours, writes the reel, and rebuilds only when the
+  week's transcripts change. `max_usd_per_week` (15) caps what auto submits. Clips are the Twitch/YouTube embed cued to
+  the clip and paused at its end (no video is downloaded); when the VOD is gone the page plays transcript and chat on a
+  clock. Tested with a fake API client; the real prompts have not yet run.
+- The watch page's phone CSS now targets `main.watch #player` / `#slider` instead of the bare ids; the unscoped rules
+  reordered the reel page's player on phones.
+
 ## Library versions checked
 Signatures were read from the wheels, not run: whisperx 3.8.6 (`whisperx.diarize.DiarizationPipeline(token=...)`,
 `__call__(..., return_embeddings=True)` returning `(df, {speaker: vector})`), pyannote.audio 4.0.7

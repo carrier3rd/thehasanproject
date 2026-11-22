@@ -30,6 +30,7 @@ fi
 # rebuild and publish below only run when a download or a transcript arrived since the last publish.
 sig=$(ls -l --time-style=+%s data/audio data/transcripts 2>/dev/null | md5sum | cut -c1-32)
 if [ "${QUICK:-0}" = 1 ] && [ -f logs/published.sig ] && [ "$sig" = "$(cat logs/published.sig)" ]; then
+  python pipeline/reel.py auto || echo "!!! step failed: reel.py auto"   # collects finished Claude batches too
   echo "=== quick run: nothing new since the last publish; end $(date -Is) ==="
   exit 0
 fi
@@ -41,6 +42,7 @@ echo "--- publish"
 if python pipeline/publish.py; then
   step pipeline/embed.py
   echo "$sig" > logs/published.sig
+  step pipeline/reel.py auto     # weekly reel: no-op until Sunday, then builds/refreshes last week via Claude
   if [ -n "${WEB_HOST:-}" ]; then
     rsync -a --delay-updates public.db index "${WEB_HOST}:${WEB_DIR:-/opt/vod-archive}/" \
       && ssh "$WEB_HOST" sudo systemctl restart web.service

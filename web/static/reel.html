@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Weekly reel · VOD archive</title><link rel="stylesheet" href="style.css"></head>
+<body><main class="reel">
+  <div class="reelbar">
+    <select id="week" aria-label="Week"></select>
+    <button id="prev" aria-label="Previous clip">←</button>
+    <span id="count" class="num"></span>
+    <button id="next" aria-label="Next clip">→</button>
+  </div>
+  <div id="empty" class="note" hidden></div>
+  <div id="stage" hidden>
+    <div class="rcol">
+      <div id="player"></div>
+      <div id="slider" hidden>
+        <div class="note" style="padding:0 0 6px">The original video is no longer available. The clock below plays the clip's transcript and chat.</div>
+        <input type="range" id="range" step="1" aria-label="Position">
+      </div>
+      <div class="bar clipctl">
+        <button id="play">Play clip</button>
+        <span id="clock" class="num"></span>
+        <a id="full">Open full stream here</a>
+      </div>
+      <article id="card"></article>
+    </div>
+    <div class="rcol">
+      <nav class="tabs" id="rtabs">
+        <button type="button" data-pane="chat" class="on">Chat at the time</button>
+        <button type="button" data-pane="lines">Transcript</button>
+      </nav>
+      <div id="chatbox">
+        <label class="allchat"><input type="checkbox" id="allchat"> show the whole clip's chat</label>
+        <div id="rchat"></div>
+      </div>
+      <div id="lines" hidden></div>
+    </div>
+  </div>
+  <p class="note small">Clips are picked and described by Claude (AI) from machine-made transcripts, using a fixed rubric
+    that counts only Hasan's own words. Transcripts can mishear; watch the clip before relying on it.</p>
+</main>
+<script src="common.js"></script>
+<script>
+let cfg, reel = null, idx = 0, clip = null, player = null, chat = [], playing = false, sim = null;
+const qs = new URLSearchParams(location.search);
+
+function loadScript(src) {
+  if (document.querySelector(`script[src="${src}"]`)) return Promise.resolve();
+  return new Promise((ok, fail) => document.head.append(el('script', { src, onload: ok, onerror: fail })));
+}
+
+// ---------- player: Twitch / YouTube embed cued to the clip, or a clock when the VOD is gone ----------
+async function mountPlayer(c) {
+  const box = $('#player');
+  box.replaceChildren(); box.hidden = false; $('#slider').hidden = true;
+  if (sim) { clearInterval(sim); sim = null; }
+  try {
+    if (c.embed_type === 'twitch') {
+      await loadScript('https://player.twitch.tv/js/embed/v1.js');
+      const tw = new Twitch.Player(box, { video: String(c.embed_id).replace(/^v/, ''), parent: [cfg.site_domain],
+        width: '100%', height: '100%', autoplay: false, time: fmtTime(c.start).replace(/(\d+):(\d+):(\d+)/, '$1h$2m$3s') });
+      return { get: () => tw.getCurrentTime(), seek: t => tw.seek(t), play: () => tw.play(), pause: () => tw.pause() };
+    }
+    if (c.embed_type === 'youtube') {
+      if (!window.YT || !YT.Player) await new Promise(ok => { window.onYouTubeIframeAPIReady = ok; loadScript('https://www.youtube.com/iframe_api'); });
+      return await new Promise(ok => {
+        const yt = new YT.Player(box.appendChild(el('div')), { videoId: c.embed_id, width: '100%', height: '100%',
+          playerVars: { start: Math.floor(c.start), rel: 0 }, events: { onReady: () => ok({
+            get: () => yt.getCurrentTime(), seek: t => yt.seekTo(t, true), play: () => yt.playVideo(), pause: () => yt.pauseVideo() }) } });
+      });
+    }
+  } catch (e) {
+    box.replaceChildren(el('div', { class: 'note', style: 'padding:16px;color:#ccc', text: 'The video player could not load. Transcript and chat still work.' }));
+  }
+  // no embed (VOD deleted) or the embed failed: a clock over the clip
+  box.hidden = true; $('#slider').hidden = false;
+  const range = $('#range'); range.min = Math.floor(c.start); range.max = Math.ceil(c.end);
+  let pos = c.start, last = 0; range.value = pos;
+  range.oninput = () => { pos = +range.value; };
+  return { get: () => pos, seek: t => { pos = t; range.value = t; },
+    play: () => { last = performance.now(); sim = setInterval(() => { const n = performance.now(); pos += (n - last) / 1000; last = n; range.value = pos; }, 250); },
+    pause: () => { if (sim) clearInterval(sim); sim = null; } };
+}
+
+// ---------- the card ----------
+const STANCE = { own_view: 'His own view', joke_or_bait: 'Joke or bait', unclear: 'Stance unclear' };
+const CAT = c => c.replace(/_/g, ' ');
+function renderCard(c) {
+  const sev = el('span', { class: `sev s${Math.min(Math.max(c.severity, 1), 10)}`, title: 'Severity on the rubric, 1-10', text: `${c.severity}/10` });
+  const meta = el('div', { class: 'cmeta' }, sev,
+    ...c.categories.map(x => el('span', { class: 'tag', text: CAT(x) })),
+    el('span', { class: 'tag', text: STANCE[c.stance] || c.stance }),
+    el('span', { class: 'tag', text: `${c.confidence} confidence` }));
+  const sec = (h, t) => t ? [el('h3', { text: h }), el('p', { text: t })] : [];
+  const ex = c.chat_examples.length ? el('ul', { class: 'cex' }, ...c.chat_examples.map(m => el('li', { text: m }))) : null;
+  $('#card').replaceChildren(
+    meta,
+    el('h2', { text: c.title }),
+    el('div', { class: 'cwhen', text: `${fmtDate(c.date)} · ${c.stream_title} · ${fmtTime(c.start)}–${fmtTime(c.end)}` }),
+    c.quote ? el('blockquote', { text: `“${c.quote}”` }) : null,
+    ...sec('What he said', c.summary), ...sec('Why it’s here', c.why_notable),
+    ...sec('Context and nuance', c.nuance), ...sec('Chat’s reaction', c.chat_reaction), ex);
+  $('#full').href = watchUrl(c.video_id, c.start);
+  $('#lines').replaceChildren(...c.lines.map(l => el('div', { class: 'turn' + (l.speaker === 'Media' ? ' media' : ''), 'data-t': l.t,
+    onclick: () => { player && player.seek(l.t); } },
+    el('span', { class: 't', text: fmtTime(l.t) }), el('span', {}, el('span', { class: 'who', text: l.speaker }), document.createTextNode(l.text)))));
+}
+
+// ---------- chat for the clip window ----------
+async function loadChat(c) {
+  chat = [];
+  $('#rchat').replaceChildren(el('div', { class: 'note', style: 'padding:10px', text: 'Loading chat…' }));
+  try {
+    const r = await api(`/api/videos/${encodeURIComponent(c.video_id)}/chat`, { start: Math.max(c.start - 10, 0), end: c.end + 60 });
+    if (clip === c) chat = r.messages;
+  } catch (e) { /* shown as empty */ }
+  lastKey = '';
+}
+let lastKey = '';
+function renderChat(now) {
+  const all = $('#allchat').checked;
+  const msgs = all ? chat : chat.filter(m => m.t <= now).slice(-60);
+  const key = `${all}-${msgs.length}-${msgs.length ? msgs[msgs.length - 1].id : 0}`;
+  if (key === lastKey) return;
+  lastKey = key;
+  const box = $('#rchat');
+  if (!msgs.length) return box.replaceChildren(el('div', { class: 'note', style: 'padding:10px',
+    text: chat.length ? 'Chat appears here as the clip plays.' : 'No chat for this clip.' }));
+  box.replaceChildren(...msgs.map(m => {
+    const time = el('span', { class: 't', text: fmtTime(m.t) });
+    const who = el('span', { class: 'who', text: m.author || '?' });
+    if (m.kind === 'mod_action') return el('div', { class: 'msg mod' }, time, who, document.createTextNode(' ' + m.text));
+    return el('div', { class: 'msg' + (m.deleted ? ' deleted' : '') }, time,
+      m.first_msg ? el('span', { class: 'first', text: 'first' }) : null, who, document.createTextNode(': '),
+      el('span', { class: 'body', text: m.text }), m.deleted ? el('span', { class: 'tag del', text: 'deleted by mods' }) : null);
+  }));
+  if (!all) box.scrollTop = box.scrollHeight;
+}
+
+// ---------- flipping ----------
+async function show(i) {
+  if (!reel || !reel.clips.length) return;
+  idx = (i + reel.clips.length) % reel.clips.length;
+  clip = reel.clips[idx];
+  playing = false; $('#play').textContent = 'Play clip';
+  $('#count').textContent = `${idx + 1} / ${reel.clips.length}`;
+  history.replaceState(null, '', `?week=${reel.week}&clip=${idx + 1}`);
+  renderCard(clip);
+  loadChat(clip);
+  player = null;
+  player = await mountPlayer(clip);
+}
+
+async function loadWeek(week) {
+  try { reel = await api('/api/reels/' + encodeURIComponent(week)); }
+  catch (e) { reel = null; }
+  if (!reel || !reel.clips.length) {
+    $('#stage').hidden = true; $('#empty').hidden = false;
+    $('#empty').textContent = reel ? `Nothing from this week met the bar (${reel.candidates_judged} moments were judged).` : 'This week’s reel is not available.';
+    $('#count').textContent = '';
+    return;
+  }
+  $('#empty').hidden = true; $('#stage').hidden = false;
+  const want = Math.max((+qs.get('clip') || 1) - 1, 0);
+  show(reel.week === qs.get('week') ? Math.min(want, reel.clips.length - 1) : 0);
+}
+
+function tick() {
+  if (!clip || !player) return;
+  let t = clip.start;
+  try { const g = player.get(); if (typeof g === 'number' && isFinite(g)) t = g; } catch (e) { /* not ready */ }
+  if (playing && t >= clip.end) { player.pause(); playing = false; $('#play').textContent = 'Replay clip'; }
+  $('#clock').textContent = `${fmtTime(Math.max(t - clip.start, 0))} / ${fmtTime(clip.end - clip.start)}`;
+  for (const n of document.querySelectorAll('#lines .turn')) {
+    const on = +n.dataset.t <= t && (!n.nextElementSibling || +n.nextElementSibling.dataset.t > t);
+    n.classList.toggle('now', on);
+  }
+  renderChat(t);
+}
+
+(async () => {
+  cfg = await chrome('reel.html');
+  let weeks = [];
+  try { weeks = (await api('/api/reels')).weeks; } catch (e) { /* none */ }
+  if (!weeks.length) {
+    $('#empty').hidden = false;
+    $('#empty').textContent = 'No weekly reel yet. The first one is built after a full week (Sunday to Saturday) has streamed.';
+    $('.reelbar').hidden = true;
+    return;
+  }
+  $('#week').replaceChildren(...weeks.map(w => el('option', { value: w.week,
+    text: `Week of ${w.week} – ${w.week_end} (${w.clips} clip${w.clips === 1 ? '' : 's'})` })));
+  if (weeks.some(w => w.week === qs.get('week'))) $('#week').value = qs.get('week');
+  $('#week').addEventListener('change', e => { qs.delete('clip'); loadWeek(e.target.value); });
+  $('#prev').addEventListener('click', () => show(idx - 1));
+  $('#next').addEventListener('click', () => show(idx + 1));
+  document.addEventListener('keydown', e => {
+    if (e.target.matches('input, select, textarea')) return;
+    if (e.key === 'ArrowLeft') show(idx - 1);
+    if (e.key === 'ArrowRight') show(idx + 1);
+  });
+  let x0 = null;   // swipe on phones, over the write-up
+  $('#card').addEventListener('touchstart', e => { x0 = e.touches[0].clientX; }, { passive: true });
+  $('#card').addEventListener('touchend', e => {
+    if (x0 === null) return;
+    const dx = e.changedTouches[0].clientX - x0; x0 = null;
+    if (Math.abs(dx) > 60) show(idx + (dx < 0 ? 1 : -1));
+  });
+  $('#play').addEventListener('click', () => {
+    if (!player) return;
+    let t = clip.start;
+    try { t = player.get(); } catch (e) { /* not ready */ }
+    if (!playing && (t >= clip.end - 0.5 || t < clip.start - 1)) player.seek(clip.start);
+    if (playing) { player.pause(); playing = false; $('#play').textContent = 'Play clip'; }
+    else { player.play(); playing = true; $('#play').textContent = 'Pause'; }
+  });
+  $('#allchat').addEventListener('change', () => { lastKey = ''; });
+  for (const b of document.querySelectorAll('#rtabs button')) b.addEventListener('click', () => {
+    for (const o of document.querySelectorAll('#rtabs button')) o.classList.toggle('on', o === b);
+    $('#chatbox').hidden = b.dataset.pane !== 'chat';
+    $('#lines').hidden = b.dataset.pane !== 'lines';
+  });
+  await loadWeek($('#week').value);
+  setInterval(tick, 400);
+})();
+</script></body></html>

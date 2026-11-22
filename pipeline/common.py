@@ -136,7 +136,7 @@ def cfg_file(cfg: dict, name: str) -> Path:
 
 
 def make_dirs(cfg: dict) -> None:
-    for key in ("audio", "chat", "transcripts", "muted", "index", "voices", "voiceprints", "logs", "qa"):
+    for key in ("audio", "chat", "transcripts", "muted", "index", "voices", "voiceprints", "logs", "qa", "reels"):
         P(cfg, key).mkdir(parents=True, exist_ok=True)
 
 

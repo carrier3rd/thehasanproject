@@ -4,6 +4,7 @@ voiceprints/
 index/
 logs/
 qa/
+reels/
 *.db
 archive/
 site.env
