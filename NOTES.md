@@ -165,6 +165,12 @@ Run `python -m pytest` from the repo root (27 tests, no GPU or network needed).
   method: one small chart per measure (no shared axis), single blue series validated on light and dark, hover
   tooltips, latest value labelled, a table view.
 
+- **Share links** (2026-11-23): `/r/<week>/<item id>` serves a small page with Open Graph / Twitter tags (title,
+  severity or verdict, Claude's summary or correction, any review note; all text HTML-escaped) and redirects to the
+  item on reel.html. A "Share" button on every clip and fact-check uses the phone's share sheet or copies the link.
+  Text-only previews (no image). Withdrawn items return 404. The reviewer's correction note is `review_note` (a
+  fact-check's own `correction` field is Claude's "what's accurate").
+
 ## Library versions checked
 Signatures were read from the wheels, not run: whisperx 3.8.6 (`whisperx.diarize.DiarizationPipeline(token=...)`,
 `__call__(..., return_embeddings=True)` returning `(df, {speaker: vector})`), pyannote.audio 4.0.7

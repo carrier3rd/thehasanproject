@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+from html import escape as html_escape
 import hmac
 import json
 import re
@@ -12,7 +13,7 @@ from collections import defaultdict, deque
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 
 from common import ROOT, Anchors, P, cfg_file
 from search import Index, fts_execute, hybrid, window_results
@@ -525,6 +526,46 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
                     con.close()
             return StreamingResponse(gen(), media_type="application/x-ndjson",
                                      headers={"Content-Disposition": "attachment; filename=chat-export.jsonl"})
+
+    @app.get("/r/{week}/{item}")
+    def share(week: str, item: str, request: Request):
+        """Share link for one reel clip or fact-check: a page with link-preview tags that opens it on reel.html."""
+        r = load_reel(week)
+        if r is None or not re.fullmatch(r"[cf]-[A-Za-z0-9_-]{1,64}-\d{1,6}", item):
+            raise HTTPException(404, "not found")
+        kind = "clip" if item[0] == "c" else "fact"
+        items = r["clips"] if kind == "clip" else r["fact_checks"]
+        pos = next((i for i, x in enumerate(items) if x["id"] == item), None)
+        if pos is None:
+            raise HTTPException(404, "not found (it may have been withdrawn after review)")
+        x = items[pos]
+        day = f"{x['date'][:4]}-{x['date'][4:6]}-{x['date'][6:]}"
+        if kind == "clip":
+            title = f"{x['title']} ({x['severity']}/10)"
+            desc = f"{day}: {x['summary']} Context: {x['nuance']}"
+            target = f"/reel.html?week={week}&clip={pos + 1}"
+        else:
+            verdict = x["verdict"].replace("_", " ").capitalize()
+            title = f"{verdict}: {x['claim']}"
+            desc = f"{day}. Hasan: \u201c{x['quote']}\u201d. {x['correction'] or x['explanation']}"
+            target = f"/reel.html?week={week}&view=facts&item={item}"
+        if x.get("review_note"):
+            desc = f"Corrected: {x['review_note']['text']} " + desc
+        desc = (desc[:297] + "...") if len(desc) > 300 else desc
+        e = lambda t: html_escape(t, quote=True)
+        url = str(request.url)
+        page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{e(title)}</title>
+<meta name="description" content="{e(desc)}">
+<meta property="og:type" content="article"><meta property="og:site_name" content="VOD archive · weekly reel">
+<meta property="og:title" content="{e(title)}"><meta property="og:description" content="{e(desc)}">
+<meta property="og:url" content="{e(url)}"><meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="{e(title)}"><meta name="twitter:description" content="{e(desc)}">
+<meta http-equiv="refresh" content="0; url={e(target)}"><link rel="canonical" href="{e(url)}">
+</head><body><p><a href="{e(target)}">{e(title)}</a></p>
+<p>Picked and described by Claude (AI) from machine-made transcripts.</p></body></html>"""
+        return HTMLResponse(page)
 
     @app.get("/{path:path}")
     def static(path: str):

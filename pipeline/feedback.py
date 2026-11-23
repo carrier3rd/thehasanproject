@@ -94,7 +94,7 @@ def apply_corrections(cfg: dict, reel: dict) -> dict:
                 withdrawn += 1
                 continue
             if c and c["action"] == "note":
-                x["correction"] = {"text": c["text"], "date": time.strftime("%Y-%m-%d", time.localtime(c["created"]))}
+                x["review_note"] = {"text": c["text"], "date": time.strftime("%Y-%m-%d", time.localtime(c["created"]))}
             keep.append(x)
         reel[key] = keep
     reel["withdrawn"] = withdrawn

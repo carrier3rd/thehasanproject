@@ -93,8 +93,8 @@ async function mountPlayer(c) {
 // ---------- reports and corrections ----------
 let REASONS = null;
 function correctionNote(x) {
-  return x.correction ? el('div', { class: 'correction' }, el('b', { text: `Correction (${x.correction.date}): ` }),
-    document.createTextNode(x.correction.text)) : null;
+  return x.review_note ? el('div', { class: 'correction' }, el('b', { text: `Correction (${x.review_note.date}): ` }),
+    document.createTextNode(x.review_note.text)) : null;
 }
 function reportBox(kind, x) {
   const box = el('details', { class: 'report' }, el('summary', { text: 'Report a problem' }));
@@ -120,6 +120,18 @@ function reportBox(kind, x) {
   return box;
 }
 
+function shareButton(x, title) {
+  const b = el('button', { type: 'button', class: 'share', text: 'Share' });
+  b.addEventListener('click', async () => {
+    const url = `${location.origin}/r/${reel.week}/${x.id}`;
+    try {
+      if (navigator.share) await navigator.share({ title, url });
+      else { await navigator.clipboard.writeText(url); b.textContent = 'Link copied'; setTimeout(() => { b.textContent = 'Share'; }, 1500); }
+    } catch (e) { if (e && e.name !== 'AbortError') prompt('Copy this link', url); }
+  });
+  return b;
+}
+
 // ---------- the card ----------
 const STANCE = { own_view: 'His own view', joke_or_bait: 'Joke or bait', unclear: 'Stance unclear' };
 const CAT = c => c.replace(/_/g, ' ');
@@ -140,6 +152,7 @@ function renderCard(c) {
     ...sec('Context and nuance', c.nuance), ...sec('Chat’s reaction', c.chat_reaction), ex,
     c.segment_reason ? el('p', { class: 'cwhen', style: 'margin-top:10px',
       text: `Segment: ${fmtTime(c.end - c.start)}. ${c.segment_reason}` }) : null,
+    el('div', { class: 'row' }, shareButton(c, c.title)),
     reportBox('clip', c));
   $('#full').href = watchUrl(c.video_id, c.start);
   $('#lines').replaceChildren(...c.lines.map(l => el('div', { class: 'turn' + (l.speaker === 'Media' ? ' media' : ''), 'data-t': l.t,
@@ -211,7 +224,7 @@ async function renderFacts() {
   if (!fs.length) nodes.push(el('div', { class: 'note', text: 'No fact-checks for this week.' }));
   for (const f of fs) {
     const src = (f.sources || []).filter(x => safeUrl(x.url));
-    nodes.push(el('article', { class: 'fact' },
+    nodes.push(el('article', { class: 'fact', id: f.id },
       el('div', { class: 'cmeta' }, vbadge(f.verdict), el('span', { class: 'tag', text: f.topic.replace(/_/g, ' ') }),
         el('span', { class: 'tag', text: `${f.confidence} confidence` })),
       correctionNote(f),
@@ -222,9 +235,16 @@ async function renderFacts() {
       f.correction ? el('p', {}, el('b', { text: 'What’s accurate: ' }), document.createTextNode(f.correction)) : null,
       f.explanation ? el('p', { class: 'fx', text: f.explanation }) : null,
       src.length ? el('ul', { class: 'cex' }, ...src.map(x => el('li', {}, el('a', { href: safeUrl(x.url), target: '_blank', rel: 'noopener noreferrer nofollow', text: x.title || x.url })))) : null,
+      el('div', { class: 'row' }, shareButton(f, `${VERDICT[f.verdict]}: ${f.claim}`)),
       reportBox('fact', f)));
   }
   box.replaceChildren(...nodes);
+  const want = qs.get('item');                 // opened from a shared link
+  if (want && want.startsWith('f-')) {
+    const n = document.getElementById(want);
+    if (n) { n.classList.add('focus'); n.scrollIntoView({ block: 'center' }); }
+    qs.delete('item');
+  }
 }
 // ---------- trends: one small bar chart per measure (different scales never share an axis) ----------
 const SVGNS = 'http://www.w3.org/2000/svg';
@@ -397,6 +417,7 @@ function tick() {
     $('#lines').hidden = b.dataset.pane !== 'lines';
   });
   await loadWeek($('#week').value);
+  if (['facts', 'trends'].includes(qs.get('view'))) setView(qs.get('view'));
   setInterval(tick, 400);
 })();
 </script></body></html>

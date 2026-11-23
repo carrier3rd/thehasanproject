@@ -39,7 +39,7 @@ def test_reports_corrections_and_withdrawals(apps):
     # a correction note shows on the item
     assert adm.post(f"/api/flags/{flags[0]['id']}/resolve", json={"action": "note", "text": "Transcript checked: he said rent control."}).status_code == 200
     c = pub.get(f"/api/reels/{WEEK}").json()["clips"][0]
-    assert c["correction"]["text"].startswith("Transcript checked")
+    assert c["review_note"]["text"].startswith("Transcript checked")
     assert adm.get("/api/flags").json()["flags"] == [] and len(adm.get("/api/flags?all=1").json()["flags"]) == 1
     # withdrawing the fact-check removes it from the reel and the all-weeks totals
     pub.post("/api/flags", json={"week": WEEK, "item": fact["id"], "kind": "fact", "reason": "fact_check_wrong", "note": ""})
@@ -82,3 +82,28 @@ def test_trends(apps):
     assert w["week"] == WEEK and w["streams"] == 1 and w["hours"] == round(600 / 3600, 1)
     assert w["clips"] == 1 and w["max_severity"] == 7 and w["misleading"] == 1
     assert w["false_or_misleading_per_10h"] == round(1 / (600 / 3600) * 10, 2)
+
+
+def test_share_links(apps):
+    cfg, pub, _ = apps
+    r = pub.get(f"/api/reels/{WEEK}").json()
+    clip, fact = r["clips"][0], r["fact_checks"][0]
+    page = pub.get(f"/r/{WEEK}/{clip['id']}")
+    assert page.status_code == 200 and 'property="og:title" content="Rent control segment (7/10)"' in page.text
+    assert f'url=/reel.html?week={WEEK}&amp;clip=1' in page.text and 'twitter:card' in page.text
+    f = pub.get(f"/r/{WEEK}/{fact['id']}").text
+    assert "Misleading: Rent control is the topic" in f and "view=facts&amp;item=" + fact["id"] in f
+    for bad in (f"/r/{WEEK}/c-nope-1", f"/r/2026-11-08/{clip['id']}", f"/r/{WEEK}/<script>", f"/r/{WEEK}/c-v1001-9999"):
+        assert pub.get(bad).status_code == 404
+
+
+def test_share_page_escapes_text(apps, tmp_path):
+    cfg, pub, _ = apps
+    import json as _j
+    from pathlib import Path
+    p = Path(cfg["_root"]) / "reels" / f"{WEEK}.json"
+    r = _j.loads(p.read_text())
+    r["clips"][0]["title"] = '"><script>alert(1)</script>'
+    p.write_text(_j.dumps(r))
+    page = pub.get(f"/r/{WEEK}/{r['clips'][0]['id']}").text
+    assert "<script>alert(1)" not in page and "&lt;script&gt;" in page
