@@ -9,18 +9,20 @@
   <p>Transcripts and speaker labels are produced by speech-recognition software and contain mistakes. Names are attached
      only to a small set of public figures; everyone else appears as "Guest", and audio from videos being watched on
      stream appears as "Media". Sections muted on the original video are left out.</p>
-  <h2>Chat messages and opting out</h2>
+  <h2>Chat messages and removal requests</h2>
   <p>Chat is shown with the username it was sent under. Messages removed by moderators are shown as a placeholder
-     rather than their text. If you would like your messages removed from this site, write to the address below from any
-     account or address, stating your Twitch username. Your messages, under your current and previous names, are
-     excluded the next time the site is rebuilt, normally within a day.</p>
+     rather than their text. You can ask for your messages to be removed by writing to the address below from any
+     account or address, stating your Twitch username. Requests are considered case by case and are not always
+     granted. If you live in the EU or UK, or anywhere else data-protection law gives you a right to have your data
+     erased, say so in your request; those requests are handled under that law. Removed messages, under your current
+     and previous names, are excluded the next time the site is rebuilt, normally within a day.</p>
   <h2>Corrections and takedown requests</h2>
   <p id="contact">Contact address not configured.</p>
 </main>
 <script src="common.js"></script>
 <script>
 chrome('about.html').then(cfg => {
-  if (cfg.contact_email) $('#contact').replaceChildren('For opt-outs, corrections or takedown requests, write to ',
+  if (cfg.contact_email) $('#contact').replaceChildren('For removal requests, corrections or takedown requests, write to ',
     el('a', { href: 'mailto:' + cfg.contact_email, text: cfg.contact_email }), '.');
 });
 </script></body></html>
