@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fact-checks · VOD archive</title><link rel="stylesheet" href="style.css"></head>
+<body><main class="fcpage">
+  <h1>Fact-checks</h1>
+  <p class="note" style="padding:0">Claims Hasan made on stream, checked against public records and reporting, one topic at a
+    time across every transcribed stream. Weekly fact-checks are on the <a href="reel.html?view=facts">Weekly</a> page.</p>
+  <div id="reports" class="tabs" role="tablist"></div>
+  <div id="summary"></div>
+  <div id="report"><div class="note">Loading…</div></div>
+</main>
+<script src="common.js"></script>
+<script>
+const VERDICT = { false: 'False', misleading: 'Misleading', unsupported: 'Unsupported', mostly_accurate: 'Mostly accurate',
+  accurate: 'Accurate', not_checkable: 'Opinion' };
+const ORDER = ['false', 'misleading', 'unsupported', 'mostly_accurate', 'accurate', 'not_checkable'];
+const safeUrl = u => /^https?:\/\//i.test(u || '') ? u : null;
+const qs = new URLSearchParams(location.search);
+let list = [], cur = null;
+const filt = { verdicts: new Set(), section: '', q: '' };
+
+function setUrl() {
+  const p = new URLSearchParams();
+  if (cur) p.set('r', cur.id);
+  if (filt.verdicts.size) p.set('v', [...filt.verdicts].join(','));
+  if (filt.section) p.set('s', filt.section);
+  if (filt.q) p.set('q', filt.q);
+  history.replaceState(null, '', 'factchecks.html' + (p.toString() ? '?' + p : ''));
+}
+
+function summary() {
+  if (list.length < 2) return $('#summary').replaceChildren();
+  const pct = (r, vs) => Math.round(100 * vs.reduce((n, v) => n + (r.counts[v] || 0), 0) / (r.checked || 1)) + '%';
+  $('#summary').replaceChildren(el('details', { class: 'alltime' },
+    el('summary', { text: 'Compare the reports' }),
+    el('table', {},
+      el('thead', {}, el('tr', {}, el('th', { text: 'Report' }), el('th', { class: 'num', text: 'Checked' }),
+        el('th', { class: 'num', text: 'Accurate or mostly' }), el('th', { class: 'num', text: 'Misleading' }),
+        el('th', { class: 'num', text: 'False' }), el('th', { class: 'num', text: 'Unsupported' }))),
+      el('tbody', {}, ...list.map(r => el('tr', {}, el('td', { text: r.title }), el('td', { class: 'num', text: String(r.checked) }),
+        el('td', { class: 'num', text: pct(r, ['accurate', 'mostly_accurate']) }), el('td', { class: 'num', text: pct(r, ['misleading']) }),
+        el('td', { class: 'num', text: pct(r, ['false']) }), el('td', { class: 'num', text: pct(r, ['unsupported']) })))))));
+}
+
+function card(x, sections) {
+  const src = (x.sources || []).filter(s => safeUrl(s.url));
+  return el('article', { class: 'fact', id: x.id },
+    el('div', { class: 'cmeta' }, el('span', { class: `verdict v-${x.verdict}`, text: VERDICT[x.verdict] || x.verdict }),
+      el('span', { class: 'tag', text: sections[x.section] || x.section }),
+      x.repeats ? el('span', { class: 'tag', text: `said on ${x.repeats + 1}+ occasions` }) : null),
+    el('h3', { text: x.what_he_said }),
+    el('div', { class: 'cwhen' }, el('a', { href: watchUrl(x.vid, Math.max(x.t - 5, 0)), text: `${fmtDate(x.date)} · ${fmtTime(x.t)}` }),
+      x.title ? document.createTextNode(` · ${x.title}`) : null),
+    x.quote ? el('blockquote', { text: `“${x.quote}”` }) : null,
+    el('p', {}, el('b', { text: 'What the record shows: ' }), document.createTextNode(x.finding)),
+    src.length ? el('ul', { class: 'cex' }, ...src.map(s => el('li', {}, el('a', { href: safeUrl(s.url), target: '_blank',
+      rel: 'noopener noreferrer nofollow', text: s.title || s.url })))) : null,
+    el('div', { class: 'row' }, el('button', { class: 'share', text: 'Copy link', onclick: e => {
+      const u = new URL(location.href); u.search = `?r=${cur.id}&item=${x.id}`;
+      navigator.clipboard.writeText(u.toString()).then(() => { e.target.textContent = 'Copied'; }, () => prompt('Copy this link:', u));
+    } })));
+}
+
+function render() {
+  if (!cur) return;
+  const sections = Object.fromEntries(cur.sections.map(s => [s.key, s.title]));
+  const items = cur.items.filter(x => (!filt.verdicts.size || filt.verdicts.has(x.verdict)) && (!filt.section || x.section === filt.section) &&
+    (!filt.q || `${x.what_he_said} ${x.finding} ${x.quote}`.toLowerCase().includes(filt.q.toLowerCase())));
+  const rank = { false: 0, misleading: 1, unsupported: 2, mostly_accurate: 3, accurate: 4, not_checkable: 5 };
+  const nodes = [];
+  for (const s of cur.sections) {
+    const xs = items.filter(x => x.section === s.key).sort((a, b) => rank[a.verdict] - rank[b.verdict] || b.repeats - a.repeats);
+    if (!xs.length) continue;
+    nodes.push(el('h2', { class: 'fh', text: `${s.title} (${xs.length})` }), ...xs.map(x => card(x, sections)));
+  }
+  $('#items').replaceChildren(...(nodes.length ? nodes : [el('div', { class: 'note', text: 'Nothing matches those filters.' })]));
+  $('#shown').textContent = `Showing ${items.length} of ${cur.items.length}.`;
+  setUrl();
+}
+
+async function open(id, focus) {
+  $('#report').replaceChildren(el('div', { class: 'note', text: 'Loading…' }));
+  cur = await api(`/api/reports/${encodeURIComponent(id)}`);
+  for (const b of document.querySelectorAll('#reports button')) { b.classList.toggle('on', b.dataset.id === id); b.setAttribute('aria-selected', b.dataset.id === id ? 'true' : 'false'); }
+  const chips = ORDER.filter(v => cur.counts[v]).map(v => el('button', { class: `verdict v-${v} chip`, 'data-v': v, 'aria-pressed': filt.verdicts.has(v) ? 'true' : 'false',
+    text: `${VERDICT[v]} ${cur.counts[v]}`, title: 'Show only these (click again to clear)', onclick: e => {
+      filt.verdicts.has(v) ? filt.verdicts.delete(v) : filt.verdicts.add(v);
+      for (const c of document.querySelectorAll('.chip')) c.setAttribute('aria-pressed', filt.verdicts.has(c.dataset.v) ? 'true' : 'false');
+      $('.tally').classList.toggle('picking', filt.verdicts.size > 0); render();
+    } }));
+  const sel = el('select', { 'aria-label': 'Section', onchange: e => { filt.section = e.target.value; render(); } },
+    el('option', { value: '', text: 'All sections' }), ...cur.sections.map(s => el('option', { value: s.key, text: s.title })));
+  sel.value = filt.section;
+  const q = el('input', { type: 'search', placeholder: 'Filter claims…', value: filt.q, 'aria-label': 'Filter claims',
+    oninput: e => { filt.q = e.target.value.trim(); render(); } });
+  $('#report').replaceChildren(
+    el('h2', { text: cur.title }),
+    el('p', { class: 'fx', text: `${cur.subtitle}. ${cur.period}; checked ${cur.checked_on}. ${cur.items.length} claims.` }),
+    el('details', { class: 'alltime' }, el('summary', { text: 'How this was checked' }), el('p', { text: cur.method })),
+    el('div', { class: 'tally' + (filt.verdicts.size ? ' picking' : '') }, ...chips),
+    el('div', { class: 'row filters' }, sel, q, el('span', { id: 'shown', class: 'note small' })),
+    el('div', { id: 'items' }));
+  render();
+  if (focus) {
+    const n = document.getElementById(focus);
+    if (n) { n.classList.add('focus'); n.scrollIntoView({ block: 'center' }); }
+  }
+}
+
+chrome('factchecks.html').then(async () => {
+  try { list = (await api('/api/reports')).reports; }
+  catch (e) { return $('#report').replaceChildren(el('div', { class: 'note', text: 'Could not load the reports: ' + e.message })); }
+  if (!list.length) return $('#report').replaceChildren(el('div', { class: 'note', text: 'No fact-check reports yet.' }));
+  if (qs.get('v')) for (const v of qs.get('v').split(',')) if (VERDICT[v]) filt.verdicts.add(v);
+  filt.section = qs.get('s') || ''; filt.q = qs.get('q') || '';
+  $('#reports').replaceChildren(...list.map(r => el('button', { role: 'tab', 'data-id': r.id, text: `${r.title} (${r.checked})`,
+    onclick: () => { filt.verdicts.clear(); filt.section = ''; filt.q = ''; open(r.id); } })));
+  summary();
+  const want = list.find(r => r.id === qs.get('r')) || list[0];
+  open(want.id, qs.get('item'));
+});
+</script></body></html>

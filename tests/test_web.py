@@ -179,3 +179,26 @@ def test_site_password_and_auto_domain(project, monkeypatch):
     assert client.get("/index.html", auth=("viewer", "s3cret pass")).status_code == 200
     assert client.get("/api/config", auth=("viewer", "s3cret pass")).json()["site_domain"] == "laptop.tail1234.ts.net"
     assert TestClient(create_app(locked, "admin")).get("/api/config").status_code == 200  # admin is local-only, no password
+
+
+def test_fact_check_reports(apps, project):
+    root, cfg = project
+    pub, _ = apps
+    rep = root / "reports"
+    rep.mkdir(exist_ok=True)
+    (rep / "test-report.json").write_text(json.dumps({
+        "id": "test-report", "title": "Claims about X", "subtitle": "s", "checked_on": "2026-11-23", "period": "p", "method": "m",
+        "sections": [{"key": "a", "title": "A"}],
+        "items": [{"id": "test-report-1", "section": "a", "verdict": "false", "what_he_said": "w", "finding": "f",
+                   "quote": "q", "vid": "v1001", "t": 1, "date": "20261020", "repeats": 0, "sources": []},
+                  {"id": "test-report-2", "section": "a", "verdict": "accurate", "what_he_said": "w", "finding": "f",
+                   "quote": "q", "vid": "nope", "t": 5, "date": "20261020", "repeats": 2, "sources": []}]}))
+    (rep / "broken.json").write_text("{not json")
+    lst = pub.get("/api/reports").json()["reports"]
+    assert [r["id"] for r in lst] == ["test-report"]
+    assert lst[0]["checked"] == 2 and lst[0]["counts"]["false"] == 1 and lst[0]["counts"]["accurate"] == 1
+    r = pub.get("/api/reports/test-report").json()
+    assert r["items"][0]["title"] and r["items"][1]["title"] is None          # stream titles joined from the db
+    for bad in ("nope", "..%2Fconfig", "Test-Report", "broken"):
+        assert pub.get(f"/api/reports/{bad}").status_code == 404
+    assert pub.get("/factchecks.html").status_code == 200

@@ -194,3 +194,11 @@ Signatures were read from the wheels, not run: whisperx 3.8.6 (`whisperx.diarize
 1. **publish.py rebuilds public.db from scratch.** That was cheap when it held transcripts only. With every chat
    message it will take minutes and grow with the archive; an incremental publish may be needed after the backfill.
 2. **Opt-outs are applied on the next publish**, i.e. up to a day later with the nightly schedule.
+
+## Standing fact-check reports (not in the spec)
+- `factchecks.html` and `/api/reports` show topic-wide fact-check reports (one JSON file each, in `paths.reports`; the
+  private config points this at `../thehasanprojectprivate/reports`). Unlike the weekly reel's fact-checks they span
+  every stream and are built by hand in a Claude session, not by a scheduled job. Same verdict scale as the reel; each item
+  links to the moment on the watch page and to its sources. The public app only reads these JSON files: they hold
+  Hasan's words, findings and source links, never chat or user data.
+- Report ids are restricted to `[a-z0-9-]`; a malformed file is skipped rather than breaking the page.

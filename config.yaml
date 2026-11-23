@@ -78,7 +78,7 @@ robots_noindex: true
 
 paths: {audio: data/audio, chat: data/chat, transcripts: data/transcripts, muted: data/muted,
         archive_db: archive/archive.db, public_db: public.db, index: index,
-        voices: voices, voiceprints: voiceprints, logs: logs, qa: qa, reels: reels,
+        voices: voices, voiceprints: voiceprints, logs: logs, qa: qa, reels: reels, reports: reports,
         feedback: feedback/feedback.db}
 
 # Weekly reel (pipeline/reel.py, page reel.html): the week's most egregious things Hasan said, picked and explained by

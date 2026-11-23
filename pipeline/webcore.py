@@ -479,6 +479,49 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
                     weeks.append(row)
         return {"verdicts": verdicts, "total": total, "by_topic": topics, "weeks": weeks}
 
+    reports = P(cfg, "reports") if "reports" in cfg.get("paths", {}) else None
+    REPORT_VERDICTS = ["false", "misleading", "unsupported", "mostly_accurate", "accurate", "not_checkable"]
+
+    def load_report(rid: str) -> dict | None:
+        if reports is None or not re.fullmatch(r"[a-z0-9-]{1,60}", rid) or not (reports / f"{rid}.json").is_file():
+            return None
+        try:
+            r = json.loads((reports / f"{rid}.json").read_text())
+        except (OSError, ValueError):
+            return None
+        r["counts"] = {v: sum(1 for x in r.get("items", []) if x.get("verdict") == v) for v in REPORT_VERDICTS}
+        return r
+
+    @app.get("/api/reports")
+    def report_list():
+        """Standing fact-check reports (one topic across every stream), newest first."""
+        out = []
+        if reports is not None and reports.is_dir():
+            for p in reports.glob("*.json"):
+                r = load_report(p.stem)
+                if r:
+                    out.append({k: r.get(k) for k in ("id", "title", "subtitle", "checked_on", "period", "counts")}
+                               | {"checked": len(r.get("items", []))})
+        out.sort(key=lambda r: r["id"])
+        out.sort(key=lambda r: r["checked_on"] or "", reverse=True)
+        return {"reports": out}
+
+    @app.get("/api/reports/{rid}")
+    def report(rid: str):
+        r = load_report(rid)
+        if r is None:
+            raise HTTPException(404, "no such report")
+        ids = sorted({x["vid"] for x in r.get("items", []) if x.get("vid")})
+        if ids:
+            con = db()
+            try:
+                titles = dict(con.execute(f"SELECT id, title FROM videos WHERE id IN ({','.join('?' * len(ids))})", ids))
+            finally:
+                con.close()
+            for x in r["items"]:
+                x["title"] = titles.get(x.get("vid"))
+        return r
+
     @app.get("/api/reels/{week}")
     def reel_week(week: str):
         r = load_reel(week)
