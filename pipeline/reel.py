@@ -480,7 +480,8 @@ def clip_from(st, v, m, turns, chat, got) -> dict | None:
     a = min(max(r["clip_start"], lo), hi)
     b = min(max(r["clip_end"], a + st["clip_min_s"]), a + st["clip_max_s"], hi + 5)
     lines = [{"t": t["start"], "speaker": t["speaker"], "text": t["text"]} for t in turns if a - 10 <= t["start"] <= b + 5]
-    return {"video_id": v["id"], "stream_title": v["title"], "date": v["upload_date"], "embed_type": v["embed_type"],
+    return {"id": f"c-{v['id']}-{int(a)}", "video_id": v["id"], "stream_title": v["title"], "date": v["upload_date"],
+            "embed_type": v["embed_type"],
             "embed_id": v["embed_id"], "source_url": v["source_url"], "start": round(a, 1), "end": round(b, 1),
             "severity": r["severity"], "confidence": r["confidence"], "stance": r["stance"],
             "categories": r["categories"], "title": r["title"], "summary": r["summary"],
@@ -540,7 +541,8 @@ def fact_from(v, c, turns, got) -> dict | None:
     sources = [s for s in r.get("sources", []) if isinstance(s, dict) and s.get("url") in seen][:5]
     if r["verdict"] != "accurate" and not sources:
         return None                          # never publish a negative verdict without a source it actually found
-    return {"video_id": v["id"], "stream_title": v["title"], "date": v["upload_date"], "t": c["start"],
+    return {"id": f"f-{v['id']}-{int(c['start'])}", "video_id": v["id"], "stream_title": v["title"],
+            "date": v["upload_date"], "t": c["start"],
             "quote": c["quote"], "claim": r.get("claim") or c["claim"], "topic": c["topic"], "verdict": r["verdict"],
             "correction": r.get("correction", ""), "explanation": r.get("explanation", ""),
             "confidence": r.get("confidence", "medium"), "sources": sources}

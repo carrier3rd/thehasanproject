@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reports · VOD archive admin</title><link rel="stylesheet" href="style.css"></head>
+<body><main>
+  <h1>Reader reports</h1>
+  <p class="note" style="padding:0">Each decision applies to every open report on the same item. A note is shown
+    publicly on the item; a withdrawn item disappears from the reel and is counted as withdrawn.</p>
+  <label><input type="checkbox" id="all"> show resolved reports too</label>
+  <div id="list"><div class="note">Loading…</div></div>
+</main>
+<script src="common.js"></script>
+<script>
+async function act(id, action) {
+  let text = '';
+  if (action !== 'dismiss') {
+    text = prompt(action === 'note' ? 'Correction note to show on the item:' : 'Why it is withdrawn (shown publicly, optional):') ?? null;
+    if (text === null) return;
+  }
+  const res = await fetch(`/api/flags/${id}/resolve`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, text }) });
+  if (!res.ok) alert('Failed: ' + res.status);
+  load();
+}
+async function load() {
+  const r = await api('/api/flags', { all: $('#all').checked ? 1 : 0 });
+  if (!r.flags.length) return $('#list').replaceChildren(el('div', { class: 'note', text: 'No reports.' }));
+  $('#list').replaceChildren(...r.flags.map(f => {
+    const s = f.subject;
+    const what = s ? (f.kind === 'clip' ? s.title : s.claim) : '(item no longer in the reel)';
+    const link = s ? (f.kind === 'clip' ? `reel.html?week=${f.week}` : watchUrl(s.video_id, Math.max(s.t - 5, 0))) : null;
+    return el('div', { class: 'flag' },
+      el('div', { class: 'cwhen', text: `#${f.id} · ${new Date(f.created * 1000).toLocaleString()} · week ${f.week} · ${f.kind} · ${f.status}` }),
+      el('h3', {}, link ? el('a', { href: link, text: what }) : document.createTextNode(what)),
+      s && s.quote ? el('blockquote', { text: `“${s.quote}”` }) : null,
+      el('p', {}, el('b', { text: (r.reasons[f.reason] || f.reason) + '. ' }), document.createTextNode(f.note || '')),
+      f.status === 'open' ? el('div', { class: 'acts' },
+        el('button', { text: 'Dismiss', onclick: () => act(f.id, 'dismiss') }),
+        el('button', { text: 'Add correction note', onclick: () => act(f.id, 'note') }),
+        el('button', { text: 'Withdraw item', onclick: () => act(f.id, 'withdraw') })) :
+        el('p', { class: 'note', style: 'padding:0', text: f.response ? `Response: ${f.response}` : '' }));
+  }));
+}
+chrome('flags.html').then(() => { $('#all').addEventListener('change', load); load(); });
+</script></body></html>

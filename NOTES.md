@@ -149,6 +149,14 @@ Run `python -m pytest` from the repo root (27 tests, no GPU or network needed).
   archive.db and runs `PRAGMA integrity_check`. Status in `logs/backup-status.json`, `qa.py --health` and `status.sh`.
   Tested against real restic 0.16 with local repositories; Google Drive not tested from the build container.
 
+- **Reader reports and corrections** (`pipeline/feedback.py`, 2026-11-23): every reel clip and fact-check has a
+  "Report a problem" form (reason + optional note; 10 per hour per visitor; no IP or name stored). Reports go to
+  `feedback/feedback.db`, the only path the public site may write (`ReadWritePaths` in the vod-web unit; re-run
+  `install.sh` once). The owner resolves them in the admin app (`flags.html`, "Reports") or with `feedback.py resolve`:
+  dismiss, add a public correction note, or withdraw the item. Corrections are applied when a reel is served; withdrawn
+  items drop out of the reel and the all-weeks totals and are counted publicly. Items have stable ids
+  (`c-<video>-<second>`, `f-<video>-<second>`).
+
 ## Library versions checked
 Signatures were read from the wheels, not run: whisperx 3.8.6 (`whisperx.diarize.DiarizationPipeline(token=...)`,
 `__call__(..., return_embeddings=True)` returning `(df, {speaker: vector})`), pyannote.audio 4.0.7

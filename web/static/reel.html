@@ -87,6 +87,36 @@ async function mountPlayer(c) {
     pause: () => { if (sim) clearInterval(sim); sim = null; } };
 }
 
+// ---------- reports and corrections ----------
+let REASONS = null;
+function correctionNote(x) {
+  return x.correction ? el('div', { class: 'correction' }, el('b', { text: `Correction (${x.correction.date}): ` }),
+    document.createTextNode(x.correction.text)) : null;
+}
+function reportBox(kind, x) {
+  const box = el('details', { class: 'report' }, el('summary', { text: 'Report a problem' }));
+  box.addEventListener('toggle', async () => {
+    if (!box.open || box.querySelector('form')) return;
+    if (!REASONS) { try { REASONS = (await api('/api/flag_reasons')).reasons; } catch (e) { REASONS = {}; } }
+    const sel = el('select', { 'aria-label': 'What is wrong' }, ...Object.entries(REASONS).map(([k, v]) => el('option', { value: k, text: v })));
+    const note = el('textarea', { rows: 3, maxlength: 1000, placeholder: 'Optional: what is wrong, a better quote, a source…' });
+    const msg = el('span', { class: 'note', style: 'padding:0' });
+    const form = el('form', {}, sel, note, el('div', { class: 'row' }, el('button', { text: 'Send report' }), msg));
+    form.addEventListener('submit', async e => {
+      e.preventDefault();
+      msg.textContent = 'Sending…';
+      try {
+        const res = await fetch('/api/flags', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ week: reel.week, item: x.id, kind, reason: sel.value, note: note.value }) });
+        if (!res.ok) throw new Error(res.status === 429 ? 'Too many reports; try again later.' : 'Could not send.');
+        form.replaceChildren(el('p', { class: 'note', style: 'padding:0', text: 'Thanks. Reports are reviewed and corrections are shown on the item.' }));
+      } catch (err) { msg.textContent = err.message; }
+    });
+    box.append(form);
+  });
+  return box;
+}
+
 // ---------- the card ----------
 const STANCE = { own_view: 'His own view', joke_or_bait: 'Joke or bait', unclear: 'Stance unclear' };
 const CAT = c => c.replace(/_/g, ' ');
@@ -99,14 +129,15 @@ function renderCard(c) {
   const sec = (h, t) => t ? [el('h3', { text: h }), el('p', { text: t })] : [];
   const ex = c.chat_examples.length ? el('ul', { class: 'cex' }, ...c.chat_examples.map(m => el('li', { text: m }))) : null;
   $('#card').replaceChildren(
-    meta,
+    meta, correctionNote(c),
     el('h2', { text: c.title }),
     el('div', { class: 'cwhen', text: `${fmtDate(c.date)} · ${c.stream_title} · ${fmtTime(c.start)}–${fmtTime(c.end)}` }),
     c.quote ? el('blockquote', { text: `“${c.quote}”` }) : null,
     ...sec('What he said', c.summary), ...sec('Why it’s here', c.why_notable),
     ...sec('Context and nuance', c.nuance), ...sec('Chat’s reaction', c.chat_reaction), ex,
     c.segment_reason ? el('p', { class: 'cwhen', style: 'margin-top:10px',
-      text: `Segment: ${fmtTime(c.end - c.start)}. ${c.segment_reason}` }) : null);
+      text: `Segment: ${fmtTime(c.end - c.start)}. ${c.segment_reason}` }) : null,
+    reportBox('clip', c));
   $('#full').href = watchUrl(c.video_id, c.start);
   $('#lines').replaceChildren(...c.lines.map(l => el('div', { class: 'turn' + (l.speaker === 'Media' ? ' media' : ''), 'data-t': l.t,
     onclick: () => { player && player.seek(l.t); } },
@@ -159,7 +190,12 @@ async function renderFacts() {
   if (!totals) { try { totals = await api('/api/factchecks'); } catch (e) { totals = null; } }
   const nodes = [];
   nodes.push(el('h2', { class: 'fh', text: reel ? `Week of ${reel.week} – ${reel.week_end}: ${fs.length} claim${fs.length === 1 ? '' : 's'} checked` : 'This week' }));
-  if (reel && reel.fact_summary) nodes.push(tally(reel.fact_summary.by_verdict, order));
+  if (reel && fs.length) {     // counted from what is shown, so withdrawn items drop out of the tally
+    const c = {}; for (const f of fs) c[f.verdict] = (c[f.verdict] || 0) + 1;
+    nodes.push(tally(c, order));
+  }
+  if (reel && reel.withdrawn) nodes.push(el('p', { class: 'note', style: 'padding:0 0 8px',
+    text: `${reel.withdrawn} item${reel.withdrawn === 1 ? '' : 's'} withdrawn after review.` }));
   if (totals && totals.weeks.length) {
     const topics = Object.entries(totals.by_topic).sort((a, b) => order.slice(0, 2).reduce((n, v) => n + b[1][v] - a[1][v], 0));
     nodes.push(el('details', { class: 'alltime' },
@@ -175,13 +211,15 @@ async function renderFacts() {
     nodes.push(el('article', { class: 'fact' },
       el('div', { class: 'cmeta' }, vbadge(f.verdict), el('span', { class: 'tag', text: f.topic.replace(/_/g, ' ') }),
         el('span', { class: 'tag', text: `${f.confidence} confidence` })),
+      correctionNote(f),
       el('h3', { text: f.claim }),
       el('div', { class: 'cwhen' }, el('a', { href: watchUrl(f.video_id, Math.max(f.t - 5, 0)), text: `${fmtDate(f.date)} · ${fmtTime(f.t)}` }),
         document.createTextNode(` · ${f.stream_title}`)),
       el('blockquote', { text: `“${f.quote}”` }),
       f.correction ? el('p', {}, el('b', { text: 'What’s accurate: ' }), document.createTextNode(f.correction)) : null,
       f.explanation ? el('p', { class: 'fx', text: f.explanation }) : null,
-      src.length ? el('ul', { class: 'cex' }, ...src.map(x => el('li', {}, el('a', { href: safeUrl(x.url), target: '_blank', rel: 'noopener noreferrer nofollow', text: x.title || x.url })))) : null));
+      src.length ? el('ul', { class: 'cex' }, ...src.map(x => el('li', {}, el('a', { href: safeUrl(x.url), target: '_blank', rel: 'noopener noreferrer nofollow', text: x.title || x.url })))) : null,
+      reportBox('fact', f)));
   }
   box.replaceChildren(...nodes);
 }
@@ -203,7 +241,7 @@ async function show(i) {
   idx = (i + reel.clips.length) % reel.clips.length;
   clip = reel.clips[idx];
   playing = false; $('#play').textContent = 'Play clip';
-  $('#count').textContent = `${idx + 1} / ${reel.clips.length}`;
+  $('#count').textContent = `${idx + 1} / ${reel.clips.length}` + (reel.withdrawn ? ` · ${reel.withdrawn} withdrawn` : '');
   history.replaceState(null, '', `?week=${reel.week}&clip=${idx + 1}`);
   renderCard(clip);
   loadChat(clip);

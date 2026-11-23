@@ -5,6 +5,7 @@ index/
 logs/
 qa/
 reels/
+feedback/
 *.db
 archive/
 site.env

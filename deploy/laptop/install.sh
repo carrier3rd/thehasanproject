@@ -13,7 +13,7 @@ PY="$REPO/.venv/bin/python"
 as_user() { runuser -u "$USER_NAME" -- "$@"; }
 
 # Private folders the public site must never read. They must exist before the site starts (fail closed).
-as_user mkdir -p "$REPO/archive" "$REPO/data" "$REPO/voices" "$REPO/voiceprints" "$REPO/logs" "$REPO/index"
+as_user mkdir -p "$REPO/archive" "$REPO/data" "$REPO/voices" "$REPO/voiceprints" "$REPO/logs" "$REPO/index" "$REPO/feedback" "$REPO/reels"
 as_user touch "$REPO/.env"
 chmod 700 "$REPO/archive"
 chmod 600 "$REPO/.env"
@@ -65,6 +65,8 @@ RestartSec=5
 InaccessiblePaths=$REPO/archive $REPO/data $REPO/voices $REPO/voiceprints $REPO/.env
 ProtectSystem=strict
 ProtectHome=read-only
+# the one place the public site may write: reader reports (feedback/feedback.db)
+ReadWritePaths=$REPO/feedback
 PrivateTmp=true
 NoNewPrivileges=true
 

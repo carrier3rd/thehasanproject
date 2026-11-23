@@ -78,7 +78,8 @@ robots_noindex: true
 
 paths: {audio: data/audio, chat: data/chat, transcripts: data/transcripts, muted: data/muted,
         archive_db: archive/archive.db, public_db: public.db, index: index,
-        voices: voices, voiceprints: voiceprints, logs: logs, qa: qa, reels: reels}
+        voices: voices, voiceprints: voiceprints, logs: logs, qa: qa, reels: reels,
+        feedback: feedback/feedback.db}
 
 # Weekly reel (pipeline/reel.py, page reel.html): the week's most egregious things Hasan said, picked and explained by
 # Claude. Built after the week (Sunday-Saturday) ends, once it is Sunday build_after_hour; refreshed when a late

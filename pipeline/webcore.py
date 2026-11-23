@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from common import ROOT, Anchors, P, cfg_file
 from search import Index, fts_execute, hybrid, window_results
+import feedback
 
 PAGE = 50
 RATE_LIMITED = ("/api/search", "/api/semantic", "/api/chat/search")
@@ -357,6 +358,70 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
                         "streams": len(r["streams"]), "generated_at": r["generated_at"]})
         return {"weeks": out}
 
+    def load_reel(week: str) -> dict | None:
+        if reels is None or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", week) or not (reels / f"{week}.json").is_file():
+            return None
+        try:
+            return feedback.apply_corrections(cfg, json.loads((reels / f"{week}.json").read_text()))
+        except (OSError, ValueError):
+            return None
+
+    flag_hits: dict[str, deque] = defaultdict(deque)
+
+    @app.get("/api/flag_reasons")
+    def flag_reasons():
+        return {"reasons": feedback.REASONS}
+
+    @app.post("/api/flags")
+    async def add_flag(request: Request):
+        ip = request.client.host if request.client else "?"
+        fwd = request.headers.get("x-forwarded-for")
+        if fwd and ip in ("127.0.0.1", "::1"):
+            ip = fwd.split(",")[-1].strip()
+        now, q = time.monotonic(), flag_hits[ip]          # 10 reports an hour per visitor; nothing is stored about them
+        while q and now - q[0] > 3600:
+            q.popleft()
+        if len(q) >= 10:
+            raise HTTPException(429, "too many reports; try again later")
+        try:
+            body = await request.json()
+        except ValueError:
+            raise HTTPException(400, "send JSON")
+        if not isinstance(body, dict):
+            raise HTTPException(400, "send a JSON object")
+        week, item, kind = str(body.get("week", "")), str(body.get("item", "")), str(body.get("kind", ""))
+        reason, note = str(body.get("reason", "")), str(body.get("note", ""))[:1000]
+        reel = load_reel(week)
+        if reel is None or kind not in ("clip", "fact") or reason not in feedback.REASONS:
+            raise HTTPException(400, "unknown week, kind or reason")
+        items = reel["clips"] if kind == "clip" else reel["fact_checks"]
+        if item not in {x["id"] for x in items}:
+            raise HTTPException(400, "unknown item")
+        q.append(now)
+        feedback.add_flag(cfg, week, item, kind, reason, note)
+        return {"ok": True}
+
+    if admin:
+        @app.get("/api/flags")
+        def list_flags(all: int = 0):
+            out = feedback.list_flags(cfg, bool(all))
+            cache: dict = {}
+            for f in out:     # attach what was reported, for the review page
+                r = cache.get(f["week"]) or cache.setdefault(f["week"], load_reel(f["week"]) or {})
+                items = (r.get("clips") if f["kind"] == "clip" else r.get("fact_checks")) or []
+                f["subject"] = next((x for x in items if x["id"] == f["item"]), None)
+            return {"flags": out, "reasons": feedback.REASONS}
+
+        @app.post("/api/flags/{flag_id}/resolve")
+        async def resolve_flag(flag_id: int, request: Request):
+            body = await request.json()
+            try:
+                return feedback.resolve(cfg, flag_id, str(body.get("action", "")), str(body.get("text", ""))[:1000])
+            except KeyError:
+                raise HTTPException(404, "no such report")
+            except ValueError as e:
+                raise HTTPException(400, str(e))
+
     @app.get("/api/factchecks")
     def factchecks():
         """Every week's fact-checks added up: totals by verdict and topic, and per week."""
@@ -364,9 +429,8 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
         total, topics, weeks = {v: 0 for v in verdicts}, {}, []
         if reels is not None and reels.is_dir():
             for p in sorted(reels.glob("????-??-??.json")):
-                try:
-                    r = json.loads(p.read_text())
-                except (OSError, ValueError):
+                r = load_reel(p.stem)
+                if r is None:
                     continue
                 fs = r.get("fact_checks") or []
                 row = {"week": r["week"], **{v: 0 for v in verdicts}}
@@ -383,9 +447,10 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
 
     @app.get("/api/reels/{week}")
     def reel_week(week: str):
-        if reels is None or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", week) or not (reels / f"{week}.json").is_file():
+        r = load_reel(week)
+        if r is None:
             raise HTTPException(404, "no reel for that week")
-        return json.loads((reels / f"{week}.json").read_text())
+        return r
 
     @app.get("/api/speakers")
     def speakers():
