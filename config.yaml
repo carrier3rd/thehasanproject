@@ -89,3 +89,12 @@ reel:
   min_severity: 5
   build_after_hour: 10
   max_usd_per_week: 15
+
+# Encrypted backups (pipeline/backup.py, restic): archive.db snapshot, transcripts, chat, voices, caches, logs.
+# Destinations go in the private config (backup.repos). Run `backup.py init --repo URL` once per destination; it
+# creates the password file the first time. Keep a copy of that password off this laptop.
+backup:
+  repos: []
+  password_file: ~/.config/vod-archive/restic-password
+  include_audio: false
+  every_hours: 24

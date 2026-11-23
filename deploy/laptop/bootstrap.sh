@@ -11,7 +11,7 @@ say() { printf '\n== %s\n' "$*"; }
 
 say "System packages"
 $SUDO apt-get update -qq
-$SUDO apt-get install -y -qq python3-venv python3-dev ffmpeg git rsync openssh-client tmux unzip curl ca-certificates >/dev/null
+$SUDO apt-get install -y -qq python3-venv python3-dev ffmpeg git rsync openssh-client tmux unzip curl ca-certificates restic >/dev/null
 
 say "Python environment (.venv)"
 [ -d .venv ] || python3 -m venv .venv

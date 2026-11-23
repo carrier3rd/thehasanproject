@@ -48,6 +48,23 @@ if [ -n "$log" ]; then
   [ "$n" -eq 0 ] && ok "$log: no failed steps" || { bad "$log: $n failed step(s):"; grep '^!!!' "$log" | sed 's/^/       /'; }
 fi
 
+hdr "backup"
+# backup (pipeline/backup.py): when the last encrypted backup succeeded
+bk=$("$PY" - <<'PY' 2>/dev/null
+import json, time
+try:
+    b = json.load(open("logs/backup-status.json"))
+except Exception:
+    b = {}
+w, ok = b.get("warning"), b.get("last_ok")
+print("none" if w else ("never" if not ok else int((time.time() - ok) / 3600)))
+PY
+)
+case "$bk" in
+  none|"") bad "backup: no destination configured (pipeline/backup.py init)";;
+  never) bad "backup: never succeeded";;
+  *) [ "$bk" -le 36 ] && ok "backup ${bk} h ago" || bad "backup ${bk} h ago (stale)";;
+esac
 hdr "chat logger"
 hb=logs/chat_logger.heartbeat
 if [ -f "$hb" ]; then

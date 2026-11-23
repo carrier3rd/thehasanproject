@@ -205,6 +205,22 @@ def health(cfg: dict) -> int:
     con = connect_archive(cfg)
     now, week = time.time(), 7 * 86400
     since = int((now - week) * 1000)
+    print("== backup ==")
+    try:
+        b = json.loads((P(cfg, "logs") / "backup-status.json").read_text())
+    except (OSError, ValueError):
+        b = {}
+    if not (cfg.get("backup") or {}).get("repos"):
+        print("NO BACKUP DESTINATION CONFIGURED: the archive exists only on this laptop (see pipeline/backup.py)")
+    elif not b.get("last_ok"):
+        print("no successful backup yet")
+    else:
+        h = (now - b["last_ok"]) / 3600
+        print(f"last successful backup {h:.0f} h ago" + ("  <-- STALE" if h > 36 else ""))
+        for repo, r in (b.get("repos") or {}).items():
+            if r.get("error"):
+                print(f"  {repo}: LAST RUN FAILED: {r['error'][:200]}")
+    print()
     print("== chat logger, last 7 days ==")
     hb = P(cfg, "logs") / "chat_logger.heartbeat"
     age = now - int(hb.read_text()) if hb.exists() else None

@@ -140,6 +140,15 @@ Run `python -m pytest` from the repo root (27 tests, no GPU or network needed).
 - The watch page's phone CSS now targets `main.watch #player` / `#slider` instead of the bare ids; the unscoped rules
   reordered the reel page's player on phones.
 
+- **Backups** (`pipeline/backup.py`, 2026-11-23): restic, encrypted and incremental, to each repository in
+  `backup.repos` (Google Drive via the laptop's rclone remote, and/or a USB drive). Backs up a consistent snapshot of
+  archive.db (SQLite online backup, in steps so the chat logger keeps writing), transcripts, chat replay, muted spans,
+  voices, voiceprints, reels, the reel/rhetoric caches, QA labels and logs. Leaves out `.env`/`site.env` (secrets),
+  public.db/index (rebuilt), and audio unless `include_audio`. Runs from the hourly job, at most once a day; prunes
+  (7 daily, 8 weekly, 12 monthly) and checks 5% of the data weekly. `backup.py restore-test` restores the latest
+  archive.db and runs `PRAGMA integrity_check`. Status in `logs/backup-status.json`, `qa.py --health` and `status.sh`.
+  Tested against real restic 0.16 with local repositories; Google Drive not tested from the build container.
+
 ## Library versions checked
 Signatures were read from the wheels, not run: whisperx 3.8.6 (`whisperx.diarize.DiarizationPipeline(token=...)`,
 `__call__(..., return_embeddings=True)` returning `(df, {speaker: vector})`), pyannote.audio 4.0.7
