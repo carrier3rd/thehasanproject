@@ -178,6 +178,12 @@ Run `python -m pytest` from the repo root (27 tests, no GPU or network needed).
   emotes) from 5+ accounts within 60 s. Heuristics, shown as counts on the card under "Chat in numbers"; a burst is a
   signal of coordinated posting, not proof. Existing reels rebuild with them from cache (no Claude cost).
 
+- **Own domain** (`deploy/laptop/domain.sh`, 2026-11-23): Tailscale Funnel only serves `*.ts.net`, so a custom
+  domain goes through a Cloudflare Tunnel: cloudflared on the laptop, tunnel `vod-archive`, `DOMAIN` and `www.DOMAIN`
+  routed to 127.0.0.1:8000 (never the admin app), run as the `cloudflared` system service. Funnel keeps working.
+  cloudflared passes the visitor address in X-Forwarded-For, which uvicorn already trusts from 127.0.0.1. Untested
+  from the build container (Cloudflare unreachable there); syntax-checked only.
+
 ## Library versions checked
 Signatures were read from the wheels, not run: whisperx 3.8.6 (`whisperx.diarize.DiarizationPipeline(token=...)`,
 `__call__(..., return_embeddings=True)` returning `(df, {speaker: vector})`), pyannote.audio 4.0.7

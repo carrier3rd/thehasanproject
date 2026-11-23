@@ -83,6 +83,12 @@ sudo tailscale serve --bg --https=8443 http://127.0.0.1:8001    # admin: only yo
 ```
 The site is offline whenever the laptop is off or asleep.
 
+Own domain instead of (or as well as) the ts.net address: buy one, put it on Cloudflare, then
+`deploy/laptop/domain.sh yourdomain.com` (Cloudflare Tunnel; no router changes).
+
+Backups: `.venv/bin/python pipeline/backup.py init --repo rclone:gdrive:backup` once (save the password it creates
+somewhere else), then the hourly job backs up daily. `backup.py status`, `backup.py restore-test`.
+
 To check everything at once (services, chat logger, tools, data, site, Tailscale):
 ```bash
 deploy/laptop/status.sh          # sudo deploy/laptop/status.sh also shows Funnel/serve status
