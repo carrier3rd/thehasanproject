@@ -194,3 +194,50 @@ def test_last_json():
     assert reel.last_json('text {"a": 1} more {"b": {"c": 2}}') == {"b": {"c": 2}}
     assert reel.last_json('{"a": "brace } inside"}') == {"a": "brace } inside"}
     assert reel.last_json("no json here") is None
+
+
+def test_quote_matching_ignores_punctuation_but_not_words():
+    text = reel.norm("Welcome back, everybody! Today we're talking about the housing market — and rent control.")
+    assert reel.quoted("welcome back everybody", text)
+    assert reel.quoted("Today we’re talking about the housing market and rent control", text)   # curly ', no dash
+    assert reel.quoted('"the housing market, and rent control."', text)
+    assert not reel.quoted("the housing market and rent strikes", text)
+    assert not reel.quoted("", text) and not reel.quoted("...", text)
+    assert not reel.quoted("rent", reel.norm("current events"))          # whole words only
+
+
+def test_diagnostics_and_rebuild_on_new_version(reel_project):
+    root, cfg = reel_project
+    client = FakeClient()
+    reel.build(cfg, WEEK, client=client, yes=True, wait=True)
+    path = root / "reels" / f"{WEEK}.json"
+    out = json.loads(path.read_text())
+    d = out["diagnostics"]
+    assert out["version"] == reel.VERSION
+    assert d["screen_windows"] == 1 and d["screen_status"] == {"succeeded": 1}
+    assert d["moments"] == 2 and d["moments_quote_mismatch"] == 1 and d["examples_quote_mismatch"] == ["words that were never said"]
+    assert d["claims"] == 5 and d["claims_low_importance"] == 1 and d["claims_quote_mismatch"] == 1
+    assert d["judged_kept"] == 1 and d["fact_not_checkable"] == 1 and d["fact_no_found_source"] == 1
+    # a reel made by older code is rebuilt by auto, from cache: no new batches
+    out["version"] = 2
+    path.write_text(json.dumps(out))
+    n = len(client.messages.batches.created)
+    assert reel.auto(cfg, client=client, now=dt.datetime(2026, 11, 8, 11)) == "written"
+    assert len(client.messages.batches.created) == n
+    assert reel.auto(cfg, client=client, now=dt.datetime(2026, 11, 8, 12)) == "up_to_date"
+
+
+def test_failed_answers_are_retried_once(reel_project):
+    root, cfg = reel_project
+
+    class Flaky(FakeBatches):
+        def results(self, bid):
+            for r in self.store[bid]:
+                yield NS(custom_id=r["custom_id"], result=NS(type="errored"))
+    c = FakeClient(); c.messages.batches = Flaky()
+    assert reel.build(cfg, WEEK, client=c, yes=True) == "waiting"     # submitted
+    assert reel.build(cfg, WEEK, client=c, yes=True) == "waiting"     # errored -> resubmitted once
+    assert reel.build(cfg, WEEK, client=c, yes=True) == "written"     # errored again: give up, write what there is
+    assert len(c.messages.batches.created) == 2
+    out = json.loads((root / "reels" / f"{WEEK}.json").read_text())
+    assert out["diagnostics"]["screen_status"] == {"errored": 1}

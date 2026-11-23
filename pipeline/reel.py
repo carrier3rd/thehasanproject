@@ -32,7 +32,7 @@ import time
 from pathlib import Path
 
 from common import P, get_logger, load_config, make_dirs
-from rhetoric import api_client, norm, read_jsonl
+from rhetoric import api_client, read_jsonl
 
 log = get_logger("reel")
 DEFAULTS = {"model": "claude-opus-5-5", "screen_effort": "low", "judge_effort": "high",
@@ -48,6 +48,19 @@ CATEGORIES = ["antisemitism", "nazi_or_holocaust_comparison", "justifying_or_glo
               "misinformation", "other"]
 STANCES = ["own_view", "joke_or_bait", "reading_or_quoting", "condemning", "unclear"]
 WEEK_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+VERSION = 3          # bump when selection logic changes: auto rebuilds reels made by an older version (from cache)
+_NONWORD = re.compile(r"[^a-z0-9]+")
+
+
+def norm(s: str) -> str:
+    """Words only: lowercase, punctuation and quote marks dropped. Claude often fixes punctuation or apostrophes when it
+    quotes; the words must still match exactly."""
+    return " " + " ".join(_NONWORD.sub(" ", (s or "").lower().replace("\u2019", "'").replace("'", "")).split()) + " "
+
+
+def quoted(q: str, text_norm: str) -> bool:
+    q = norm(q)
+    return q.strip() != "" and q in text_norm
 TOPICS = ["israel_palestine", "us_politics", "elections_and_polls", "economy", "war_and_foreign_policy",
           "other_countries", "media_and_public_figures", "himself_and_his_critics", "history", "science_and_health",
           "other"]
@@ -263,6 +276,14 @@ def cache_put(cfg, kind: str, key: str, value) -> None:
     tmp.replace(p)
 
 
+RETRY = ("errored", "expired", "truncated", "paused", "unparsed")
+
+
+def usable(got) -> bool:
+    """A cached answer counts unless it is a retryable failure on its first attempt (refusals are never retried)."""
+    return got is not None and not (got.get("status") in RETRY and got.get("attempts", 1) < 2)
+
+
 def in_flight(cfg) -> set[str]:
     return {k for b in read_jsonl(root(cfg) / "batches.jsonl") if not b["collected"] for k in b["keys"]}
 
@@ -272,7 +293,7 @@ def submit(cfg, st: dict, kind: str, reqs: list[tuple[str, str, str, dict | None
     effort = {"screen": st["screen_effort"], "judge": st["judge_effort"], "fact": st["fact_effort"]}[kind]
     requests = []
     for i, (key, system, user, schema) in enumerate(reqs):
-        params = {"model": st["model"], "max_tokens": 8192 if kind == "screen" else 16000,
+        params = {"model": st["model"], "max_tokens": 16000,
                   "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
                   "messages": [{"role": "user", "content": user}], "output_config": {"effort": effort}}
         if schema is not None:
@@ -334,8 +355,10 @@ def collect(cfg, client, wait: bool = False) -> int:
                         value["result"] = json.loads(text)
                     except json.JSONDecodeError:
                         value["status"] = "unparsed"
-            if value["status"] != "succeeded":   # errored/expired/refused: cached too, so auto doesn't resubmit hourly
-                log.warning("%s %s: %s", b["kind"], key, value["status"])
+            if value["status"] != "succeeded":   # cached too: retried once if retryable, never resubmitted hourly
+                prev = cache_get(cfg, b["kind"], key) or {}
+                value["attempts"] = prev.get("attempts", 0) + 1
+                log.warning("%s %s: %s (attempt %d)", b["kind"], key, value["status"], value["attempts"])
             cache_put(cfg, b["kind"], key, value)
             done += 1
         b["collected"], b["usage"] = True, usage
@@ -366,7 +389,7 @@ def screen_requests(cfg, st, con, streams) -> tuple[list, list, bool]:
             text = lines_text(w)
             key = h("screen", 2, st["model"], v["id"], text)
             got = cache_get(cfg, "screen", key)
-            if got is not None:
+            if usable(got):
                 have.append((v, w, got))
             elif key in flying:
                 waiting = True
@@ -393,7 +416,7 @@ def candidates(st, screened) -> list[dict]:
         for m in got["result"]["moments"]:
             if m["severity"] < st["screen_min_severity"] or m["stance"] in ("reading_or_quoting", "condemning"):
                 continue
-            if m["quote"] and norm(m["quote"]) not in text:
+            if m["quote"] and not quoted(m["quote"], text):
                 continue                     # quote not in the window: likely invented, drop
             out.append({**m, "vid": v["id"]})
     out.sort(key=lambda m: (-m["severity"], m["vid"], m["start"]))
@@ -421,7 +444,7 @@ def judge_requests(cfg, st, con, streams, cands) -> tuple[list, list, bool]:
         chat_text = "\n".join(f"[{c['t']:.0f}s {fmt(c['t'])}] {c['text']}" for c in chat)
         key = h("judge", 2, st["model"], v["id"], m["start"], text, chat_text)
         got = cache_get(cfg, "judge", key)
-        if got is not None:
+        if usable(got):
             have.append((v, m, turns, chat, got))
         elif key in flying:
             waiting = True
@@ -449,7 +472,7 @@ def clip_from(st, v, m, turns, chat, got) -> dict | None:
     if not r["keep"] or r["severity"] < st["min_severity"] or r["stance"] in ("reading_or_quoting", "condemning"):
         return None
     ctx = norm(" ".join(t["text"] for t in turns))
-    if r["quote"] and norm(r["quote"]) not in ctx:
+    if r["quote"] and not quoted(r["quote"], ctx):
         return None                          # never publish a quote that isn't in the transcript
     msgs = {norm(c["text"]) for c in chat}
     examples = [e for e in r["chat_examples"] if norm(e) in msgs][:4]
@@ -474,7 +497,7 @@ def claims_from(st, screened) -> list[dict]:
             continue
         text = norm(" ".join(t["text"] for t in w if t["speaker"] in ("Hasan", "Auto-captions")))
         for c in got["result"].get("claims", []):
-            if c["importance"] < st["fact_min_importance"] or not c["quote"] or norm(c["quote"]) not in text:
+            if c["importance"] < st["fact_min_importance"] or not quoted(c["quote"], text):
                 continue
             out.append({**c, "vid": v["id"]})
     out.sort(key=lambda c: (-c["importance"], c["vid"], c["start"]))
@@ -495,7 +518,7 @@ def fact_requests(cfg, st, con, streams, claims) -> tuple[list, list, bool]:
         text = lines_text(turns)
         key = h("fact", 1, st["model"], v["id"], c["start"], c["claim"], text)
         got = cache_get(cfg, "fact", key)
-        if got is not None:
+        if usable(got):
             have.append((v, c, turns, got))
         elif key in flying:
             waiting = True
@@ -537,6 +560,63 @@ def last_json(text: str):
             found = obj
         i = text.find("{", end)
     return found
+
+
+def diagnostics(st, screened, judged, checked) -> dict:
+    """Counts of what each pass produced and why things were dropped (no private data: Hasan's public words only)."""
+    from collections import Counter
+    d = {"screen_windows": len(screened), "screen_status": dict(Counter(g.get("status") for *_, g in screened)),
+         "moments": 0, "moments_below_threshold": 0, "moments_reading_or_condemning": 0, "moments_quote_mismatch": 0,
+         "claims": 0, "claims_low_importance": 0, "claims_quote_mismatch": 0,
+         "judge_status": dict(Counter(g.get("status") for *_, g in judged)), "judged_kept": 0,
+         "judged_rejected": 0, "judged_below_min": 0, "judged_reading_or_condemning": 0, "judged_quote_mismatch": 0,
+         "fact_status": dict(Counter(g.get("status") for *_, g in checked)), "fact_not_checkable": 0,
+         "fact_no_found_source": 0, "examples_quote_mismatch": []}
+    for v, w, got in screened:
+        if got.get("status") != "succeeded":
+            continue
+        text = norm(" ".join(t["text"] for t in w))
+        htext = norm(" ".join(t["text"] for t in w if t["speaker"] in ("Hasan", "Auto-captions")))
+        for m in got["result"].get("moments", []):
+            d["moments"] += 1
+            if m["severity"] < st["screen_min_severity"]:
+                d["moments_below_threshold"] += 1
+            elif m["stance"] in ("reading_or_quoting", "condemning"):
+                d["moments_reading_or_condemning"] += 1
+            elif m["quote"] and not quoted(m["quote"], text):
+                d["moments_quote_mismatch"] += 1
+                if len(d["examples_quote_mismatch"]) < 5:
+                    d["examples_quote_mismatch"].append(m["quote"][:200])
+        for c in got["result"].get("claims", []):
+            d["claims"] += 1
+            if c["importance"] < st["fact_min_importance"]:
+                d["claims_low_importance"] += 1
+            elif not quoted(c["quote"], htext):
+                d["claims_quote_mismatch"] += 1
+    for v, m, turns, chat, got in judged:
+        if got.get("status") != "succeeded":
+            continue
+        r = got["result"]
+        if not r["keep"]:
+            d["judged_rejected"] += 1
+        elif r["severity"] < st["min_severity"]:
+            d["judged_below_min"] += 1
+        elif r["stance"] in ("reading_or_quoting", "condemning"):
+            d["judged_reading_or_condemning"] += 1
+        elif r["quote"] and not quoted(r["quote"], norm(" ".join(t["text"] for t in turns))):
+            d["judged_quote_mismatch"] += 1
+        else:
+            d["judged_kept"] += 1
+    for v, c, turns, got in checked:
+        r = got.get("result") if got.get("status") == "succeeded" else None
+        if not isinstance(r, dict):
+            continue
+        if r.get("verdict") == "not_checkable":
+            d["fact_not_checkable"] += 1
+        elif r.get("verdict") != "accurate" and not [x for x in r.get("sources", []) if isinstance(x, dict)
+                                                       and x.get("url") in set(got.get("urls", []))]:
+            d["fact_no_found_source"] += 1
+    return d
 
 
 def summarise(facts: list[dict]) -> dict:
@@ -614,7 +694,8 @@ def build(cfg, week: str, client=None, yes: bool = False, wait: bool = False, bu
            "generated_at": (now or dt.datetime.now()).isoformat(timespec="seconds"), "model": st["model"],
            "streams": [{"video_id": v["id"], "title": v["title"], "date": v["upload_date"]} for v in streams],
            "fingerprint": fingerprint(con, streams), "candidates_judged": len(judged), "clips": clips,
-           "fact_checks": facts, "fact_summary": summarise(facts),
+           "fact_checks": facts, "fact_summary": summarise(facts), "version": VERSION,
+           "diagnostics": diagnostics(st, screened, judged, checked),
            "method": "Claude read every transcript line of the week's streams, flagged moments where Hasan himself "
                      "may have said something egregious, then re-judged the strongest with 20 minutes of context and "
                      "the chat at the time, against a fixed rubric (own words only; readings, condemnations and "
@@ -651,7 +732,7 @@ def auto(cfg, client=None, now: dt.datetime | None = None) -> str:
     if path.exists() and not pending:
         con = public_db(cfg)
         old = json.loads(path.read_text())
-        if old.get("fingerprint") == fingerprint(con, week_streams(con, week)):
+        if old.get("fingerprint") == fingerprint(con, week_streams(con, week)) and old.get("version") == VERSION:
             return "up_to_date"
     return build(cfg, week, client=client or api_client(), yes=True, budget=st["max_usd_per_week"], now=now)
 
