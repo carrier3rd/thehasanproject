@@ -114,8 +114,8 @@ def merge_private(cfg: dict) -> dict:
         return cfg
     overlay = yaml.safe_load(overlay_path.read_text()) or {}
     for key, value in overlay.items():
-        if key == "paths" and isinstance(value, dict):
-            cfg["paths"] = {**cfg.get("paths", {}), **value}
+        if isinstance(value, dict) and isinstance(cfg.get(key), dict):   # sections merge key by key (paths, reel, backup)
+            cfg[key] = {**cfg[key], **value}
         elif key == "optout_file" and not Path(value).is_absolute():
             cfg[key] = str(pdir / value)
         else:

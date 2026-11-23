@@ -386,13 +386,15 @@ def test_private_config_overlay(tmp_path):
     priv = tmp_path / "private"
     priv.mkdir()
     (priv / "config.yaml").write_text(yaml.safe_dump({"site_domain": "example.org", "optout_file": "optout.txt",
-                                                      "paths": {"archive_db": "/srv/a.db"}}))
+                                                      "paths": {"archive_db": "/srv/a.db"},
+                                                      "reel": {"backfill_from": "2026-09-13"}}))
     c = yaml.safe_load((REPO / "config.yaml").read_text())
     c["private_dir"] = "private"
     (tmp_path / "config.yaml").write_text(yaml.safe_dump(c))
     cfg = load_config(tmp_path / "config.yaml")
     assert cfg["site_domain"] == "example.org" and cfg["paths"]["archive_db"] == "/srv/a.db"
     assert cfg["paths"]["audio"] == "data/audio"
+    assert cfg["reel"]["backfill_from"] == "2026-09-13" and cfg["reel"]["max_clips"] == 10   # merged, not replaced
     assert cfg_file(cfg, "optout_file") == priv / "optout.txt"
 
 
