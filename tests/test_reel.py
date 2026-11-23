@@ -254,3 +254,32 @@ def test_failed_answers_are_retried_once(reel_project):
     assert len(c.messages.batches.created) == 2
     out = json.loads((root / "reels" / f"{WEEK}.json").read_text())
     assert out["diagnostics"]["screen_status"] == {"errored": 1}
+
+
+def test_chat_metrics():
+    import sqlite3
+    con = sqlite3.connect(":memory:")
+    con.row_factory = sqlite3.Row          # as public_db() opens it
+    con.execute("CREATE TABLE chat(video_id TEXT, t REAL, author TEXT, text TEXT, first_msg INTEGER, kind TEXT, deleted INTEGER)")
+    rows = [("v", 1000 - 300 + i * 30, f"a{i}", "just chatting about stuff", 0) for i in range(10)]     # 2/min before
+    said = ["landlords are parasites", "parasites lol", "true landlords suck", "so true about landlords", "based"]
+    rows += [("v", 1000 + i, f"b{i}", f"{said[i % 5]} {'!' * (i // 5)} {i}", 1 if i < 5 else 0) for i in range(20)]
+    rows += [("v", 1030 + i, f"c{i}", "LANDLORDS OUT NOW!!", 0) for i in range(6)]                    # 6 accounts in 6 s
+    rows += [("v", 1100 + i, f"d{i}", "four accounts only here", 0) for i in range(4)]                # below the burst bar
+    rows += [("v", 1100 + i * 100, f"e{i}", "same words but slowly", 0) for i in range(6)]            # too spread out
+    rows += [("v", 1200 + i, f"f{i}", "KEKW", 0) for i in range(8)]                                   # emote spam: ignored
+    con.executemany("INSERT INTO chat VALUES(?,?,?,?,?,'msg',0)", rows)
+    lines = [{"t": 1000, "speaker": "Hasan", "text": "Landlords are parasites, all of them."},
+             {"t": 1010, "speaker": "Media", "text": "parasites documentary"}]
+    m = reel.chat_metrics(con, "v", 1000, 1060, "Landlords are parasites", lines)
+    assert m["rate_before"] == 2.0 and m["rate_during"] > 20
+    assert m["echo_share"] > 0.4 and m["echo_share_before"] == 0.0
+    assert m["bursts"] == 1 and m["burst_accounts"] == 6 and m["burst_examples"][0]["text"] == "LANDLORDS OUT NOW!!"
+    assert m["first_msg_share"] > m["first_msg_share_stream"] * 0.9
+
+
+def test_burst_key_ignores_emotes_and_mentions():
+    assert reel.burst_key("KEKW @alice lol") == ""
+    assert reel.burst_key("hasL hasRaid OMEGALUL KEKW") == ""
+    assert reel.burst_key("@bob free palestine now hasL") == "free palestine now"
+    assert reel.burst_key("LANDLORDS OUT NOW!!") == "landlords out now"

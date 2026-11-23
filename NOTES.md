@@ -171,6 +171,13 @@ Run `python -m pytest` from the repo root (27 tests, no GPU or network needed).
   Text-only previews (no image). Withdrawn items return 404. The reviewer's correction note is `review_note` (a
   fact-check's own `correction` field is Claude's "what's accurate").
 
+- **Chat response numbers** (2026-11-23, reel VERSION 4): each clip gets `chat_metrics`, computed from public chat
+  without Claude: messages/min 5 min before, during and 5 min after; share of messages echoing his distinctive words
+  (5+ letters, from the quote and his lines) vs the 5 minutes before; first-time-chatter share vs the stream; and
+  copy-paste bursts: the same message (3+ real words after dropping @mentions, has* channel emotes and common Twitch
+  emotes) from 5+ accounts within 60 s. Heuristics, shown as counts on the card under "Chat in numbers"; a burst is a
+  signal of coordinated posting, not proof. Existing reels rebuild with them from cache (no Claude cost).
+
 ## Library versions checked
 Signatures were read from the wheels, not run: whisperx 3.8.6 (`whisperx.diarize.DiarizationPipeline(token=...)`,
 `__call__(..., return_embeddings=True)` returning `(df, {speaker: vector})`), pyannote.audio 4.0.7

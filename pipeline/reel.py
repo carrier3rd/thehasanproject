@@ -48,7 +48,7 @@ CATEGORIES = ["antisemitism", "nazi_or_holocaust_comparison", "justifying_or_glo
               "misinformation", "other"]
 STANCES = ["own_view", "joke_or_bait", "reading_or_quoting", "condemning", "unclear"]
 WEEK_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-VERSION = 3          # bump when selection logic changes: auto rebuilds reels made by an older version (from cache)
+VERSION = 4          # bump when selection logic changes: auto rebuilds reels made by an older version (from cache)
 _NONWORD = re.compile(r"[^a-z0-9]+")
 
 
@@ -465,7 +465,69 @@ def judge_requests(cfg, st, con, streams, cands) -> tuple[list, list, bool]:
     return need, have, waiting
 
 
-def clip_from(st, v, m, turns, chat, got) -> dict | None:
+STOP = set("""about after again also and any are because been before being but can could did does doing dont down
+from going gonna have having here just know like make more most much need never not now only other over really right
+said same should some still such than that the their them then there these they thing think this those very want was
+were what when where which while who will with would yeah you your youre theyre thats whats""".split())
+
+
+EMOTES = set("""kekw kekl lul omegalul pog pogu poggers pogchamp icant cooked based toobased yep nope nodders aware monka
+monkas monkaw monkaomega sadge peepohappy kappa lol lmao lmfao rofl xd catjam hmm hmmm classic noted copium hopium clueless
+hesright fricc ripbozo letsgo gigachad chad smorc dnmsit glorpslam wokege glorp ez widepeepohappy pepega pepelaugh
+omegaluliguess kekwait susge shrug libbers bedge waiting""".split())
+_MENTION_EMOTE = re.compile(r"@\w+|\bhas[A-Z]\w*")
+
+
+def burst_key(text: str) -> str:
+    """Message text reduced to its real words: @mentions, the channel's has* emotes and common Twitch emotes dropped.
+    A copy-paste burst needs 3+ such words, so emote spam and '@someone lol' don't count."""
+    words = [w for w in norm(_MENTION_EMOTE.sub(" ", text or "")).split() if w not in EMOTES and len(w) >= 2]
+    return " ".join(words) if len(words) >= 3 else ""
+
+
+def chat_metrics(con, vid: str, start: float, end: float, quote: str, lines: list[dict]) -> dict:
+    """How chat responded around a clip, from public chat (counts only; no usernames leave this function).
+    rate_*: messages per minute 5 min before / during / 5 min after; echo: share of messages using his distinctive
+    words (from the quote and his lines in the clip) vs the 5 minutes before; first_msg share vs the whole stream;
+    bursts: identical 3+-word messages from 5+ different accounts within 60 s (copy-paste / coordinated posting)."""
+    rows = [dict(r) for r in con.execute(
+        "SELECT t, author, text, first_msg FROM chat WHERE video_id=? AND kind='msg' AND deleted=0 AND t BETWEEN ? AND ? "
+        "ORDER BY t", (vid, start - 300, end + 300))]
+    words = set()
+    for t in [quote] + [l["text"] for l in lines if l["speaker"] in ("Hasan", "Auto-captions")]:
+        words |= {w for w in norm(t).split() if len(w) >= 5 and w not in STOP}
+    before = [r for r in rows if r["t"] < start]
+    during = [r for r in rows if start <= r["t"] <= end]
+    after = [r for r in rows if r["t"] > end]
+    resp = during + after
+    rate = lambda rs, secs: round(len(rs) / max(secs, 1) * 60, 1)
+    echo = lambda rs: (sum(1 for r in rs if words & set(norm(r["text"]).split())) / len(rs)) if rs and words else 0.0
+    base_first = con.execute("SELECT AVG(COALESCE(first_msg,0)) FROM chat WHERE video_id=? AND kind='msg'", (vid,)).fetchone()[0] or 0
+    first = (sum(1 for r in resp if r["first_msg"]) / len(resp)) if resp else 0.0
+    groups: dict[str, list[dict]] = {}
+    for r in resp:
+        key = burst_key(r["text"])
+        if key:
+            groups.setdefault(key, []).append(r)
+    bursts = []
+    for key, rs in groups.items():
+        rs.sort(key=lambda r: r["t"])
+        i = 0
+        for j in range(len(rs)):                      # widest 60 s window with the most distinct accounts
+            while rs[j]["t"] - rs[i]["t"] > 60:
+                i += 1
+            authors = {r["author"] for r in rs[i:j + 1]}
+            if len(authors) >= 5:
+                bursts.append({"text": rs[j]["text"][:200], "accounts": len({r["author"] for r in rs}), "messages": len(rs)})
+                break
+    bursts.sort(key=lambda b: -b["accounts"])
+    return {"rate_before": rate(before, min(300, start)), "rate_during": rate(during, end - start),
+            "rate_after": rate(after, 300), "echo_share": round(echo(resp), 3), "echo_share_before": round(echo(before), 3),
+            "first_msg_share": round(first, 3), "first_msg_share_stream": round(base_first, 3),
+            "bursts": len(bursts), "burst_accounts": sum(b["accounts"] for b in bursts), "burst_examples": bursts[:3]}
+
+
+def clip_from(st, v, m, turns, chat, got, con=None) -> dict | None:
     if got.get("status") != "succeeded":
         return None
     r = got["result"]
@@ -480,6 +542,7 @@ def clip_from(st, v, m, turns, chat, got) -> dict | None:
     a = min(max(r["clip_start"], lo), hi)
     b = min(max(r["clip_end"], a + st["clip_min_s"]), a + st["clip_max_s"], hi + 5)
     lines = [{"t": t["start"], "speaker": t["speaker"], "text": t["text"]} for t in turns if a - 10 <= t["start"] <= b + 5]
+    metrics = chat_metrics(con, v["id"], a, b, r["quote"], lines) if con is not None else None
     return {"id": f"c-{v['id']}-{int(a)}", "video_id": v["id"], "stream_title": v["title"], "date": v["upload_date"],
             "embed_type": v["embed_type"],
             "embed_id": v["embed_id"], "source_url": v["source_url"], "start": round(a, 1), "end": round(b, 1),
@@ -487,6 +550,7 @@ def clip_from(st, v, m, turns, chat, got) -> dict | None:
             "categories": r["categories"], "title": r["title"], "summary": r["summary"],
             "why_notable": r["why_notable"], "nuance": r["nuance"], "chat_reaction": r["chat_reaction"],
             "chat_examples": examples, "quote": r["quote"], "segment_reason": r.get("segment_reason", ""),
+            "chat_metrics": metrics,
             "lines": lines}
 
 
@@ -686,7 +750,7 @@ def build(cfg, week: str, client=None, yes: bool = False, wait: bool = False, bu
             collect(cfg, client, wait=True)
             continue
         break
-    clips = [c for c in (clip_from(st, *x) for x in judged) if c]
+    clips = [c for c in (clip_from(st, *x, con=con) for x in judged) if c]
     clips.sort(key=lambda c: (-c["severity"], {"high": 0, "medium": 1, "low": 2}[c["confidence"]], c["date"], c["start"]))
     clips = clips[: st["max_clips"]]
     facts = [f for f in (fact_from(*x) for x in checked) if f]

@@ -132,6 +132,19 @@ function shareButton(x, title) {
   return b;
 }
 
+function chatNumbers(m) {
+  if (!m) return [];
+  const pct = x => `${(x * 100).toFixed(x < 0.1 ? 1 : 0)}%`;
+  const items = [
+    `Messages per minute: ${m.rate_before} before · ${m.rate_during} during · ${m.rate_after} after`,
+    `Echoed his words: ${pct(m.echo_share)} of messages (${pct(m.echo_share_before)} in the 5 minutes before)`,
+    `First-time chatters: ${pct(m.first_msg_share)} (stream average ${pct(m.first_msg_share_stream)})`,
+    m.bursts ? `Copy-paste bursts: ${m.bursts}, from ${m.burst_accounts} accounts` : 'Copy-paste bursts: none'];
+  const ex = (m.burst_examples || []).map(b => el('li', { text: `“${b.text}” · ${b.accounts} accounts` }));
+  return [el('h3', { text: 'Chat in numbers' }), el('ul', { class: 'cnum' }, ...items.map(t => el('li', { text: t }))),
+    ex.length ? el('ul', { class: 'cex' }, ...ex) : null];
+}
+
 // ---------- the card ----------
 const STANCE = { own_view: 'His own view', joke_or_bait: 'Joke or bait', unclear: 'Stance unclear' };
 const CAT = c => c.replace(/_/g, ' ');
@@ -150,6 +163,7 @@ function renderCard(c) {
     c.quote ? el('blockquote', { text: `“${c.quote}”` }) : null,
     ...sec('What he said', c.summary), ...sec('Why it’s here', c.why_notable),
     ...sec('Context and nuance', c.nuance), ...sec('Chat’s reaction', c.chat_reaction), ex,
+    ...chatNumbers(c.chat_metrics),
     c.segment_reason ? el('p', { class: 'cwhen', style: 'margin-top:10px',
       text: `Segment: ${fmtTime(c.end - c.start)}. ${c.segment_reason}` }) : null,
     el('div', { class: 'row' }, shareButton(c, c.title)),
