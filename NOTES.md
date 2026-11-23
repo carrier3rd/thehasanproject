@@ -157,6 +157,14 @@ Run `python -m pytest` from the repo root (27 tests, no GPU or network needed).
   items drop out of the reel and the all-weeks totals and are counted publicly. Items have stable ids
   (`c-<video>-<second>`, `f-<video>-<second>`).
 
+- **Backfill and trends** (2026-11-23): `reel.py auto` works on one week at a time (`archive/reel/auto.json`): the
+  latest finished week first, then earlier weeks newest-first from `reel.backfill_from` (rounded to its Sunday), at
+  most `max_backfill_weeks` (default 12). Off unless `backfill_from` is set, so importing old streams never starts
+  Claude spending by itself. `/api/trends` and the reel page's "Trends" view: per week, clips and false/misleading
+  claims per 10 stream-hours, worst and mean severity, verdict counts (corrections applied). Charts follow the dataviz
+  method: one small chart per measure (no shared axis), single blue series validated on light and dark, hover
+  tooltips, latest value labelled, a table view.
+
 ## Library versions checked
 Signatures were read from the wheels, not run: whisperx 3.8.6 (`whisperx.diarize.DiarizationPipeline(token=...)`,
 `__call__(..., return_embeddings=True)` returning `(df, {speaker: vector})`), pyannote.audio 4.0.7

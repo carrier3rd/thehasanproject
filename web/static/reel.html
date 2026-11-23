@@ -11,9 +11,12 @@
   <nav class="tabs" id="views">
     <button type="button" data-view="clips" class="on">Clips</button>
     <button type="button" data-view="facts">Fact-checks</button>
+    <button type="button" data-view="trends">Trends</button>
   </nav>
   <div id="empty" class="note" hidden></div>
   <div id="facts" hidden></div>
+  <div id="trends" hidden></div>
+  <div id="tip" class="tip" role="tooltip" hidden></div>
   <div id="stage" hidden>
     <div class="rcol">
       <div id="player"></div>
@@ -223,16 +226,89 @@ async function renderFacts() {
   }
   box.replaceChildren(...nodes);
 }
+// ---------- trends: one small bar chart per measure (different scales never share an axis) ----------
+const SVGNS = 'http://www.w3.org/2000/svg';
+const svg = (tag, attrs = {}) => { const n = document.createElementNS(SVGNS, tag); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); return n; };
+const shortWeek = w => new Date(w + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+function showTip(evt, lines) {
+  const t = $('#tip'); t.replaceChildren(...lines.map((l, i) => el('div', { class: i ? '' : 'tt', text: l }))); t.hidden = false;
+  const r = evt.currentTarget.getBoundingClientRect();
+  t.style.left = Math.min(Math.max(r.left + r.width / 2 - t.offsetWidth / 2, 8), innerWidth - t.offsetWidth - 8) + 'px';
+  t.style.top = Math.max(r.top + scrollY - t.offsetHeight - 8, scrollY + 8) + 'px';
+}
+function barChart(title, sub, weeks, key, fmt) {
+  const W = 340, H = 170, L = 34, R = 8, T = 22, B = 26;
+  const vals = weeks.map(w => w[key]);
+  const max = Math.max(1, ...vals.filter(v => v != null));
+  const nice = max <= 5 ? Math.ceil(max) : Math.ceil(max / 5) * 5;
+  const band = (W - L - R) / Math.max(weeks.length, 1), bw = Math.min(24, band - 2);
+  const y = v => T + (H - T - B) * (1 - v / nice);
+  const g = svg('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': `${title}, by week` });
+  for (const f of [0, 0.5, 1]) {                       // recessive grid + y labels
+    const v = nice * f;
+    g.append(svg('line', { x1: L, x2: W - R, y1: y(v), y2: y(v), class: 'grid' }));
+    const tx = svg('text', { x: L - 6, y: y(v) + 4, 'text-anchor': 'end', class: 'axis' }); tx.textContent = fmt(v, true); g.append(tx);
+  }
+  weeks.forEach((w, i) => {
+    const v = w[key], cx = L + band * i + band / 2;
+    if (v != null && v > 0) {
+      const top = y(v), x0 = cx - bw / 2, h = y(0) - top, r = Math.min(4, h);
+      g.append(svg('path', { class: 'bar', d: `M${x0},${y(0)}V${top + r}Q${x0},${top} ${x0 + r},${top}H${x0 + bw - r}Q${x0 + bw},${top} ${x0 + bw},${top + r}V${y(0)}Z` }));
+    }
+    const hit = svg('rect', { x: L + band * i, y: T, width: band, height: H - T - B, class: 'hit', tabindex: 0,
+      'aria-label': `${shortWeek(w.week)}: ${v == null ? 'no data' : fmt(v)}` });
+    const tip = e => showTip(e, [`Week of ${shortWeek(w.week)}`, `${title}: ${v == null ? '–' : fmt(v)}`, `${w.streams} stream${w.streams === 1 ? "" : "s"}, ${w.hours} h`]);
+    hit.addEventListener('mouseenter', tip); hit.addEventListener('focus', tip);
+    hit.addEventListener('mouseleave', () => { $('#tip').hidden = true; }); hit.addEventListener('blur', () => { $('#tip').hidden = true; });
+    g.append(hit);
+    if (weeks.length <= 8 || i % 2 === weeks.length % 2 || i === weeks.length - 1) {
+      const lx = svg('text', { x: cx, y: H - 8, 'text-anchor': 'middle', class: 'axis' }); lx.textContent = shortWeek(w.week); g.append(lx);
+    }
+  });
+  const last = weeks[weeks.length - 1];                // selective direct label: the latest week only
+  if (last && last[key] != null) {
+    const lv = svg('text', { x: L + band * (weeks.length - 1) + band / 2, y: y(last[key]) - 6, 'text-anchor': 'middle', class: 'val' });
+    lv.textContent = fmt(last[key]); g.append(lv);
+  }
+  return el('figure', { class: 'chart' }, el('figcaption', {}, el('b', { text: title }), el('span', { text: sub })), g);
+}
+async function renderTrends() {
+  const box = $('#trends');
+  let weeks = [];
+  try { weeks = (await api('/api/trends')).weeks; } catch (e) { /* none */ }
+  if (!weeks.length) return box.replaceChildren(el('div', { class: 'note', text: 'Trends appear once there are weekly reels.' }));
+  const n1 = (v, axis) => axis ? String(Math.round(v * 10) / 10) : v.toFixed(1);
+  const int = v => String(Math.round(v));
+  const cols = [['week', 'Week'], ['streams', 'Streams'], ['hours', 'Hours'], ['clips', 'Clips'], ['clips_per_10h', 'Clips / 10 h'],
+    ['max_severity', 'Worst severity'], ['mean_severity', 'Mean severity'], ['false', 'False'], ['misleading', 'Misleading'],
+    ['unsupported', 'Unsupported'], ['mostly_accurate', 'Mostly accurate'], ['accurate', 'Accurate'],
+    ['false_or_misleading_per_10h', 'False or misleading / 10 h'], ['withdrawn', 'Withdrawn']];
+  box.replaceChildren(
+    el('p', { class: 'note', style: 'padding:0 0 8px', text: 'Rates are per 10 hours streamed, so long and short weeks compare fairly. Withdrawn items are not counted.' }),
+    el('div', { class: 'charts' },
+      barChart('Clips per 10 hours', 'moments that met the reel’s bar', weeks, 'clips_per_10h', n1),
+      barChart('False or misleading claims per 10 hours', 'from the weekly fact-check', weeks, 'false_or_misleading_per_10h', n1),
+      barChart('Worst severity of the week', 'on the reel’s 1–10 rubric', weeks, 'max_severity', int)),
+    el('details', { class: 'alltime' }, el('summary', { text: 'Table' }),
+      el('div', { style: 'overflow-x:auto' }, el('table', {},
+        el('thead', {}, el('tr', {}, ...cols.map(([, h]) => el('th', { class: 'num', text: h })))),
+        el('tbody', {}, ...weeks.slice().reverse().map(w => el('tr', {}, ...cols.map(([k]) => el('td', { class: 'num',
+          text: k === 'week' ? `${w.week} – ${w.week_end}` : (w[k] == null ? '–' : String(w[k])) })))))))));
+}
+
 let view = 'clips';
 function setView(v) {
   view = v;
   for (const b of document.querySelectorAll('#views button')) b.classList.toggle('on', b.dataset.view === v);
   $('#facts').hidden = v !== 'facts';
+  $('#trends').hidden = v !== 'trends';
   const hasClips = reel && reel.clips.length;
   $('#stage').hidden = v !== 'clips' || !hasClips;
   $('#empty').hidden = v !== 'clips' || hasClips;
   for (const id of ['#prev', '#next', '#count']) $(id).hidden = v !== 'clips';
-  if (v === 'facts') { if (player && playing) { player.pause(); playing = false; } renderFacts(); }
+  if (v !== 'clips' && player && playing) { player.pause(); playing = false; }
+  if (v === 'facts') renderFacts();
+  if (v === 'trends') renderTrends();
 }
 
 // ---------- flipping ----------

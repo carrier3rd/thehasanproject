@@ -422,6 +422,39 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
             except ValueError as e:
                 raise HTTPException(400, str(e))
 
+    @app.get("/api/trends")
+    def trends():
+        """Per week, from the served reels (corrections applied): clips and false/misleading claims per 10 stream-hours,
+        worst and mean severity, verdict counts. Per-hour rates make weeks with long and short streams comparable."""
+        out = []
+        if reels is None or not reels.is_dir():
+            return {"weeks": out}
+        con = db()
+        try:
+            for p in sorted(reels.glob("????-??-??.json")):
+                r = load_reel(p.stem)
+                if r is None:
+                    continue
+                ids = [x["video_id"] for x in r.get("streams", [])]
+                secs = sum(row[0] or 0 for row in con.execute(
+                    f"SELECT duration FROM videos WHERE id IN ({','.join('?' * len(ids))})", ids)) if ids else 0
+                hours = secs / 3600
+                sev = [c["severity"] for c in r["clips"]]
+                fc = r.get("fact_checks") or []
+                verdicts = {v: sum(1 for f in fc if f["verdict"] == v)
+                            for v in ("false", "misleading", "unsupported", "mostly_accurate", "accurate")}
+                per10 = lambda n: round(n / hours * 10, 2) if hours else None
+                out.append({"week": r["week"], "week_end": r["week_end"], "streams": len(ids), "hours": round(hours, 1),
+                            "clips": len(sev), "clips_per_10h": per10(len(sev)),
+                            "max_severity": max(sev) if sev else None,
+                            "mean_severity": round(sum(sev) / len(sev), 1) if sev else None,
+                            "checked": len(fc), **verdicts,
+                            "false_or_misleading_per_10h": per10(verdicts["false"] + verdicts["misleading"]),
+                            "withdrawn": r.get("withdrawn", 0)})
+        finally:
+            con.close()
+        return {"weeks": out}
+
     @app.get("/api/factchecks")
     def factchecks():
         """Every week's fact-checks added up: totals by verdict and topic, and per week."""

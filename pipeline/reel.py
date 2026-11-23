@@ -720,23 +720,61 @@ def fingerprint(con, streams) -> str:
                                     (v["id"],)).fetchone()[:]) for v in streams])
 
 
+def needs_work(cfg, con, week: str) -> bool:
+    path = reels_dir(cfg) / f"{week}.json"
+    if not path.exists():
+        return bool(week_streams(con, week))
+    old = json.loads(path.read_text())
+    return old.get("fingerprint") != fingerprint(con, week_streams(con, week)) or old.get("version") != VERSION
+
+
+def backfill_weeks(st: dict, latest: str) -> list[str]:
+    """Earlier weeks to fill in, newest first: from `backfill_from` (rounded back to its Sunday), at most
+    `max_backfill_weeks`. Empty unless backfill_from is set, so a big import of old streams never costs by surprise."""
+    if not st.get("backfill_from"):
+        return []
+    first = dt.date.fromisoformat(str(st["backfill_from"]))
+    first -= dt.timedelta(days=(first.weekday() + 1) % 7)
+    out, w = [], dt.date.fromisoformat(latest) - dt.timedelta(days=7)
+    while w >= first and len(out) < st.get("max_backfill_weeks", 12):
+        out.append(w.isoformat())
+        w -= dt.timedelta(days=7)
+    return out
+
+
 def auto(cfg, client=None, now: dt.datetime | None = None) -> str:
-    """Hourly: build the latest finished week once it is due, and refresh it when its streams change."""
+    """Hourly: build the latest finished week once it is due (and refresh it when its streams change); when it is up
+    to date, fill in earlier weeks one at a time (backfill_from). One week is worked on at a time."""
     st = settings(cfg)
     now = now or dt.datetime.now()
-    week = last_finished_week(now)
-    week_end = dt.date.fromisoformat(week) + dt.timedelta(days=6)
+    state_path = root(cfg) / "auto.json"
+    try:
+        state = json.loads(state_path.read_text())
+    except (OSError, ValueError):
+        state = {}
+
+    def work(week: str) -> str:
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(json.dumps({"week": week}))
+        result = build(cfg, week, client=client or api_client(), yes=True, budget=st["max_usd_per_week"], now=now)
+        if result != "waiting":
+            state_path.unlink(missing_ok=True)
+        return f"{week}: {result}"
+
+    if state.get("week"):                    # finish what is in flight first
+        return work(state["week"])
+    latest = last_finished_week(now)
+    week_end = dt.date.fromisoformat(latest) + dt.timedelta(days=6)
     due = dt.datetime.combine(week_end + dt.timedelta(days=1), dt.time(st["build_after_hour"]))
-    pending = bool(in_flight(cfg))
-    if now < due and not pending:
-        return "not_due"
-    path = reels_dir(cfg) / f"{week}.json"
-    if path.exists() and not pending:
-        con = public_db(cfg)
-        old = json.loads(path.read_text())
-        if old.get("fingerprint") == fingerprint(con, week_streams(con, week)) and old.get("version") == VERSION:
-            return "up_to_date"
-    return build(cfg, week, client=client or api_client(), yes=True, budget=st["max_usd_per_week"], now=now)
+    con = public_db(cfg)
+    if now < due:
+        latest = (dt.date.fromisoformat(latest) - dt.timedelta(days=7)).isoformat()   # last week's reel stands
+    if needs_work(cfg, con, latest):
+        return work(latest)
+    for week in backfill_weeks(st, latest):
+        if needs_work(cfg, con, week):
+            return work(week)
+    return "up_to_date"
 
 
 def status(cfg) -> None:

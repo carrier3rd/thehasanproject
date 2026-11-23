@@ -159,16 +159,29 @@ def test_build_respects_budget_and_empty_weeks(reel_project):
 def test_auto_waits_for_sunday_then_refreshes_only_on_change(reel_project):
     root, cfg = reel_project
     client = FakeClient()
-    saturday = dt.datetime(2026, 11, 7, 23)        # week Nov 1-7 not over: auto looks at Oct 25-31, which is empty
-    assert reel.auto(cfg, client=client, now=saturday) == "empty"
+    saturday = dt.datetime(2026, 11, 7, 23)        # week Nov 1-7 not over; Oct 25-31 has no streams
+    assert reel.auto(cfg, client=client, now=saturday) == "up_to_date"
+    early_sunday = dt.datetime(2026, 11, 8, 7)     # before build_after_hour (10): last week's reel stands
+    assert reel.auto(cfg, client=client, now=early_sunday) == "up_to_date"
     assert client.messages.batches.created == []
-    early_sunday = dt.datetime(2026, 11, 8, 7)     # before build_after_hour (10)
-    assert reel.auto(cfg, client=client, now=early_sunday) == "not_due"
     sunday = dt.datetime(2026, 11, 8, 11)
-    for _ in range(4):                              # submit screen, judge, write; then up to date
-        state = reel.auto(cfg, client=client, now=sunday)
-    assert state == "up_to_date"
+    results = [reel.auto(cfg, client=client, now=sunday) for _ in range(4)]
+    assert results == ["2026-11-01: waiting", "2026-11-01: waiting", "2026-11-01: written", "up_to_date"]
     assert (root / "reels" / f"{WEEK}.json").exists()
+
+
+def test_auto_backfills_earlier_weeks_within_limits(reel_project):
+    root, cfg = reel_project
+    assert reel.backfill_weeks(reel.settings(cfg), "2026-11-01") == []          # off unless backfill_from is set
+    st = {**reel.settings(cfg), "backfill_from": "2026-10-15", "max_backfill_weeks": 12}
+    assert reel.backfill_weeks(st, "2026-11-01") == ["2026-10-25", "2026-10-18", "2026-10-11"]   # rounded to Sunday
+    assert reel.backfill_weeks({**st, "max_backfill_weeks": 1}, "2026-11-01") == ["2026-10-25"]
+    cfg["reel"] = {**(cfg.get("reel") or {}), "backfill_from": "2026-10-11"}
+    client, sunday = FakeClient(), dt.datetime(2026, 11, 8, 11)
+    results = [reel.auto(cfg, client=client, now=sunday) for _ in range(8)]
+    assert results[2] == "2026-11-01: written"                                   # the latest week first
+    assert "2026-10-18: written" in results and results[-1] == "up_to_date"     # then the week with ytABCDEFGH1
+    assert not (root / "reels" / "2026-10-25.json").exists()                    # no streams: nothing built
 
 
 def test_reel_api(reel_project):
@@ -222,7 +235,7 @@ def test_diagnostics_and_rebuild_on_new_version(reel_project):
     out["version"] = 2
     path.write_text(json.dumps(out))
     n = len(client.messages.batches.created)
-    assert reel.auto(cfg, client=client, now=dt.datetime(2026, 11, 8, 11)) == "written"
+    assert reel.auto(cfg, client=client, now=dt.datetime(2026, 11, 8, 11)) == "2026-11-01: written"
     assert len(client.messages.batches.created) == n
     assert reel.auto(cfg, client=client, now=dt.datetime(2026, 11, 8, 12)) == "up_to_date"
 

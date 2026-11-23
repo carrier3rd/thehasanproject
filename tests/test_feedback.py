@@ -74,3 +74,11 @@ def test_feedback_cli(apps, capsys, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["feedback.py", "resolve", "1", "--dismiss"])
     feedback.main()
     assert feedback.list_flags(cfg) == []
+
+
+def test_trends(apps):
+    cfg, pub, _ = apps
+    [w] = pub.get("/api/trends").json()["weeks"]
+    assert w["week"] == WEEK and w["streams"] == 1 and w["hours"] == round(600 / 3600, 1)
+    assert w["clips"] == 1 and w["max_severity"] == 7 and w["misleading"] == 1
+    assert w["false_or_misleading_per_10h"] == round(1 / (600 / 3600) * 10, 2)

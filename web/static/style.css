@@ -169,3 +169,18 @@ main.reel #player iframe { width:100%; height:100%; border:0; display:block; }
 .report textarea { font:inherit; color:inherit; background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:6px 10px; }
 .flag { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:12px 14px; margin-bottom:10px; }
 .flag .acts { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+#trends[hidden] { display:none; }
+:root { --series1:#2a78d6; --tt-bg:#0b0b0b; --tt-ink:#f0efec; }
+@media (prefers-color-scheme: dark) { :root { --series1:#3987e5; --tt-bg:#f0efec; --tt-ink:#0b0b0b; } }
+.charts { display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:12px; margin-bottom:12px; }
+.chart { margin:0; background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:10px 12px; }
+.chart figcaption { display:flex; flex-direction:column; font-size:14px; } .chart figcaption span { color:var(--muted); font-size:12px; }
+.chart svg { width:100%; height:auto; display:block; margin-top:4px; }
+.chart .grid { stroke:var(--line); stroke-width:1; }
+.chart .axis { fill:var(--muted); font-size:10px; }
+.chart .val { fill:var(--ink); font-size:11px; font-weight:600; }
+.chart .bar { fill:var(--series1); }
+.chart .hit { fill:transparent; cursor:default; outline:none; }
+.chart .hit:hover, .chart .hit:focus { fill:var(--ink); fill-opacity:.06; }
+.tip { position:absolute; z-index:10; background:var(--tt-bg); color:var(--tt-ink); font-size:12px; line-height:1.4; padding:6px 9px; border-radius:6px; pointer-events:none; max-width:240px; }
+.tip[hidden] { display:none; } .tip .tt { font-weight:600; }
