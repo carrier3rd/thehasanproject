@@ -2,11 +2,14 @@
 
   reel.py auto            run from the nightly/hourly job: collect finished batches, build or refresh the latest
                           finished week (Sunday-Saturday) once it is due; cheap no-op otherwise
+  reel.py weekly          the subscription run (reel-weekly.timer): the latest week, then one earlier week, every
+                          Claude call through `claude -p` on the owner's Claude login (no API bill)
   reel.py build --week YYYY-MM-DD [--yes] [--wait]
-                          one week by its Sunday; without --yes it only prints the cost estimate
+                          one week by its Sunday; without --yes it only prints what it would send
   reel.py status          batches in flight and the reels on disk
 
-Two passes, both through the Message Batches API (half price):
+Three passes, through `claude -p` on the owner's Claude subscription (backend "subscription", the default) or, only
+when the config sets reel.backend: api, through the Message Batches API (half price):
   1. screen: every transcript line of the week's streams, in ~12-minute windows (all speakers labelled, so Claude can
      tell Hasan from clips and guests), returns candidate moments where Hasan himself may have said something
      egregious;
@@ -42,13 +45,18 @@ DEFAULTS = {"model": "claude-opus-5-5", "screen_effort": "low", "judge_effort": 
             "fact_context_s": 90, "search_usd": 0.01,   # web search: $10 per 1,000 searches
             "build_after_hour": 10,          # local hour on Sunday after which the finished week is built
             "max_usd_per_week": 15.0,        # auto never submits more than this per week (estimate)
-            "prices": {"claude-opus-5-5": [4.0, 20.0], "claude-sonnet-5-5": [2.0, 10.0]}}
+            "prices": {"claude-opus-5-5": [4.0, 20.0], "claude-sonnet-5-5": [2.0, 10.0]},
+            # "subscription" (default): every Claude call goes through `claude -p` on the owner's Claude login, run by
+            # `reel.py weekly` (deploy/laptop/user/reel-weekly.timer), never billed to the API. "api": the paid
+            # Message Batches API, from the hourly `reel.py auto`; only when the config asks for it.
+            "backend": "subscription", "claude_bin": "claude", "cli_workers": 2, "cli_timeout_s": 1200,
+            "cli_backfill_per_run": 1}      # earlier weeks filled in per weekly run, so usage is spread out
 CATEGORIES = ["antisemitism", "nazi_or_holocaust_comparison", "justifying_or_glorifying_violence",
               "dehumanization_or_bigotry", "targeting_individuals", "conspiracy", "anti_american",
               "misinformation", "other"]
 STANCES = ["own_view", "joke_or_bait", "reading_or_quoting", "condemning", "unclear"]
 WEEK_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-VERSION = 4          # bump when selection logic changes: auto rebuilds reels made by an older version (from cache)
+VERSION = 5          # bump when selection logic changes: auto rebuilds reels made by an older version (from cache)
 _NONWORD = re.compile(r"[^a-z0-9]+")
 
 
@@ -119,7 +127,7 @@ SCREEN_SCHEMA = {
             "end": {"type": "number", "description": "seconds, from the timestamp of the last line of the moment"},
             "stance": {"type": "string", "enum": STANCES},
             "category": {"type": "string", "enum": CATEGORIES},
-            "severity": {"type": "integer", "minimum": 1, "maximum": 10},
+            "severity": {"type": "integer", "description": "1 to 10 on the rubric"},
             "quote": {"type": "string", "description": "exact words from one line"},
             "why": {"type": "string"}}}},
         "claims": {"type": "array", "items": {
@@ -130,8 +138,8 @@ SCREEN_SCHEMA = {
                 "quote": {"type": "string", "description": "exact words from one Hasan line"},
                 "claim": {"type": "string", "description": "the factual claim, restated neutrally and self-contained"},
                 "topic": {"type": "string", "enum": TOPICS},
-                "importance": {"type": "integer", "minimum": 1, "maximum": 5,
-                               "description": "5 = a central factual claim about events, numbers or people; 1 = trivial"}}}}}}
+                "importance": {"type": "integer",
+                               "description": "1 to 5: 5 = a central factual claim about events, numbers or people; 1 = trivial"}}}}}}
 
 JUDGE_SCHEMA = {
     "type": "object", "additionalProperties": False,
@@ -140,7 +148,7 @@ JUDGE_SCHEMA = {
     "properties": {
         "keep": {"type": "boolean", "description": "true if this belongs in a reel of his most egregious statements"},
         "stance": {"type": "string", "enum": STANCES},
-        "severity": {"type": "integer", "minimum": 1, "maximum": 10},
+        "severity": {"type": "integer", "description": "1 to 10 on the rubric"},
         "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
         "categories": {"type": "array", "items": {"type": "string", "enum": CATEGORIES}},
         "title": {"type": "string", "description": "neutral, factual, at most 80 characters, no editorialising"},
@@ -359,13 +367,152 @@ def collect(cfg, client, wait: bool = False) -> int:
                 prev = cache_get(cfg, b["kind"], key) or {}
                 value["attempts"] = prev.get("attempts", 0) + 1
                 log.warning("%s %s: %s (attempt %d)", b["kind"], key, value["status"], value["attempts"])
-            cache_put(cfg, b["kind"], key, value)
+            cache_put(cfg, b["kind"], key, tidy(value))
             done += 1
         b["collected"], b["usage"] = True, usage
         log.info("collected %s batch %s: %s", b["kind"], b["batch_id"], usage)
     with open(path, "w", encoding="utf-8") as f:
         for b in batches:
             f.write(json.dumps(b) + "\n")
+    return done
+
+
+def _clamp(x, lo: int, hi: int):
+    return max(lo, min(hi, int(x))) if isinstance(x, (int, float)) and not isinstance(x, bool) else lo
+
+
+def tidy(value: dict) -> dict:
+    """Structured outputs can't carry integer minimum/maximum, so the scales are held here: severity 1-10,
+    importance 1-5."""
+    r = value.get("result")
+    if not isinstance(r, dict):
+        return value
+    for m in r.get("moments", []) if isinstance(r.get("moments"), list) else []:
+        if isinstance(m, dict) and "severity" in m:
+            m["severity"] = _clamp(m["severity"], 1, 10)
+    for c in r.get("claims", []) if isinstance(r.get("claims"), list) else []:
+        if isinstance(c, dict) and "importance" in c:
+            c["importance"] = _clamp(c["importance"], 1, 5)
+    if "severity" in r and "keep" in r:
+        r["severity"] = _clamp(r["severity"], 1, 10)
+    return value
+
+
+# ---------------------------------------------------------------- subscription backend (claude -p)
+class UsageLimit(Exception):
+    """The Claude login hit its usage limit (or is logged out): stop, keep what is cached, resume next run."""
+
+
+URL_RE = re.compile(r"https?://[^\s\"'<>\]\)\\]+")
+LIMIT_RE = re.compile(r"usage limit|rate limit|limit reached|out of extra usage|not logged in|/login|"
+                      r"invalid api key|authentication", re.I)
+
+
+def cli_env() -> dict:
+    """The environment for `claude -p`, without any API key: with one set, Claude Code would bill the API instead of
+    the owner's subscription (rhetoric.api_client loads .env into os.environ)."""
+    import os
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_USE_BEDROCK",
+                        "CLAUDE_CODE_USE_VERTEX", "ANTHROPIC_MODEL")}
+    env["PATH"] = str(Path.home() / ".local" / "bin") + ":" + env.get("PATH", "/usr/bin:/bin")
+    return env
+
+
+def cli_args(st: dict, kind: str, system: str, schema: dict | None) -> list[str]:
+    effort = {"screen": st["screen_effort"], "judge": st["judge_effort"], "fact": st["fact_effort"]}[kind]
+    args = [st["claude_bin"], "-p", "--model", st["model"], "--effort", effort,
+            "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--strict-mcp-config",
+            "--disable-slash-commands", "--setting-sources", "", "--system-prompt", system]
+    if kind == "fact":   # web search only; the answer ends in JSON (as with the API)
+        args += ["--tools", "WebSearch", "--allowedTools", "WebSearch", "--max-turns", str(st["fact_search_uses"] + 3)]
+    else:
+        args += ["--tools", ""]
+    if schema is not None:
+        args += ["--json-schema", json.dumps(schema)]
+    return args
+
+
+def cli_value(kind: str, lines: list[str], schema: dict | None) -> dict:
+    """The cache value for one `claude -p` run, in the same shape `collect` writes for a batch result."""
+    final, urls = None, []
+    for line in lines:
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if ev.get("type") == "result":
+            final = ev
+        elif ev.get("type") == "user":      # tool results: the URLs the web searches actually returned
+            for blk in (ev.get("message") or {}).get("content") or []:
+                if isinstance(blk, dict) and blk.get("type") == "tool_result":
+                    urls += URL_RE.findall(json.dumps(blk.get("content"), ensure_ascii=False))
+    if final is None:
+        return {"status": "errored"}
+    text = str(final.get("result") or "")
+    if final.get("is_error") or final.get("subtype") not in ("success", None):
+        if LIMIT_RE.search(text) or final.get("api_error_status") in (401, 403, 429):
+            raise UsageLimit(text[:200] or str(final.get("api_error_status")))
+        return {"status": "truncated" if "max_turns" in str(final.get("subtype")) else "errored"}
+    if final.get("stop_reason") == "refusal":
+        return {"status": "refused"}
+    value = {"status": "succeeded"}
+    if kind == "fact":
+        value["result"], value["urls"] = last_json(text), list(dict.fromkeys(u.rstrip(".,;") for u in urls))
+    elif schema is not None and isinstance(final.get("structured_output"), dict):
+        value["result"] = final["structured_output"]
+    else:
+        try:
+            value["result"] = json.loads(text)
+        except json.JSONDecodeError:
+            value["result"] = None
+    if value["result"] is None:
+        value["status"] = "unparsed"
+    return value
+
+
+def run_cli(cfg, st: dict, kind: str, reqs: list[tuple[str, str, str, dict | None]]) -> int:
+    """Answer requests one `claude -p` call each (a few at a time) and cache them like batch results.
+    Raises UsageLimit when the login is out of usage; everything answered so far stays cached."""
+    import subprocess
+    from concurrent.futures import ThreadPoolExecutor
+
+    env = cli_env()
+
+    def one(req) -> tuple[str, dict]:
+        key, system, user, schema = req
+        try:
+            p = subprocess.run(cli_args(st, kind, system, schema), input=user, capture_output=True, text=True,
+                               env=env, cwd="/tmp", timeout=st["cli_timeout_s"])
+        except subprocess.TimeoutExpired:
+            return key, {"status": "errored"}
+        if p.returncode != 0 and not p.stdout.strip():
+            if LIMIT_RE.search(p.stderr):
+                raise UsageLimit(p.stderr.strip()[:200])
+            log.warning("%s %s: claude exited %d: %s", kind, key, p.returncode, p.stderr.strip()[:200])
+            return key, {"status": "errored"}
+        return key, cli_value(kind, p.stdout.splitlines(), schema)
+
+    done, limit = 0, None
+    with ThreadPoolExecutor(max_workers=max(1, st["cli_workers"])) as pool:
+        futures = [pool.submit(one, r) for r in reqs]
+        for fut in futures:
+            try:
+                key, value = fut.result()
+            except UsageLimit as e:
+                limit = limit or e
+                for f in futures:
+                    f.cancel()
+                continue
+            if value["status"] != "succeeded":
+                prev = cache_get(cfg, kind, key) or {}
+                value["attempts"] = prev.get("attempts", 0) + 1
+                log.warning("%s %s: %s (attempt %d)", kind, key, value["status"], value["attempts"])
+            cache_put(cfg, kind, key, tidy(value))
+            done += 1
+    log.info("subscription: answered %d/%d %s requests", done, len(reqs), kind)
+    if limit:
+        raise limit
     return done
 
 
@@ -713,6 +860,18 @@ def build(cfg, week: str, client=None, yes: bool = False, wait: bool = False, bu
         if not todo:
             return None
         usd = sum(u for *_, u in todo)
+        if st["backend"] != "api":           # the owner's Claude subscription: no API bill
+            print(f"week {week}: " + "; ".join(f"{k} {len(r)} requests" for k, r, _ in todo) +
+                  f" with {st['model']} through claude -p (subscription)")
+            if not yes:
+                return "estimate"
+            for kind, reqs, _ in todo:
+                try:
+                    run_cli(cfg, st, kind, reqs)
+                except UsageLimit as e:
+                    log.warning("week %s: subscription usage limit (%s); resuming next run", week, e)
+                    return "limit"
+            return None
         print(f"week {week}: " + "; ".join(f"{k} {len(r)} requests" for k, r, _ in todo) +
               f" with {st['model']}: about ${usd:.2f}")
         if not yes:
@@ -732,6 +891,8 @@ def build(cfg, week: str, client=None, yes: bool = False, wait: bool = False, bu
         stop = send([("screen", need, estimate(st, need, 600))])
         if stop:
             return stop
+        if need and st["backend"] != "api":   # answered and cached just now: read them back
+            continue
         if need or waiting:
             if not wait:
                 return "waiting"
@@ -744,6 +905,8 @@ def build(cfg, week: str, client=None, yes: bool = False, wait: bool = False, bu
                                               extra_usd=st["search_usd"] * st["fact_search_uses"]))])
         if stop:
             return stop
+        if (jneed or fneed) and st["backend"] != "api":
+            continue
         if jneed or fneed or jwait or fwait:
             if not wait:
                 return "waiting"
@@ -806,10 +969,14 @@ def backfill_weeks(st: dict, latest: str) -> list[str]:
     return out
 
 
-def auto(cfg, client=None, now: dt.datetime | None = None) -> str:
+def auto(cfg, client=None, now: dt.datetime | None = None, subscription_run: bool = False) -> str:
     """Hourly: build the latest finished week once it is due (and refresh it when its streams change); when it is up
-    to date, fill in earlier weeks one at a time (backfill_from). One week is worked on at a time."""
+    to date, fill in earlier weeks one at a time (backfill_from). One week is worked on at a time.
+    With the subscription backend the hourly call does nothing: `reel.py weekly` (its own timer) does the work, so a
+    run of a few hours never holds up the hourly pipeline."""
     st = settings(cfg)
+    if st["backend"] != "api" and not subscription_run:
+        return "subscription backend: built by reel.py weekly"
     now = now or dt.datetime.now()
     state_path = root(cfg) / "auto.json"
     try:
@@ -820,8 +987,10 @@ def auto(cfg, client=None, now: dt.datetime | None = None) -> str:
     def work(week: str) -> str:
         state_path.parent.mkdir(parents=True, exist_ok=True)
         state_path.write_text(json.dumps({"week": week}))
-        result = build(cfg, week, client=client or api_client(), yes=True, budget=st["max_usd_per_week"], now=now)
-        if result != "waiting":
+        api = st["backend"] == "api"
+        result = build(cfg, week, client=(client or api_client()) if api else None, yes=True,
+                       budget=st["max_usd_per_week"] if api else None, now=now)
+        if result not in ("waiting", "limit"):
             state_path.unlink(missing_ok=True)
         return f"{week}: {result}"
 
@@ -841,6 +1010,18 @@ def auto(cfg, client=None, now: dt.datetime | None = None) -> str:
     return "up_to_date"
 
 
+def weekly(cfg, now: dt.datetime | None = None) -> list[str]:
+    """The subscription run: the latest week, then at most `cli_backfill_per_run` earlier weeks."""
+    st = settings(cfg)
+    out = []
+    for _ in range(1 + int(st["cli_backfill_per_run"])):
+        r = auto(cfg, now=now, subscription_run=True)
+        out.append(r)
+        if not r.endswith(": written"):
+            break
+    return out
+
+
 def status(cfg) -> None:
     for b in read_jsonl(root(cfg) / "batches.jsonl")[-10:]:
         print(f"{b['created']} {b['kind']:6} {b['batch_id']} {len(b['keys'])} requests "
@@ -853,7 +1034,7 @@ def status(cfg) -> None:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["auto", "build", "status"])
+    ap.add_argument("cmd", choices=["auto", "weekly", "build", "status"])
     ap.add_argument("--week", help="build: the Sunday that starts the week, YYYY-MM-DD (default: last finished week)")
     ap.add_argument("--yes", action="store_true", help="build: submit the batches (otherwise only estimate)")
     ap.add_argument("--wait", action="store_true", help="build: wait for the batches instead of returning")
@@ -866,10 +1047,13 @@ def main():
     if a.cmd == "auto":
         print("reel:", auto(cfg))
         return 0
+    if a.cmd == "weekly":
+        print("reel:", "; ".join(weekly(cfg)))
+        return 0
     week = a.week or last_finished_week(dt.datetime.now())
     if not WEEK_RE.match(week):
         sys.exit("--week must be YYYY-MM-DD")
-    client = api_client() if a.yes else None
+    client = api_client() if a.yes and settings(cfg)["backend"] == "api" else None
     print("reel:", build(cfg, week, client=client, yes=a.yes, wait=a.wait))
     return 0
 

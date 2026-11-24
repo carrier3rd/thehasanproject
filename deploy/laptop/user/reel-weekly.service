@@ -1,0 +1,13 @@
+[Unit]
+Description=Weekly reel through the owner's Claude subscription (claude -p), never the paid API
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/thehasanproject
+# claude lives in ~/.local/bin; reel.py strips any API key from claude's environment so it uses the Claude login
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/thehasanproject/.venv/bin/python pipeline/reel.py weekly
+StandardOutput=append:%h/thehasanproject/logs/reel-weekly.log
+StandardError=append:%h/thehasanproject/logs/reel-weekly.log
+TimeoutStartSec=12h
+Nice=10

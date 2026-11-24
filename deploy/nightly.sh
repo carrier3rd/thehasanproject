@@ -43,7 +43,7 @@ echo "--- publish"
 if python pipeline/publish.py; then
   step pipeline/embed.py
   echo "$sig" > logs/published.sig
-  step pipeline/reel.py auto     # weekly reel: no-op until Sunday, then builds/refreshes last week via Claude
+  step pipeline/reel.py auto     # weekly reel: no-op with the subscription backend (reel-weekly.timer builds it)
   step pipeline/backup.py run    # encrypted backup, at most once a day (backup.every_hours)
   if [ -n "${WEB_HOST:-}" ]; then
     rsync -a --delay-updates public.db index "${WEB_HOST}:${WEB_DIR:-/opt/vod-archive}/" \

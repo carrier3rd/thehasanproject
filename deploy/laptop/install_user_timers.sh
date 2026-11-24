@@ -5,7 +5,8 @@
 set -eu
 here="$(cd "$(dirname "$0")" && pwd)"
 mkdir -p ~/.config/systemd/user
-cp "$here"/user/vod-hourly.service "$here"/user/vod-hourly.timer ~/.config/systemd/user/
+# reel-weekly (2026-11-24): the weekly reel through the owner's Claude subscription (claude -p), not the paid API
+cp "$here"/user/vod-hourly.service "$here"/user/vod-hourly.timer "$here"/user/reel-weekly.service "$here"/user/reel-weekly.timer ~/.config/systemd/user/
 systemctl --user daemon-reload
-systemctl --user enable --now vod-hourly.timer
-systemctl --user list-timers vod-hourly.timer --no-pager
+systemctl --user enable --now vod-hourly.timer reel-weekly.timer
+systemctl --user list-timers vod-hourly.timer reel-weekly.timer --no-pager

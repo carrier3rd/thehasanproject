@@ -96,7 +96,9 @@ def reel_project(project, tmp_path):
     root, _ = project
     alt = tmp_path / "proj"
     shutil.copytree(root, alt)
-    return alt, load_config(alt / "config.yaml")
+    cfg = load_config(alt / "config.yaml")
+    cfg["reel"] = {**(cfg.get("reel") or {}), "backend": "api"}      # these tests drive the batch API path
+    return alt, cfg
 
 
 def test_last_finished_week():
@@ -283,3 +285,88 @@ def test_burst_key_ignores_emotes_and_mentions():
     assert reel.burst_key("hasL hasRaid OMEGALUL KEKW") == ""
     assert reel.burst_key("@bob free palestine now hasL") == "free palestine now"
     assert reel.burst_key("LANDLORDS OUT NOW!!") == "landlords out now"
+
+
+# ---------------------------------------------------------------- subscription backend (claude -p)
+class FakeClaude:
+    """Stands in for `claude -p --output-format stream-json`: answers each call as FakeBatches would, records the
+    arguments and environment, and can run out of usage after a number of calls."""
+    def __init__(self, limit_after=None):
+        self.calls, self.limit_after, self.batches = [], limit_after, FakeBatches()
+
+    def __call__(self, args, input=None, env=None, **kw):
+        self.calls.append((args, env))
+        if self.limit_after is not None and len(self.calls) > self.limit_after:
+            ev = {"type": "result", "subtype": "error_during_execution", "is_error": True,
+                  "result": "Claude AI usage limit reached", "api_error_status": 429}
+            return NS(returncode=1, stdout=json.dumps(ev) + "\n", stderr="")
+        tools = args[args.index("--tools") + 1]
+        schema = json.loads(args[args.index("--json-schema") + 1]) if "--json-schema" in args else None
+        kind = "f" if tools == "WebSearch" else "s" if "moments" in (schema or {}).get("properties", {}) else "j"
+        req = {"custom_id": f"{kind}0-x", "params": {"messages": [{"role": "user", "content": input}],
+                                                    "tools": [{"type": "web_search_20260209"}], "output_config": {}}}
+        res = next(iter(self.batches.results_for([req])))
+        msg = res.result.message
+        text = "".join(b.text for b in msg.content if b.type == "text")
+        lines = []
+        if kind == "f":     # the search's tool result, as Claude Code's stream shows it
+            lines.append({"type": "user", "message": {"content": [{"type": "tool_result", "content":
+                          "Links: [{\"title\":\"Real\",\"url\":\"https://example.org/real\"}]"}]}})
+        final = {"type": "result", "subtype": "success", "is_error": False, "result": text,
+                 "stop_reason": "end_turn", "total_cost_usd": 0.01}
+        if schema is not None:
+            final["structured_output"] = json.loads(text)
+        lines.append(final)
+        return NS(returncode=0, stdout="\n".join(json.dumps(x) for x in lines) + "\n", stderr="")
+
+
+def _results_for(self, reqs):
+    self.store["tmp"] = reqs
+    return self.results("tmp")
+
+
+FakeBatches.results_for = _results_for
+
+
+@pytest.fixture()
+def sub_project(reel_project, monkeypatch):
+    root, cfg = reel_project
+    cfg["reel"] = {**cfg["reel"], "backend": "subscription", "cli_workers": 1}
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-should-never-reach-claude")
+    monkeypatch.setattr(reel, "api_client", lambda: (_ for _ in ()).throw(AssertionError("paid API used")))
+    return root, cfg
+
+
+def test_schemas_have_no_integer_limits():
+    # structured outputs refuse "minimum"/"maximum" on integers; every request of Nov 22, 2026 errored on them
+    assert "minimum" not in json.dumps([reel.SCREEN_SCHEMA, reel.JUDGE_SCHEMA])
+    assert "maximum" not in json.dumps([reel.SCREEN_SCHEMA, reel.JUDGE_SCHEMA])
+    v = reel.tidy({"status": "succeeded", "result": {"moments": [{"severity": 14}], "claims": [{"importance": 0}]}})
+    assert v["result"]["moments"][0]["severity"] == 10 and v["result"]["claims"][0]["importance"] == 1
+
+
+def test_subscription_builds_through_claude_p_without_the_api(sub_project, monkeypatch):
+    root, cfg = sub_project
+    fake = FakeClaude()
+    monkeypatch.setattr("subprocess.run", fake)
+    assert reel.auto(cfg, now=dt.datetime(2026, 11, 8, 12)) == "subscription backend: built by reel.py weekly"
+    assert fake.calls == []                                   # the hourly run never calls Claude
+    assert reel.build(cfg, WEEK, yes=True) == "written"
+    out = json.loads((root / "reels" / f"{WEEK}.json").read_text())
+    assert [c["title"] for c in out["clips"]] == ["Rent control segment"]
+    assert [f["verdict"] for f in out["fact_checks"]] == ["misleading"]
+    assert [s["url"] for s in out["fact_checks"][0]["sources"]] == ["https://example.org/real"]   # only searched URLs
+    for args, env in fake.calls:
+        assert "ANTHROPIC_API_KEY" not in env and "--bare" not in args and args[1] == "-p"
+    assert all("--json-schema" in a for a, _ in fake.calls if a[a.index("--tools") + 1] == "")
+
+
+def test_subscription_stops_at_the_usage_limit_and_resumes(sub_project, monkeypatch):
+    root, cfg = sub_project
+    monkeypatch.setattr("subprocess.run", FakeClaude(limit_after=0))
+    assert reel.build(cfg, WEEK, yes=True) == "limit"
+    assert not (root / "reels" / f"{WEEK}.json").exists()
+    assert not list((reel.root(cfg) / "screen").glob("*.json"))     # a limit is not cached as a failure
+    fake = FakeClaude()
+    monkeypatch.setattr("subprocess.run", fake)
+    assert reel.weekly(cfg, now=dt.datetime(2026, 11, 8, 12))[0] == f"{WEEK}: written"

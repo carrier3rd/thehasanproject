@@ -16,6 +16,7 @@ def apps(project, tmp_path):
     alt = tmp_path / "proj"
     shutil.copytree(root, alt)
     cfg = load_config(alt / "config.yaml")
+    cfg["reel"] = {**(cfg.get("reel") or {}), "backend": "api"}      # built with the fake batch client
     reel.build(cfg, WEEK, client=FakeClient(), yes=True, wait=True)
     return cfg, TestClient(create_app(cfg, "public")), TestClient(create_app(cfg, "admin"))
 
