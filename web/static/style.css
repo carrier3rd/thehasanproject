@@ -123,16 +123,17 @@ main.reel { max-width:1200px; }
 .reelbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
 .reelbar select { flex:1; min-width:200px; }
 .reelbar button { font-size:18px; padding:4px 14px; }
-/* video + chat are sticky; the write-up (#card) scrolls up underneath them */
-.live { position:sticky; top:0; z-index:5; background:var(--bg); display:grid; grid-template-columns:minmax(0, 1fr) 380px;
-        gap:16px; padding:6px 0 8px; border-bottom:1px solid var(--line); margin-bottom:12px; }
+/* computer: video on the left with the write-up under it, chat on the right (as before). The video and the
+   chat column stay on screen while the write-up scrolls up under the video. */
+#stage { display:grid; grid-template-columns:minmax(0, 1fr) 380px; grid-template-areas:"pane side" "card side";
+         grid-template-rows:auto 1fr; column-gap:16px; align-items:start; }
+.pane { grid-area:pane; position:sticky; top:0; z-index:5; background:var(--bg); padding-top:6px; }
+#card { grid-area:card; }
 .rcol { display:flex; flex-direction:column; min-width:0; }
-/* the chat column takes the video column's height instead of growing with its messages */
-.live .side { contain:size; min-height:0; }
+.side { grid-area:side; position:sticky; top:0; height:calc(100vh - 12px); padding-top:6px; }
 main.reel #player { flex:none; aspect-ratio:16/9; width:100%; max-height:52vh; background:#000; border-radius:6px; overflow:hidden; }
-.live #chatbox { height:auto; flex:1; min-height:0; }
-.live #lines { max-height:none; flex:1; min-height:0; }
-#card { max-width:820px; }
+.side #chatbox { height:auto; flex:1; min-height:0; }
+.side #lines { max-height:none; flex:1; min-height:0; }
 .clamp { display:-webkit-box; -webkit-line-clamp:4; line-clamp:4; -webkit-box-orient:vertical; overflow:hidden; }
 .clamp.open { display:block; }
 .linkish { border:0; background:none; padding:0; margin-top:2px; color:var(--accent); font:inherit; font-size:14px; cursor:pointer; }
@@ -176,21 +177,21 @@ main.reel #player iframe { width:100%; height:100%; border:0; display:block; }
 .note.small { font-size:12px; }
 @media (max-width: 860px) {
   main.reel { padding:8px; }
-  /* phone: video on top, a short chat strip under it, both pinned; the write-up scrolls below */
-  .live { grid-template-columns:1fr; gap:0; margin:0 -8px 10px; padding:0 0 6px; }
-  .live .rcol { padding:0 8px; }
-  .live .rcol:first-child { padding:0; }
+  /* phone: video pinned to the top, chat pinned to the bottom (where it sat before), write-up scrolls between */
+  #stage { grid-template-columns:1fr; grid-template-areas:"pane" "card" "side"; grid-template-rows:auto; }
+  .pane { margin:0 -8px; padding-top:0; }
+  .pane .clipctl { margin:6px 8px; font-size:14px; }
   main.reel #player { border-radius:0; max-height:none; }
-  .clipctl { margin:6px 8px; font-size:14px; }
-  .live .side { contain:none; }
-  .live #chatbox, .live #lines { height:24vh; flex:none; }
-  .live .tabs button { padding:4px 10px; font-size:14px; }
-  .live .allchat { padding:3px 10px; }
-  .live #rchat { font-size:14px; }
-  .live .msg { padding:2px 10px; font-size:14px; }
+  #card { margin-bottom:10px; }
+  .side { top:auto; bottom:0; height:auto; z-index:5; background:var(--bg); margin:0 -8px; padding:4px 8px 0;
+          border-top:1px solid var(--line); box-shadow:0 -4px 12px rgb(0 0 0 / .12); }
+  .side #chatbox, .side #lines { height:22vh; flex:none; }
+  .side .tabs button { padding:3px 10px; font-size:14px; }
+  .side .allchat { padding:2px 10px; }
+  .side .msg { padding:2px 10px; font-size:14px; }
 }
-/* too short to pin both (phone held sideways, small laptop window): let it all scroll */
-@media (max-height: 560px) { .live { position:static; } }
+/* too short to pin anything (phone held sideways, small laptop window): let it all scroll */
+@media (max-height: 560px) { .pane, .side { position:static; } .side { height:auto; } .side #chatbox { height:60vh; } }
 #views { margin:0 0 10px; }
 .verdict { font-weight:600; font-size:12px; border-radius:4px; padding:1px 8px; color:#fff; background:#8a877f; white-space:nowrap; }
 .v-false { background:#b3261e; } .v-misleading { background:#c2410c; } .v-unsupported { background:#8a6d0a; }

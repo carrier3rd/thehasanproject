@@ -19,33 +19,32 @@
   <div id="trends" hidden></div>
   <div id="tip" class="tip" role="tooltip" hidden></div>
   <div id="stage" hidden>
-    <!-- video + chat stay on screen (sticky) while the write-up scrolls underneath -->
-    <div class="live">
-      <div class="rcol">
-        <div id="player"></div>
-        <div id="slider" hidden>
-          <div class="note" style="padding:0 0 6px">The original video is no longer available. The clock below plays the clip's transcript and chat.</div>
-          <input type="range" id="range" step="1" aria-label="Position">
-        </div>
-        <div class="bar clipctl">
-          <button id="play">Play clip</button>
-          <span id="clock" class="num"></span>
-          <a id="full">Full stream</a>
-        </div>
+    <!-- the video (and on a computer the chat column) stay on screen while the write-up scrolls;
+         on a phone the chat stays pinned to the bottom of the screen instead -->
+    <div class="pane">
+      <div id="player"></div>
+      <div id="slider" hidden>
+        <div class="note" style="padding:0 0 6px">The original video is no longer available. The clock below plays the clip's transcript and chat.</div>
+        <input type="range" id="range" step="1" aria-label="Position">
       </div>
-      <div class="rcol side">
-        <nav class="tabs" id="rtabs">
-          <button type="button" data-pane="chat" class="on">Chat at the time</button>
-          <button type="button" data-pane="lines">Transcript</button>
-        </nav>
-        <div id="chatbox">
-          <label class="allchat"><input type="checkbox" id="allchat"> whole clip <span id="hotcount"></span></label>
-          <div id="rchat"></div>
-        </div>
-        <div id="lines" hidden></div>
+      <div class="bar clipctl">
+        <button id="play">Play clip</button>
+        <span id="clock" class="num"></span>
+        <a id="full">Full stream</a>
       </div>
     </div>
     <article id="card"></article>
+    <div class="rcol side">
+      <nav class="tabs" id="rtabs">
+        <button type="button" data-pane="chat" class="on">Chat at the time</button>
+        <button type="button" data-pane="lines">Transcript</button>
+      </nav>
+      <div id="chatbox">
+        <label class="allchat"><input type="checkbox" id="allchat"> whole clip <span id="hotcount"></span></label>
+        <div id="rchat"></div>
+      </div>
+      <div id="lines" hidden></div>
+    </div>
   </div>
   <p class="note small">Picked and written by Claude (AI) from machine-made transcripts, counting only Hasan's own words.
     Watch the moment before relying on it.</p>
