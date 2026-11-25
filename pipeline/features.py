@@ -743,8 +743,10 @@ the transcript leading up to the moment and a sample of the chat during it (user
 Decide what happened.
 - pushback: a real share of chat disagreed with, doubted or mocked what HE said.
 - split: chat was clearly divided about what he said.
-- mass_deletion: moderators deleted many messages; say what chat was reacting to (use the counts given).
-- other: chat was reacting to something else (a video, a game, a donation, a raid, a chatter), or nothing notable.
+- mass_deletion: moderators deleted many messages because of a clash with what HE said or did (chat turning on
+  him, or on his take); say what chat was reacting to (use the counts given).
+- other: chat was reacting to something else (a video, a game, a donation, a raid, a chatter, hype or spam, mods
+  clearing a troll), or nothing notable. Mods sweeping spam or hype is "other".
 keep = true only for the first three, when a reader would find the moment worth a look.
 
 If kept: title (neutral, at most 80 characters), hasan_said (what he said or argued, one or two plain sentences),
@@ -796,7 +798,7 @@ def chat_candidates(cfg, st: dict, con) -> list[dict]:
             elif deleted >= st["chatvs_deleted_min"]:
                 found.append({"video_id": vid, "date": day(v["upload_date"]), "minute": k, "msgs": n, "pushback": push,
                               "share": round(share, 3), "base": round(base, 3), "deleted": deleted,
-                              "score": deleted / 10, "why": "deleted"})
+                              "score": deleted / 40, "why": "deleted"})
         found.sort(key=lambda c: -c["score"])
         picked = []
         for c in found:                      # one per 5 minutes; the strongest few per stream
@@ -806,7 +808,14 @@ def chat_candidates(cfg, st: dict, con) -> list[dict]:
                 break
         out += picked
     save_json(work_dir(cfg) / "chatvs_minutes.json", cache)
-    return sorted(out, key=lambda c: -c["score"])
+    # strongest first, two pushback minutes for every mod sweep, so sweeps (common, mostly spam) can't crowd out pushback
+    push = sorted((c for c in out if c["why"] == "pushback"), key=lambda c: -c["score"])
+    swept = sorted((c for c in out if c["why"] == "deleted"), key=lambda c: -c["score"])
+    merged = []
+    while push or swept:
+        merged += push[:2] + swept[:1]
+        push, swept = push[2:], swept[1:]
+    return merged
 
 
 def chatvs_request(st: dict, con, c: dict) -> tuple:
@@ -822,7 +831,8 @@ def chatvs_request(st: dict, con, c: dict) -> tuple:
     user = (f"Stream date {c['date']}. Chat in this minute: {c['msgs']} messages, {c['pushback']} with pushback words "
             f"({c['share']:.0%} of messages; this stream's usual is {c['base']:.0%}); {c['deleted']} deleted by mods.\n\n"
             f"TRANSCRIPT\n{part_text(turns)}\n\nCHAT SAMPLE\n{lines}")
-    return (reel.h("chatvs", VERSION, st["model"], user), CHATVS_RUBRIC, user, CHATVS_SCHEMA, {"chat": chat, "turns": turns})
+    return (reel.h("chatvs", VERSION, st["model"], CHATVS_RUBRIC, user), CHATVS_RUBRIC, user, CHATVS_SCHEMA,
+            {"chat": chat, "turns": turns})          # the rubric is in the key: a stricter rubric re-judges every moment
 
 
 def chatvs_items(cfg, st: dict, con, cands: list[dict], run_claude: bool = True) -> tuple[list[dict], str | None]:
@@ -974,7 +984,9 @@ def build_stories(cfg, st: dict, con, entries: list[dict], reddit: dict | None) 
         mentions = said.get(sid, [])
         said_on_both = sum(1 for m in mentions if m[0] in both)
         community = {sub: by_sub[sub] for sub in COMMUNITY if by_sub.get(sub)}
-        quiet = hasan_on_both < 3 and said_on_both <= 2       # under 3 minutes and at most 2 passing mentions
+        # under 3 minutes and at most 2 passing mentions on the days compared, and never a story he covered at length
+        # some other time (the Reddit data has gaps; a story he spent hours on is not a blindspot)
+        quiet = hasan_on_both < 3 and said_on_both <= 2 and hasan_min < 10 and len(mentions) <= 6
         badge = None
         if who.get("orbit") and quiet and both and reddit_on_both >= st["orbit_min_reddit"]:
             badge = "close_to_home"
