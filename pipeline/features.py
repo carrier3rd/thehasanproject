@@ -929,6 +929,7 @@ def stream_days(con) -> dict[str, float]:
     return dict(out)
 
 
+POLITICAL = ("news_politics", "israel_palestine", "war_and_foreign_policy")
 COMMUNITY = ("Hasan_Piker", "LivestreamFail", "Destiny")      # his own subreddit and the two that follow him most
 
 
@@ -1006,8 +1007,8 @@ def build_stories(cfg, st: dict, con, entries: list[dict], reddit: dict | None) 
             badge = "close_to_home"
         elif who.get("proximity") and quiet and both and reddit_on_both >= st["orbit_min_reddit"]:
             badge = "proximity_gap"
-        elif reddit_on_both >= 200 and quiet and len(both) >= 3:
-            badge = "blindspot"
+        elif reddit_on_both >= 200 and quiet and len(both) >= 3 and s["kind"] in POLITICAL:
+            badge = "blindspot"           # only political and world stories: a celebrity death he skipped tells nobody anything
         elif hasan_on_both >= 60 and reddit_on_both < 30 and len(both) >= 2:
             badge = "stream_focus"
         tags = state.get("tags", {}).get(sid)
