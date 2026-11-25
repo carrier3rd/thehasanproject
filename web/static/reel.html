@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Weekly reel · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112505"></head>
+<title>Weekly reel · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112506"></head>
 <body><main class="reel">
   <h1 class="sr-only">Weekly reel</h1>
   <p class="intro">Each week, Claude reads every line of every stream and picks the moments worth a look, with the chat at the time and fact-checks of his claims.</p>
@@ -58,7 +58,7 @@
   <p class="note small">Picked and written by Claude (AI) from machine-made transcripts, counting only Hasan's own words.
     Watch the moment before relying on it.</p>
 </main>
-<script src="common.js?v=2026112505"></script>
+<script src="common.js?v=2026112506"></script>
 <script>
 let lastNow = 0;
 let cfg, reel = null, idx = 0, clip = null, player = null, chat = [], playing = false, sim = null, mounting = 0;
@@ -508,7 +508,7 @@ async function renderWeekChatvs() {
   const end = new Date(week + 'T12:00:00'); end.setDate(end.getDate() + 6);
   const hi = end.toISOString().slice(0, 10);
   const items = chatvsAll.filter(m => m.date >= week && m.date <= hi);
-  const KIND = { pushback: 'Pushback', split: 'Chat split', mass_deletion: 'Mod sweep' };
+  const KIND = { id_politics: 'Identity politics', courting_outsider: 'Courting an outsider', pushback: 'Pushback', split: 'Chat split', mass_deletion: 'Mod sweep' };
   box.replaceChildren(...[
     el('p', { class: 'note', style: 'padding:0 0 10px' }, document.createTextNode(
       'Moments this week when his chat pushed back, split, or got swept by the mods. '),

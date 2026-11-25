@@ -45,7 +45,7 @@ DEFAULTS = {
     "story_min_minutes": 8, "story_min_reddit": 30,
     "cli_workers": 2, "part_min_lines": 30,
     "tags_effort": "low", "tags_batch": 60, "tags_max_requests": 10,
-    "orbit": [], "orbit_min_reddit": 20, "orbit_story_min_reddit": 8,
+    "orbit": [], "orbit_min_reddit": 20, "orbit_story_min_reddit": 8, "outsiders": [],
 }
 KINDS = ["news_politics", "israel_palestine", "war_and_foreign_policy", "streamers_and_internet", "culture_and_entertainment",
          "games", "sports", "science_tech_health", "personal_or_stream", "other"]
@@ -350,16 +350,17 @@ def run_stories(cfg, st: dict, entries: list[dict], reddit_titles: list[dict], c
 # ---------------------------------------------------------------- blindspot tags: orbit, proximity, who did what
 EVENT_TYPES = ["attacks_on_civilians", "war_or_invasion", "crackdown_on_protest_or_dissent", "censorship_or_press_freedom",
                "elections_and_democracy", "human_rights_abuses", "terrorism", "other"]
-BLOCS = {"us_and_allies": "US & allies", "russia_china_iran_and_allies": "Russia, China, Iran & allies"}
+BLOCS = {"us_and_allies": "US & allies", "not_us_allied": "Not allied with the US"}
 TAG_RUBRIC = """You tag stories for a neutral public archive that compares how much attention HasanAbi (Hasan Piker) gave
 different stories. For each story give:
 - world_event: true for real-world political, military or human-rights events; false for internet or streamer drama,
   culture, games, sports and his own life.
 - event_type: the closest type (other if none fits).
 - actor: the country, government or armed group mainly responsible for the act at the centre of the story; empty if none.
-- actor_bloc: us_and_allies (the US, Israel, the UK, EU and NATO states, Ukraine, Taiwan, Japan, South Korea, and US-aligned
-  states such as Saudi Arabia or the UAE), russia_china_iran_and_allies (Russia, China, Iran, North Korea, the governments of
-  Venezuela, Cuba, Belarus, Nicaragua, and Hamas, Hezbollah, the Houthis), or neither.
+- actor_bloc: us_and_allies (the US, Israel, the UK, EU and NATO states, Ukraine, Taiwan, Japan, South Korea,
+  Australia, and US-aligned states such as Saudi Arabia or the UAE), not_us_allied (any other country, government or
+  armed group: Russia, China, Iran, North Korea, Venezuela, Cuba, Hamas, Hezbollah, the Houthis, the RSF, juntas and
+  so on), or neither (no state or armed group is the actor).
 - target: who was harmed or affected, in a few words.
 Record only who did what. Do not judge the act or the story."""
 TAG_SCHEMA = {
@@ -382,7 +383,7 @@ def run_tags(cfg, st: dict, cap: int) -> tuple[int, str | None]:
         batch = todo[:st["tags_batch"]]
         user = "Stories (id | title | summary):\n" + "\n".join(
             f"{i} | {state['stories'][sid]['title']} | {state['stories'][sid]['summary']}" for i, sid in enumerate(batch))
-        req = (reel.h("tags", VERSION, st["topic_model"], user), TAG_RUBRIC, user, TAG_SCHEMA)
+        req = (reel.h("tags", VERSION, st["topic_model"], TAG_RUBRIC, user), TAG_RUBRIC, user, TAG_SCHEMA)
         _, why = ask(cfg, st, "tags", [req], 1)
         got = answer(cfg, "tags", req[0])
         if got is None and not reel.usable(reel.cache_get(cfg, "tags", req[0])):
@@ -748,70 +749,118 @@ PUSHBACK = re.compile(
     r"delusional|lying|liar|lies|fact ?check|source\?|clueless|yikes|bro what|hello\?+|what\?{2,}|huh\?+|"
     r"ratio|embarrassing|dishonest|misinfo\w*|cap)\b|\?{3,}", re.I)
 
+# Identity-politics language in chat, and chat going after people outside the left
+IDPOL = re.compile(
+    r"\b(woke|problematic|transphob\w*|homophob\w*|racis[tm]\w*|misogyn\w*|ableis[tm]\w*|sexis[tm]\w*|bigot\w*|cis|"
+    r"privilege[d]?|pronouns?|white (?:people|men|women|guys?)|colonizers?|settlers?|terfs?|islamophob\w*|"
+    r"anti-?black|whiteness|microaggression\w*|harmful|yikes|cancel+ed|apologi[sz]e|do better)\b", re.I)
+OUTSIDER_CHAT = re.compile(
+    r"\b(libs?|liberals?|neolibs?|shitlibs?|centrists?|never ?trump\w*|republicans?|ex-?republicans?|grift\w*|sell-?outs?|"
+    r"neocons?|warmongers?|war criminals?|fascists?|chuds?|rightoids?|bulwark|traitors?|ghouls?|sold out|platforming|"
+    r"why (?:is|are) (?:he|you|they) (?:here|on)|dont trust|don't trust|cringe|gross|ew+)\b", re.I)
+DEFAULT_OUTSIDERS = ["Bulwark", "Tim Miller", "Sarah Longwell", "JVL", "Jonathan V. Last", "Charlie Sykes", "Never Trump",
+                     "Never Trumpers", "Liz Cheney", "Adam Kinzinger", "Pakman", "Ezra Klein", "Douthat", "centrists",
+                     "moderates", "liberals", "Democratic establishment"]
+
 CHATVS_RUBRIC = """You review moments from HasanAbi's (Hasan Piker's) Twitch streams for a neutral public archive's
-"Chat vs Hasan" section: moments when his chat pushed back on him, split, or was cleared out by moderators. You get
-the transcript leading up to the moment and a sample of the chat during it (usernames removed).
+"Chat vs Hasan" section: political moments where his own chat and he were not on the same page. You get the
+transcript leading up to the moment and a sample of the chat during it (usernames removed).
 
-Decide what happened.
-- pushback: a real share of chat disagreed with, doubted or mocked what HE said. Chat agreeing with him (including
-  backing him when he bans or scolds a chatter) is not pushback.
-- split: chat was clearly divided about what he said.
-- mass_deletion: moderators deleted many messages because of a clash with what HE said or did (chat turning on
-  him, or on his take); say what chat was reacting to (use the counts given).
-- other: chat was reacting to something else (a video, a game, a donation, a raid, a chatter, hype or spam, mods
-  clearing a troll), or nothing notable. Mods sweeping spam or hype is "other".
-keep = true only for the first three, when a reader would find the moment worth a look.
+Decide what happened. The archive mostly wants the first two:
+- id_politics: chat is dug into identity politics (calling something or someone problematic, racist, transphobic,
+  "do better", demands to apologise, purity tests) and Hasan wants nothing to do with it: he brushes it off, argues
+  against it, or steers back to class or material politics.
+- courting_outsider: Hasan is engaging or warming to someone outside the left that he sees as a possible ally (for
+  example The Bulwark's Tim Miller or Sarah Longwell, ex-Republicans, Never Trumpers, centrists, liberal pundits or
+  Democrats), while chat attacks that person or him for platforming them.
+- pushback: a real share of chat disagreed with, doubted or mocked a political point HE made.
+- split: chat was clearly divided about a political point he made.
+- other: anything else. Video games (GTA and the like), entertainment, food, his life, hype, spam, donations, raids,
+  mods sweeping spam, chat agreeing with him (including backing him when he bans or scolds a chatter), or chat
+  reacting to a video rather than to him.
+keep = true only for the first four, when a reader would find the moment worth a look.
 
-If kept: title (neutral, at most 80 characters), hasan_said (what he said or argued, one or two plain sentences),
-chat_said (what chat said back, one or two sentences, describing the mix fairly), quote (his key words, copied
-exactly from one line labelled Hasan; empty if none fits), examples (up to 4 chat messages copied exactly from the
-sample, the clearest ones on each side; never slurs, threats or personal details), clip_start and clip_end (seconds,
-from line timestamps, covering what he said and the reaction)."""
+If kept: title (neutral, at most 80 characters), who (for courting_outsider: the person or group he was engaging;
+otherwise empty), hasan_said (what he said or argued, one or two plain sentences), chat_said (what chat said back,
+one or two sentences, describing the mix fairly), quote (his key words, copied exactly from one line labelled
+Hasan; empty if none fits), examples (up to 4 chat messages copied exactly from the sample, the clearest ones; never
+slurs, threats or personal details), clip_start and clip_end (seconds, from line timestamps)."""
 
+CHATVS_KINDS = ["id_politics", "courting_outsider", "pushback", "split", "other"]
 CHATVS_SCHEMA = {
     "type": "object", "additionalProperties": False,
-    "required": ["keep", "kind", "title", "hasan_said", "chat_said", "quote", "examples", "clip_start", "clip_end"],
-    "properties": {"keep": {"type": "boolean"},
-                   "kind": {"type": "string", "enum": ["pushback", "split", "mass_deletion", "other"]},
-                   "title": {"type": "string"}, "hasan_said": {"type": "string"}, "chat_said": {"type": "string"},
-                   "quote": {"type": "string"}, "examples": {"type": "array", "items": {"type": "string"}},
+    "required": ["keep", "kind", "title", "who", "hasan_said", "chat_said", "quote", "examples", "clip_start", "clip_end"],
+    "properties": {"keep": {"type": "boolean"}, "kind": {"type": "string", "enum": CHATVS_KINDS},
+                   "title": {"type": "string"}, "who": {"type": "string"}, "hasan_said": {"type": "string"},
+                   "chat_said": {"type": "string"}, "quote": {"type": "string"},
+                   "examples": {"type": "array", "items": {"type": "string"}},
                    "clip_start": {"type": "number"}, "clip_end": {"type": "number"}}}
 
 
-def chat_candidates(cfg, st: dict, con) -> list[dict]:
-    """Minutes where chat pushed back far more than usual for that stream, or mods deleted a lot. Cached per stream."""
+def outsider_rx(st: dict):
+    names = [n for n in (st.get("outsiders") or DEFAULT_OUTSIDERS) if len(n.strip()) >= 3]
+    return re.compile(r"(?<!\w)(?:" + "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True)) + r")(?!\w)", re.I)
+
+
+def off_topic_spans(entries: list[dict]) -> dict[str, list[tuple[float, float]]]:
+    """Per stream, the stretches the topic index says were games or his own life (not politics)."""
+    out: dict[str, list[tuple[float, float]]] = defaultdict(list)
+    for e in entries:
+        if e["kind"] in ("games", "personal_or_stream", "sports", "culture_and_entertainment"):
+            out[e["video_id"]].append((e["start"], e["start"] + max(e["minutes"], 1) * 60))
+    return out
+
+
+def chat_candidates(cfg, st: dict, con, entries: list[dict] | None = None) -> list[dict]:
+    """Minutes worth a look, per stream, cached:
+    - outsider: Hasan is talking about someone outside the left (st['outsiders']) and chat turns hostile;
+    - idpol: identity-politics language in chat far above that stream's usual;
+    - pushback: pushback words far above that stream's usual.
+    Stretches the topic index marks as games or his personal life are skipped."""
     cache = load_json(work_dir(cfg) / "chatvs_minutes.json", {})
+    orx = outsider_rx(st)
+    skip = off_topic_spans(entries or [])
     out = []
     for v in con.execute("SELECT id, upload_date FROM videos ORDER BY upload_date DESC"):
         vid = v["id"]
-        sig = str(con.execute("SELECT count(*) || ':' || coalesce(max(id), 0) FROM chat WHERE video_id=?", (vid,)).fetchone()[0])
+        sig = "v2:" + str(con.execute("SELECT count(*) || ':' || coalesce(max(id), 0) FROM chat WHERE video_id=?", (vid,)).fetchone()[0])
         if cache.get(vid, {}).get("sig") != sig:
-            mins: dict[int, list[int]] = defaultdict(lambda: [0, 0, 0])
+            mins: dict[int, list[int]] = defaultdict(lambda: [0, 0, 0, 0, 0])      # msgs, pushback, deleted, idpol, outsider
             for t, text, deleted, kind in con.execute("SELECT t, text, deleted, kind FROM chat WHERE video_id=?", (vid,)):
                 if kind != "msg":
                     continue
                 m = mins[int(t // 60)]
                 m[0] += 1
                 m[2] += 1 if deleted else 0
-                if not deleted and text and PUSHBACK.search(text):
-                    m[1] += 1
+                if not deleted and text:
+                    m[1] += 1 if PUSHBACK.search(text) else 0
+                    m[3] += 1 if IDPOL.search(text) else 0
+                    m[4] += 1 if OUTSIDER_CHAT.search(text) else 0
             cache[vid] = {"sig": sig, "minutes": {str(k): x for k, x in mins.items()}}
         mins = {int(k): x for k, x in cache[vid]["minutes"].items()}
         if not mins:
             continue
-        shares = sorted(x[1] / x[0] for x in mins.values() if x[0] >= 20) or [0]
-        base = shares[len(shares) // 2]
+        talk = {int(r[0] // 60) for r in con.execute("SELECT start, text FROM turns WHERE video_id=? AND speaker='Hasan'", (vid,))
+                if orx.search(r[1] or "")}
+        near_talk = {k + d for k in talk for d in range(-1, 4)}
+        busy = [x for x in mins.values() if x[0] >= 20]
+        med = lambda i: (sorted(x[i] / x[0] for x in busy) or [0])[len(busy) // 2] if busy else 0
+        base = {"push": med(1), "idpol": med(3), "out": med(4)}
+        spans = skip.get(vid, [])
         found = []
-        for k, (n, push, deleted) in mins.items():
-            share = push / n if n else 0
-            if push >= st["chatvs_min_pushback"] and share >= max(base * st["chatvs_ratio"], 0.06):
-                found.append({"video_id": vid, "date": day(v["upload_date"]), "minute": k, "msgs": n, "pushback": push,
-                              "share": round(share, 3), "base": round(base, 3), "deleted": deleted,
-                              "score": share / max(base, 0.01), "why": "pushback"})
-            elif deleted >= st["chatvs_deleted_min"]:
-                found.append({"video_id": vid, "date": day(v["upload_date"]), "minute": k, "msgs": n, "pushback": push,
-                              "share": round(share, 3), "base": round(base, 3), "deleted": deleted,
-                              "score": deleted / 40, "why": "deleted"})
+        for k, (n, push, deleted, idp, outs) in mins.items():
+            if n < 20 or any(a <= k * 60 <= b for a, b in spans):
+                continue
+            row = {"video_id": vid, "date": day(v["upload_date"]), "minute": k, "msgs": n, "pushback": push,
+                   "share": round(push / n, 3), "base": round(base["push"], 3), "deleted": deleted,
+                   "idpol": idp, "outsider": outs}
+            hostile = (outs + push) / n
+            if k in near_talk and outs + push >= 8 and hostile >= max(2 * (base["out"] + base["push"]), 0.08):
+                found.append({**row, "why": "outsider", "score": 10 + hostile / max(base["out"] + base["push"], 0.01)})
+            elif idp >= 8 and idp / n >= max(st["chatvs_ratio"] * base["idpol"], 0.05):
+                found.append({**row, "why": "idpol", "score": 5 + (idp / n) / max(base["idpol"], 0.01)})
+            elif push >= st["chatvs_min_pushback"] and push / n >= max(base["push"] * st["chatvs_ratio"], 0.06):
+                found.append({**row, "why": "pushback", "score": (push / n) / max(base["push"], 0.01)})
         found.sort(key=lambda c: -c["score"])
         picked = []
         for c in found:                      # one per 5 minutes; the strongest few per stream
@@ -821,14 +870,7 @@ def chat_candidates(cfg, st: dict, con) -> list[dict]:
                 break
         out += picked
     save_json(work_dir(cfg) / "chatvs_minutes.json", cache)
-    # strongest first, two pushback minutes for every mod sweep, so sweeps (common, mostly spam) can't crowd out pushback
-    push = sorted((c for c in out if c["why"] == "pushback"), key=lambda c: -c["score"])
-    swept = sorted((c for c in out if c["why"] == "deleted"), key=lambda c: -c["score"])
-    merged = []
-    while push or swept:
-        merged += push[:2] + swept[:1]
-        push, swept = push[2:], swept[1:]
-    return merged
+    return sorted(out, key=lambda c: -c["score"])      # outsider moments first, then identity politics, then pushback
 
 
 def chatvs_request(st: dict, con, c: dict) -> tuple:
@@ -842,7 +884,9 @@ def chatvs_request(st: dict, con, c: dict) -> tuple:
         chat = [chat[int(i * len(chat) / 250)] for i in range(250)]
     lines = "\n".join(f"[{m['t']:.0f}s] {m['text']}" for m in chat)
     user = (f"Stream date {c['date']}. Chat in this minute: {c['msgs']} messages, {c['pushback']} with pushback words "
-            f"({c['share']:.0%} of messages; this stream's usual is {c['base']:.0%}); {c['deleted']} deleted by mods.\n\n"
+            f"({c['share']:.0%} of messages; this stream's usual is {c['base']:.0%}), {c.get('idpol', 0)} with "
+            f"identity-politics words, {c.get('outsider', 0)} attacking outsiders; {c['deleted']} deleted by mods. "
+            f"Flagged because: {c['why']}.\n\n"
             f"TRANSCRIPT\n{part_text(turns)}\n\nCHAT SAMPLE\n{lines}")
     return (reel.h("chatvs", VERSION, st["model"], CHATVS_RUBRIC, user), CHATVS_RUBRIC, user, CHATVS_SCHEMA,
             {"chat": chat, "turns": turns})          # the rubric is in the key: a stricter rubric re-judges every moment
@@ -858,7 +902,7 @@ def chatvs_items(cfg, st: dict, con, cands: list[dict], run_claude: bool = True)
     out = []
     for c, r in reqs:
         got = answer(cfg, "chatvs", r[0])
-        if not got or not got.get("keep") or got.get("kind") not in ("pushback", "split", "mass_deletion"):
+        if not got or not got.get("keep") or got.get("kind") not in CHATVS_KINDS[:4]:
             continue
         by_text: dict[str, list[dict]] = defaultdict(list)
         for m in r[4]["chat"]:
@@ -870,10 +914,11 @@ def chatvs_items(cfg, st: dict, con, cands: list[dict], run_claude: bool = True)
         start = float(got.get("clip_start") or lo - 60)
         start = min(max(start, lo - 300), lo + 60)
         out.append({"id": reel.h("chatvs", c["video_id"], c["minute"])[:10], "video_id": c["video_id"], "date": c["date"],
-                    "kind": got["kind"], "title": got.get("title", "")[:100], "hasan_said": got.get("hasan_said", ""),
+                    "kind": got["kind"], "title": got.get("title", "")[:100], "who": str(got.get("who") or "")[:80],
+                    "hasan_said": got.get("hasan_said", ""),
                     "chat_said": got.get("chat_said", ""), "quote": got["quote"].strip() if line else "",
                     "quote_t": line["start"] if line else None, "examples": examples, "start": start, "minute": c["minute"],
-                    "stats": {k: c[k] for k in ("msgs", "pushback", "share", "base", "deleted")}})
+                    "stats": {k: c.get(k, 0) for k in ("msgs", "pushback", "share", "base", "deleted", "idpol", "outsider")}})
     return out, why
 
 
@@ -1161,7 +1206,7 @@ def run(cfg, steps: set[str] | None = None) -> dict:
             limit = run_receipts(cfg, st, con, entries)
             q = load_json(queue_path(cfg), {})
             report["receipts"] = Counter(r["status"] for r in q.values())
-        cands = chat_candidates(cfg, st, con) if ("chatvs" in steps or "publish" in steps) else []
+        cands = chat_candidates(cfg, st, con, entries) if ("chatvs" in steps or "publish" in steps) else []
         chatvs, why = chatvs_items(cfg, st, con, cands, run_claude="chatvs" in steps and not limit)
         limit = limit or why
         report["chatvs"] = {"candidates": len(cands), "kept": len(chatvs)}

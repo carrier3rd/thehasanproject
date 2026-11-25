@@ -2,38 +2,43 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Chat vs Hasan · VOD archive</title>
 <meta name="description" content="Moments when Hasan's own Twitch chat pushed back on him, split, or got cleared out by moderators.">
-<link rel="stylesheet" href="style.css?v=2026112505"></head>
+<link rel="stylesheet" href="style.css?v=2026112506"></head>
 <body><main class="feat">
   <h1>Chat vs Hasan</h1>
-  <p class="lede">The moments his own chat pushed back, split down the middle, or got swept by the mods, each with what he
-    said, what chat said back, and a link to watch it with the chat replay.</p>
+  <p class="lede">When his own chat and Hasan weren't on the same page: chat going after an outsider he was trying to win
+    over, chat dug into identity politics he wanted no part of, and plain pushback. Each with what he said, what chat said
+    back, and a link to watch it with the chat replay.</p>
   <div class="filters"><div id="kinds" class="chips"></div></div>
   <p id="count" class="note small" aria-live="polite"></p>
   <div id="list" class="cards"><p class="note">Loading…</p></div>
   <details class="method"><summary>How moments are found</summary>
-    <p>Every minute of chat is scored for pushback words ("wrong", "not true", "cap", "bad take", "????" and so on), against
-      that stream's usual level, and for bursts of messages deleted by moderators. Claude (AI) then reads the transcript and
+    <p>Every minute of chat is scored against that stream's usual level for pushback words ("wrong", "not true", "bad
+      take", "????"), identity-politics language ("problematic", "do better", "transphobic") and hostility toward outsiders
+      ("libs", "grifter", "why is he here"), the last only while Hasan is talking about someone outside the left such as The
+      Bulwark's hosts. Stretches the stream index marks as games or his own life are skipped. Claude (AI) then reads the transcript and
       the chat around the strongest minutes and keeps the ones where chat was really reacting to what Hasan said. Example
       messages are copied exactly; chat usernames aren't shown, and anything the site's chat check flagged as hateful is
       never used as an example.</p>
   </details>
 </main>
-<script src="common.js?v=2026112505"></script>
-<script src="feat.js?v=2026112505"></script>
+<script src="common.js?v=2026112506"></script>
+<script src="feat.js?v=2026112506"></script>
 <script>
-const KIND = { pushback: 'Pushback', split: 'Chat split', mass_deletion: 'Mod sweep' };
+const KIND = { id_politics: 'Identity politics', courting_outsider: 'Courting an outsider', pushback: 'Pushback', split: 'Chat split', mass_deletion: 'Mod sweep' };
 let all = [], kind = '';
 
-function meter(s) {
-  const pct = Math.round(100 * s.share), base = Math.max(0, Math.round(100 * s.base));
-  return el('div', { class: 'meter' },
-    el('div', { class: 'mrow' }, el('span', { class: 'ml', text: 'This minute' }),
-      el('span', { class: 'mt' }, el('span', { class: 'mf', style: `width:${Math.min(100, pct * 2)}%` })),
-      el('span', { class: 'mv num', text: `${pct}%` })),
-    el('div', { class: 'mrow' }, el('span', { class: 'ml', text: 'Usual' }),
-      el('span', { class: 'mt' }, el('span', { class: 'mf base', style: `width:${Math.min(100, base * 2)}%` })),
-      el('span', { class: 'mv num', text: `${base}%` })),
-    el('p', { class: 'note small', text: `Share of ${s.msgs.toLocaleString()} messages with pushback words` +
+// How much of chat that minute was the reaction in question. The "usual" row exists only for pushback words.
+function meter(m) {
+  const s = m.stats, n = s.msgs || 1;
+  const [count, what] = m.kind === 'id_politics' ? [s.idpol || 0, 'identity-politics words']
+    : m.kind === 'courting_outsider' ? [(s.outsider || 0) + (s.pushback || 0), 'hostile or pushback words'] : [s.pushback, 'pushback words'];
+  const pct = Math.round(100 * count / n), base = Math.max(0, Math.round(100 * s.base));
+  const row = (label, v, cls) => el('div', { class: 'mrow' }, el('span', { class: 'ml', text: label }),
+    el('span', { class: 'mt' }, el('span', { class: 'mf' + (cls || ''), style: `width:${Math.min(100, v * 2)}%` })),
+    el('span', { class: 'mv num', text: `${v}%` }));
+  return el('div', { class: 'meter' }, row('This minute', pct),
+    m.kind === 'pushback' || m.kind === 'split' ? row('Usual', base, ' base') : null,
+    el('p', { class: 'note small', text: `Share of ${n.toLocaleString()} messages with ${what}` +
       (s.deleted ? ` · ${s.deleted} deleted by mods` : '') }));
 }
 
@@ -44,12 +49,13 @@ function card(m) {
     el('div', { class: 'fmeta' }, el('span', { class: 'kind ' + m.kind, text: KIND[m.kind] || m.kind }),
       el('span', { class: 'when', text: niceDay(m.date) })),
     el('h2', { text: m.title }),
+    m.who ? el('p', { class: 'note small', style: 'padding:0' }, el('b', { text: 'Who he was engaging: ' }), m.who) : null,
     el('div', { class: 'pair' },
       el('div', { class: 'pside' }, el('div', { class: 'when' }, el('b', { text: 'Hasan' })), el('p', { text: m.hasan_said }),
         m.quote ? el('blockquote', { text: `“${m.quote}”` }) : null),
       el('div', { class: 'pside' }, el('div', { class: 'when' }, el('b', { text: 'Chat' })), el('p', { text: m.chat_said }),
         m.examples.length ? el('ul', { class: 'bubbles', 'aria-label': 'Chat messages' }, ...m.examples.map(e => el('li', { text: e }))) : null)),
-    m.kind !== 'mass_deletion' ? meter(m.stats) : el('p', { class: 'note small', text: `${m.stats.deleted} messages deleted by mods in one minute.` }),
+    m.kind !== 'mass_deletion' ? meter(m) : el('p', { class: 'note small', text: `${m.stats.deleted} messages deleted by mods in one minute.` }),
     el('div', { class: 'row' }, el('a', { class: 'watch', href: watchAt(m.video_id, m.start), text: `▶ Watch with chat at ${fmtTime(m.start)}` }), share));
 }
 
@@ -63,7 +69,7 @@ function render() {
 (async () => {
   await chrome('chatvs.html');
   all = ((await feature('chatvs')) || {}).moments || [];
-  const draw = () => chips($('#kinds'), [['', 'All'], ['pushback', 'Pushback'], ['split', 'Chat split'], ['mass_deletion', 'Mod sweeps']],
+  const draw = () => chips($('#kinds'), [['', 'All'], ['courting_outsider', 'Courting an outsider'], ['id_politics', 'Identity politics'], ['pushback', 'Pushback'], ['split', 'Chat split']],
     kind, v => { kind = v; draw(); render(); }, 'Show');
   draw(); render();
   const want = new URLSearchParams(location.search).get('m'), n = want && document.getElementById('m-' + want);
