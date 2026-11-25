@@ -44,6 +44,8 @@ DEFAULTS = {
     "reddit_dir": "", "reddit_top_posts": 8,
     "story_min_minutes": 8, "story_min_reddit": 30,
     "cli_workers": 2, "part_min_lines": 30,
+    "tags_effort": "low", "tags_batch": 60, "tags_max_requests": 10,
+    "orbit": [], "orbit_min_reddit": 20, "orbit_story_min_reddit": 8,
 }
 KINDS = ["news_politics", "israel_palestine", "war_and_foreign_policy", "streamers_and_internet", "culture_and_entertainment",
          "games", "sports", "science_tech_health", "personal_or_stream", "other"]
@@ -108,7 +110,7 @@ def ask(cfg, st: dict, kind: str, reqs: list, cap: int) -> tuple[int, str | None
     need = [r for r in reqs if not reel.usable(reel.cache_get(cfg, kind, r[0]))][:max(0, cap)]
     if not need:
         return 0, None
-    sub = {**st, "model": st["topic_model"] if kind == "topics" else st["model"], "cli_workers": st["cli_workers"]}
+    sub = {**st, "model": st["topic_model"] if kind in ("topics", "tags") else st["model"], "cli_workers": st["cli_workers"]}
     try:
         return reel.run_cli(cfg, sub, kind, need), None
     except reel.UsageLimit as e:
@@ -339,6 +341,91 @@ def run_stories(cfg, st: dict, entries: list[dict], reddit_titles: list[dict], c
         if why:
             break
     return done, why
+
+
+# ---------------------------------------------------------------- blindspot tags: orbit, proximity, who did what
+EVENT_TYPES = ["attacks_on_civilians", "war_or_invasion", "crackdown_on_protest_or_dissent", "censorship_or_press_freedom",
+               "elections_and_democracy", "human_rights_abuses", "terrorism", "other"]
+BLOCS = {"us_and_allies": "US & allies", "russia_china_iran_and_allies": "Russia, China, Iran & allies"}
+TAG_RUBRIC = """You tag stories for a neutral public archive that compares how much attention HasanAbi (Hasan Piker) gave
+different stories. For each story give:
+- world_event: true for real-world political, military or human-rights events; false for internet or streamer drama,
+  culture, games, sports and his own life.
+- event_type: the closest type (other if none fits).
+- actor: the country, government or armed group mainly responsible for the act at the centre of the story; empty if none.
+- actor_bloc: us_and_allies (the US, Israel, the UK, EU and NATO states, Ukraine, Taiwan, Japan, South Korea, and US-aligned
+  states such as Saudi Arabia or the UAE), russia_china_iran_and_allies (Russia, China, Iran, North Korea, the governments of
+  Venezuela, Cuba, Belarus, Nicaragua, and Hamas, Hezbollah, the Houthis), or neither.
+- target: who was harmed or affected, in a few words.
+Record only who did what. Do not judge the act or the story."""
+TAG_SCHEMA = {
+    "type": "object", "additionalProperties": False, "required": ["tags"],
+    "properties": {"tags": {"type": "array", "items": {
+        "type": "object", "additionalProperties": False,
+        "required": ["id", "world_event", "event_type", "actor", "actor_bloc", "target"],
+        "properties": {"id": {"type": "integer"}, "world_event": {"type": "boolean"},
+                       "event_type": {"type": "string", "enum": EVENT_TYPES}, "actor": {"type": "string"},
+                       "actor_bloc": {"type": "string", "enum": [*BLOCS, "neither"]}, "target": {"type": "string"}}}}}}
+
+
+def run_tags(cfg, st: dict, cap: int) -> tuple[int, str | None]:
+    """Who did what, for each story without tags yet (Sonnet, low effort, many stories per request)."""
+    state = stories_state(cfg)
+    tags = state.setdefault("tags", {})
+    todo = [sid for sid in state["stories"] if sid not in tags]
+    done, why = 0, None
+    while todo and done < cap and not why:
+        batch = todo[:st["tags_batch"]]
+        user = "Stories (id | title | summary):\n" + "\n".join(
+            f"{i} | {state['stories'][sid]['title']} | {state['stories'][sid]['summary']}" for i, sid in enumerate(batch))
+        req = (reel.h("tags", VERSION, st["topic_model"], user), TAG_RUBRIC, user, TAG_SCHEMA)
+        _, why = ask(cfg, st, "tags", [req], 1)
+        got = answer(cfg, "tags", req[0])
+        if got is None and not reel.usable(reel.cache_get(cfg, "tags", req[0])):
+            break
+        by_id = {t.get("id"): t for t in (got or {}).get("tags") or []}
+        for i, sid in enumerate(batch):
+            t = by_id.get(i) or {}
+            tags[sid] = {"world_event": bool(t.get("world_event")),
+                         "event_type": t.get("event_type") if t.get("event_type") in EVENT_TYPES else "other",
+                         "actor": str(t.get("actor") or "")[:60],
+                         "actor_bloc": t.get("actor_bloc") if t.get("actor_bloc") in BLOCS else "neither",
+                         "target": str(t.get("target") or "")[:80]}
+        save_json(work_dir(cfg) / "stories.json", state)
+        todo = todo[len(batch):]
+        done += 1
+    return done, why
+
+
+def orbit_list(st: dict) -> list[dict]:
+    out = []
+    for o in st.get("orbit") or []:
+        if o.get("name") and o.get("group") in ("orbit", "proximity", "adversary"):
+            out.append({"name": str(o["name"]), "group": o["group"], "tie": o.get("tie", ""),
+                        "variants": [" ".join(str(v).split()) for v in o.get("variants") or [] if len(str(v).strip()) >= 3]})
+    return out
+
+
+def orbit_matcher(st: dict):
+    by = {v.lower(): o for o in orbit_list(st) for v in o["variants"]}
+    if not by:
+        return None, by
+    rx = re.compile(r"(?<!\w)(?:" + "|".join(re.escape(k) for k in sorted(by, key=len, reverse=True)) + r")(?!\w)", re.I)
+    return rx, by
+
+
+def hasan_mentions(con, stories: dict) -> dict[str, list[tuple]]:
+    """Every line of Hasan's that contains one of a story's keywords: (date, video_id, t, text). A blindspot must
+    count these, so a story he did mention in passing is never shown as one he ignored."""
+    rx, by_kw = keyword_matcher(stories)
+    out: dict[str, list[tuple]] = defaultdict(list)
+    if rx is None:
+        return out
+    for r in con.execute("SELECT t.video_id, t.start, t.text, v.upload_date FROM turns t JOIN videos v ON v.id = t.video_id "
+                         "WHERE t.speaker = 'Hasan' ORDER BY v.upload_date, t.start"):
+        for sid in matches(rx, by_kw, r[2]):
+            out[sid].append((day(r[3]), r[0], r[1], r[2][:200]))
+    return out
 
 
 # ---------------------------------------------------------------- Reddit: counts per story, subreddit and day
@@ -819,9 +906,14 @@ def stream_days(con) -> dict[str, float]:
     return dict(out)
 
 
+COMMUNITY = ("Hasan_Piker", "LivestreamFail", "Destiny")      # his own subreddit and the two that follow him most
+
+
 def build_stories(cfg, st: dict, con, entries: list[dict], reddit: dict | None) -> tuple[list[dict], dict]:
     state = stories_state(cfg)
     live = stream_days(con)
+    orx, oby = orbit_matcher(st)
+    said = hasan_mentions(con, state["stories"])
     by_story: dict[str, list[dict]] = defaultdict(list)
     for e in entries:
         sid = story_of(state, e)
@@ -849,7 +941,16 @@ def build_stories(cfg, st: dict, con, entries: list[dict], reddit: dict | None) 
                     rday[d] += k
         reddit_n = sum(by_sub.values())
         hasan_min = round(sum(mins.values()), 1)
-        if hasan_min < st["story_min_minutes"] and reddit_n < st["story_min_reddit"]:
+        blob = " \n ".join([s["title"], s["summary"], *s["keywords"], *(e["label"] for e in es),
+                            *(x["title"] for x in (rs or {}).get("top", []))])
+        who: dict[str, list[str]] = {}
+        if orx is not None:
+            for m in orx.finditer(blob):
+                o = oby[m.group(0).lower()]
+                if o["name"] not in who.setdefault(o["group"], []):
+                    who[o["group"]].append(o["name"])
+        floor = st["orbit_story_min_reddit"] if who.get("orbit") or who.get("proximity") else st["story_min_reddit"]
+        if hasan_min < st["story_min_minutes"] and reddit_n < floor:
             continue
         days_all = sorted(set(mins) | set(rday))
         first, last = days_all[0], days_all[-1]
@@ -870,11 +971,20 @@ def build_stories(cfg, st: dict, con, entries: list[dict], reddit: dict | None) 
         both = [d for d in days_all if d in covered and d in live]
         hasan_on_both = sum(mins[d] for d in both)
         reddit_on_both = sum(rday[d] for d in both)
+        mentions = said.get(sid, [])
+        said_on_both = sum(1 for m in mentions if m[0] in both)
+        community = {sub: by_sub[sub] for sub in COMMUNITY if by_sub.get(sub)}
+        quiet = hasan_on_both < 3 and said_on_both <= 2       # under 3 minutes and at most 2 passing mentions
         badge = None
-        if reddit_on_both >= 200 and hasan_on_both < 3 and len(both) >= 3:
+        if who.get("orbit") and quiet and both and reddit_on_both >= st["orbit_min_reddit"]:
+            badge = "close_to_home"
+        elif who.get("proximity") and quiet and both and reddit_on_both >= st["orbit_min_reddit"]:
+            badge = "proximity_gap"
+        elif reddit_on_both >= 200 and quiet and len(both) >= 3:
             badge = "blindspot"
         elif hasan_on_both >= 60 and reddit_on_both < 30 and len(both) >= 2:
             badge = "stream_focus"
+        tags = state.get("tags", {}).get(sid)
         quotes = sorted((dict(q, video_id=e["video_id"], date=e["date"]) for e in es for q in e["quotables"]),
                         key=lambda q: q["date"], reverse=True)
         positions = sorted((dict(p, video_id=e["video_id"], date=e["date"]) for e in es for p in e["positions"]),
@@ -891,12 +1001,17 @@ def build_stories(cfg, st: dict, con, entries: list[dict], reddit: dict | None) 
                           "last": last, "hasan_minutes": hasan_min, "streams": len({e["video_id"] for e in es}),
                           "hasan_days": {d: round(m, 1) for d, m in sorted(mins.items())},
                           "reddit_mentions": reddit_n, "groups": groups, "badge": badge,
-                          "quote": quotes[0] if quotes else None})
+                          "quote": quotes[0] if quotes else None, "who": who, "said": len(mentions),
+                          "community": community, "tags": tags,
+                          "on_both": {"days": len(both), "hasan_minutes": round(hasan_on_both, 1), "said": said_on_both,
+                                      "reddit": reddit_on_both}})
         details[sid] = {"id": sid, "title": s["title"], "kind": s["kind"], "summary": s["summary"],
                         "keywords": s["keywords"], "hasan_days": {d: round(m, 1) for d, m in sorted(mins.items())},
                         "reddit_days": dict(sorted(rday.items())), "by_sub": dict(sorted(by_sub.items(), key=lambda x: -x[1])),
                         "per_1000_sub": {k: round(1000 * v, 2) for k, v in sorted(share_sub.items(), key=lambda x: -x[1])},
-                        "groups": groups, "badge": badge,
+                        "groups": groups, "badge": badge, "who": who, "community": community, "tags": tags,
+                        "said": [{"date": m[0], "video_id": m[1], "t": m[2], "text": m[3]} for m in mentions[-25:]],
+                        "said_total": len(mentions),
                         "segments": sorted(({"video_id": e["video_id"], "date": e["date"], "t": e["start"],
                                              "minutes": e["minutes"], "label": e["label"]} for e in es),
                                            key=lambda x: (x["date"], x["t"])),
@@ -934,6 +1049,22 @@ def build_quiz(cfg, stories: list[dict], details: dict, chatvs: list[dict], rece
     return {"who": who, "more": more, "first": first}
 
 
+def attention(stories: list[dict]) -> dict:
+    """Selective attention: for each type of event, how many stories with each side as the actor he covered (3+
+    minutes, or said its keywords 5+ times), and his total minutes. Counts, never just percentages."""
+    out: dict[str, dict] = {}
+    for s in stories:
+        t = s.get("tags") or {}
+        if not t.get("world_event") or t.get("event_type") == "other" or t.get("actor_bloc") not in BLOCS:
+            continue
+        cell = out.setdefault(t["event_type"], {}).setdefault(t["actor_bloc"], {"stories": 0, "covered": 0, "minutes": 0.0, "ids": []})
+        cell["stories"] += 1
+        cell["covered"] += 1 if s["hasan_minutes"] >= 3 or s["said"] >= 5 else 0
+        cell["minutes"] = round(cell["minutes"] + s["hasan_minutes"], 1)
+        cell["ids"].append(s["id"])
+    return out
+
+
 def publish(cfg, st: dict, con, entries: list[dict], reddit: dict | None, chatvs: list[dict]) -> dict:
     od = out_dir(cfg)
     stories, details = build_stories(cfg, st, con, entries, reddit)
@@ -954,7 +1085,9 @@ def publish(cfg, st: dict, con, entries: list[dict], reddit: dict | None, chatvs
     covered = sorted({d for days in (reddit or {}).get("totals", {}).values() for d in days})
     now = dt.datetime.now().isoformat(timespec="seconds")
     save_json(od / "stories.json", {"generated": now, "stories": stories, "timeline": timeline,
-                                    "reddit_days": covered, "groups": GROUPS, "stream_days": stream_days(con)})
+                                    "reddit_days": covered, "groups": GROUPS, "stream_days": stream_days(con),
+                                    "attention": attention(stories), "blocs": BLOCS,
+                                    "orbit": [{k: o[k] for k in ("name", "group", "tie")} for o in orbit_list(st)]})
     # "Where he stood": every position he stated on a story, in order (documented, not judged; no approval needed:
     # each line is his exact words with a link, and the one-sentence summary is labelled as Claude's)
     timelines = []
@@ -993,6 +1126,9 @@ def run(cfg, steps: set[str] | None = None) -> dict:
         if "stories" in steps and not limit:
             n, limit = run_stories(cfg, st, entries, titles, st["stories_max_requests"])
             report["stories"] = {"batches": n, "stories": len(stories_state(cfg)["stories"])}
+        if "stories" in steps and not limit:
+            n, limit = run_tags(cfg, st, st["tags_max_requests"])
+            report["tags"] = {"batches": n}
         reddit = scan_reddit(cfg, st, stories_state(cfg)["stories"]) if "reddit" in steps or "publish" in steps else None
         if "receipts" in steps and not limit:
             limit = run_receipts(cfg, st, con, entries)

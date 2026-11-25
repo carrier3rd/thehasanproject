@@ -422,3 +422,10 @@ a.fcard:hover { text-decoration:none; border-color:var(--accent); }
 .tline li { position:relative; padding:6px 0 10px; }
 .tline li::before { content:""; position:absolute; left:-20px; top:12px; width:10px; height:10px; border-radius:50%; background:var(--accent); }
 .tline .tsum { margin:2px 0 0; } .tline .tdate a { font-size:13px; font-weight:600; }
+.fbadge.close_to_home { color:var(--no); } .fbadge.proximity_gap { color:var(--reddit); }
+.evid { display:flex; flex-direction:column; gap:2px; font-size:13px; color:var(--muted); margin:2px 0 8px; }
+.evid .orbit b { color:var(--ink); }
+.bsec { margin:18px 0 8px; } .bsec > h2 { font-size:20px; margin:0 0 2px; }
+table.attn { font-size:14px; margin:8px 0; } table.attn th[scope=row] { font-weight:600; }
+table.attn td { vertical-align:top; } table.attn .linkish { font-size:14px; min-height:24px; }
+@media (max-width: 640px) { table.attn { font-size:13px; } table.attn th, table.attn td { padding:6px 4px; } }

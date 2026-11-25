@@ -5,7 +5,7 @@
 <meta property="og:title" content="The Hasan Project: Hasan's streams, on the record">
 <meta property="og:description" content="Every stream transcribed and searchable, with chat on the same timeline. Daily quiz, receipts, Chat vs Hasan, and what Reddit was talking about while he streamed.">
 <meta property="og:site_name" content="The Hasan Project"><meta property="og:type" content="website"><meta name="twitter:card" content="summary">
-<link rel="stylesheet" href="style.css?v=2026112504"></head>
+<link rel="stylesheet" href="style.css?v=2026112505"></head>
 <body><main class="feat hub">
   <section class="hero">
     <h1>Hasan's streams, on the record</h1>
@@ -41,8 +41,8 @@
   <p class="note small">Transcripts, summaries and picks are machine-made (speech recognition and Claude, an AI) and can be wrong.
     This is an independent archive, not affiliated with Hasan Piker. <a href="about.html">About and corrections</a>.</p>
 </main>
-<script src="common.js?v=2026112504"></script>
-<script src="feat.js?v=2026112504"></script>
+<script src="common.js?v=2026112505"></script>
+<script src="feat.js?v=2026112505"></script>
 <script>
 function hubcard(kind, title, body, href, go, extra) {
   return el('a', { class: 'hubcard', href }, ...[el('span', { class: 'hk', text: kind }), el('h2', { text: title }),
@@ -79,10 +79,11 @@ async function factCard() {
 async function spotCard() {
   const d = await feature('stories');
   if (!d || !d.stories.length) return null;
-  const s = d.stories.find(x => x.badge === 'blindspot') || d.stories.find(x => x.badge === 'stream_focus') || d.stories[0];
-  const label = s.badge === 'blindspot' ? 'Blindspot' : s.badge === 'stream_focus' ? 'Stream focus' : 'Spotlight';
+  const order = ['close_to_home', 'proximity_gap', 'blindspot', 'stream_focus'];
+  const s = order.map(b => d.stories.find(x => x.badge === b)).find(Boolean) || d.stories[0];
+  const label = { close_to_home: 'Blindspot · close to home', proximity_gap: 'Blindspot · proximity', blindspot: 'Blindspot', stream_focus: 'Stream focus' }[s.badge] || 'Spotlight';
   return hubcard(label, s.title, `Hasan: ${s.hasan_minutes ? mins(s.hasan_minutes) : 'under a minute'} on stream. Reddit: ${s.reddit_mentions.toLocaleString()} posts and comments.`,
-    `spotlight.html?story=${s.id}`, 'Compare →');
+    `spotlight.html?story=${s.id}`, s.badge ? 'See the evidence →' : 'Compare →');
 }
 
 async function chatCard() {

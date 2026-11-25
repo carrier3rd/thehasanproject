@@ -35,9 +35,16 @@ class FakeClaude:
                                 "quotables": [{"quote": q} for q in lines]}]} if lines else {"topics": []}
         elif system == features.STORY_RUBRIC:
             items = [l.split(" | ", 3) for l in input.split("New items (item | date | source | text):\n", 1)[1].splitlines()]
-            body = {"assign": [{"item": int(i), "story": "n1" if "rent" in text.lower() else "none"} for i, _, _, text in items],
+            pick = lambda t: "n1" if "rent" in t.lower() else "n2" if "frogan" in t.lower() else "none"
+            body = {"assign": [{"item": int(i), "story": pick(text)} for i, _, _, text in items],
                     "new": [{"key": "n1", "title": "Rent control fight", "kind": "news_politics",
-                             "summary": "Arguments over rent control.", "keywords": ["rent control", "war"]}]}
+                             "summary": "Arguments over rent control.", "keywords": ["rent control", "war"]},
+                            {"key": "n2", "title": "Frogan copyright lawsuit", "kind": "streamers_and_internet",
+                             "summary": "A streamer is sued over a reaction video.", "keywords": ["Frogan"]}]}
+        elif system == features.TAG_RUBRIC:
+            rows = [l.split(" | ") for l in input.splitlines()[1:]]
+            body = {"tags": [{"id": int(r[0]), "world_event": "Rent" in r[1], "event_type": "human_rights_abuses",
+                              "actor": "US", "actor_bloc": "us_and_allies", "target": "renters"} for r in rows]}
         elif system == features.RECEIPT_RUBRIC:
             rows = [l.split(" | ") for l in input.splitlines() if re.match(r"^\d+ \| ", l)]
             a = next(int(r[0]) for r in rows if EARLY in r[3])
@@ -91,17 +98,23 @@ def feat(project, tmp_path, monkeypatch):
     reddit_zip(rd / "wk" / "2026-10-19_to_2026-11-02" / "r_LivestreamFail_posts_2026-10-19_to_2026-11-02.zip",
                [{"id": "p1", "title": "Hasan flips on rent control, chat goes wild about it", "selftext": "", "score": 900,
                  "num_comments": 40, "permalink": "/r/LivestreamFail/comments/p1/x/", "created_utc": day, "author": "redditor_one"},
+                {"id": "p4", "title": "Frogan loses default judgment in the copyright lawsuit", "selftext": "", "score": 700,
+                 "num_comments": 90, "permalink": "/r/LivestreamFail/comments/p4/z/", "created_utc": day, "author": "redditor_four"},
                 {"id": "p2", "title": "Unrelated clip of a streamer falling off a chair", "selftext": "", "score": 50,
                  "num_comments": 2, "permalink": "/r/LivestreamFail/comments/p2/y/", "created_utc": day, "author": "redditor_two"},
                 {"id": "p3", "title": "Removed post about rent control", "selftext": "", "score": 5000, "num_comments": 1,
                  "permalink": "/r/x/", "created_utc": day, "removed_by_category": "moderator", "author": "redditor_three"}])
     reddit_zip(rd / "wk" / "2026-10-19_to_2026-11-02" / "r_Destiny_comments_2026-10-19_to_2026-11-02.zip",
                [{"id": f"c{i}", "body": "rent control is bad policy" if i < 3 else "anyway", "created_utc": day,
-                 "author": "dgger"} for i in range(10)])
+                 "author": "dgger"} for i in range(10)] +
+               [{"id": f"f{i}", "body": "why is nobody talking about frogan getting sued", "created_utc": day,
+                 "author": "dgger"} for i in range(25)])
     cfg = load_config(alt / "config.yaml")
     cfg["reel"] = {**(cfg.get("reel") or {}), "backend": "subscription", "cli_workers": 1}
     cfg["features"] = {"reddit_dir": str(rd), "part_min_lines": 1, "receipt_min_positions": 2, "story_min_minutes": 1,
-                       "chatvs_min_pushback": 5, "chatvs_per_stream": 2, "cli_workers": 1}
+                       "chatvs_min_pushback": 5, "chatvs_per_stream": 2, "cli_workers": 1,
+                       "orbit": [{"name": "Frogan", "group": "orbit", "tie": "moderate", "variants": ["Frogan"]},
+                                 {"name": "Nobody", "group": "proximity", "tie": "loose", "variants": ["Zz"]}]}
     fake = FakeClaude()
     monkeypatch.setattr("subprocess.run", fake)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-should-never-reach-claude")
@@ -120,11 +133,20 @@ def test_run_builds_every_feature(feat):
     assert any(k == features.TOPIC_RUBRIC[:40] for k in kinds) and any(k == features.RVERIFY_RUBRIC[:40] for k in kinds)
     # stories: the keyword "war" is too generic and is dropped; removed Reddit posts never count or show
     state = features.stories_state(cfg)
-    [(sid, story)] = state["stories"].items()
-    assert story["keywords"] == ["rent control"]
-    [s] = published(cfg, "stories")["stories"]
+    [sid] = [k for k, v in state["stories"].items() if v["title"] == "Rent control fight"]
+    assert state["stories"][sid]["keywords"] == ["rent control"]
+    pub = published(cfg, "stories")
+    [s] = [x for x in pub["stories"] if x["id"] == sid]
+    # close to home: someone on the orbit list, his subreddits talking, Hasan silent on a day he streamed
+    [f] = [x for x in pub["stories"] if x["title"] == "Frogan copyright lawsuit"]
+    assert f["badge"] == "close_to_home" and f["who"] == {"orbit": ["Frogan"]} and f["said"] == 0
+    assert f["community"] == {"LivestreamFail": 1, "Destiny": 25} and f["on_both"]["reddit"] == 26
+    assert s["badge"] is None and s["said"] >= 2 and not s["who"]          # he talked about rent control
+    assert pub["attention"] == {"human_rights_abuses": {"us_and_allies": {"stories": 1, "covered": 1, "minutes": 24.0, "ids": [sid]}}}
+    assert {o["name"] for o in pub["orbit"]} == {"Frogan", "Nobody"} and "variants" not in pub["orbit"][0]
     assert s["hasan_minutes"] == 24 and s["streams"] == 2 and s["reddit_mentions"] == 4      # 1 post + 3 comments
     assert set(s["groups"]) == {"Streamer communities"}
+    assert published(cfg, "stories")["stories"]
     detail = json.loads((features.out_dir(cfg) / "stories" / f"{sid}.json").read_text())
     assert [p["title"] for p in detail["reddit_top"]] == ["Hasan flips on rent control, chat goes wild about it"]
     assert all(NAZI not in q["quote"] for q in detail["quotes"])                              # hate words: never quoted
@@ -147,7 +169,7 @@ def test_run_builds_every_feature(feat):
     assert {w["answer"] for w in quiz["who"]} == {"hasan", "chat", "reddit"}
     # nothing public carries a username
     blob = "".join(p.read_text() for p in features.out_dir(cfg).rglob("*.json"))
-    for name in ("redditor_one", "redditor_two", "dgger", "user1", "calm1", "hater", "redditor_three", "Removed post"):
+    for name in ("redditor_one", "redditor_two", "redditor_four", "dgger", "user1", "calm1", "hater", "redditor_three", "Removed post"):
         assert name not in blob
     # a second run with nothing new asks Claude nothing
     n = len(fake.calls)

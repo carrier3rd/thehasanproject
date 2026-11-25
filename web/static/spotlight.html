@@ -1,8 +1,8 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Spotlight · VOD archive</title>
+<title>Spotlight · The Hasan Project</title>
 <meta name="description" content="What Hasan talked about on stream, set against what Reddit communities were discussing at the same time.">
-<link rel="stylesheet" href="style.css?v=2026112504"></head>
+<link rel="stylesheet" href="style.css?v=2026112505"></head>
 <body><main class="feat">
   <div id="listview">
     <h1>Spotlight</h1>
@@ -10,6 +10,7 @@
       the stories he went all in on, and the big ones he barely touched.</p>
     <nav class="tabs" id="views" aria-label="Spotlight views">
       <button type="button" class="on" data-view="stories">Stories</button>
+      <button type="button" data-view="blind">Blindspots</button>
       <button type="button" data-view="weeks">Week by week</button>
     </nav>
     <section id="storiesview">
@@ -21,6 +22,23 @@
       </div>
       <p id="count" class="note small" aria-live="polite"></p>
       <div id="list" class="cards"><p class="note">Loading…</p></div>
+    </section>
+    <section id="blindview" hidden>
+      <p class="note">Stories Reddit was talking about on days Hasan streamed, set against the time he gave them. Each one lists
+        every time he said its keywords, so a passing mention is never counted as silence. Read the evidence and judge for yourself.</p>
+      <section class="bsec"><h2>Close to home</h2>
+        <p class="note small">Stories about people in his orbit: creators he is close to, works with or defends.</p>
+        <div id="b-orbit" class="cards"></div></section>
+      <section class="bsec"><h2>Proximity</h2>
+        <p class="note small">Politicians and groups he is closely associated with.</p>
+        <div id="b-prox" class="cards"></div></section>
+      <section class="bsec"><h2>Selective attention</h2>
+        <p class="note small">World events grouped by what happened and who did it. For each, how many he covered (3+ minutes on
+          stream, or he said its keywords 5+ times) out of how many stories in the data, and his total time.</p>
+        <div id="b-attn"></div><div id="b-attn-list" class="cards"></div></section>
+      <section class="bsec"><h2>Other blindspots</h2>
+        <p class="note small">Big on Reddit on days he streamed, under 3 minutes and at most 2 passing mentions on stream.</p>
+        <div id="b-other" class="cards"></div></section>
     </section>
     <section id="weeksview" hidden>
       <p class="note small">His biggest stories each week by time on stream.</p>
@@ -38,15 +56,22 @@
       <strong>Blindspot</strong> means Reddit discussed it a lot on days Hasan streamed, while he spent under 3 minutes on it.
       <strong>Stream focus</strong> means an hour or more on stream on days the subreddits barely mentioned it. Groupings of
       communities are only a reading aid; every subreddit is listed by name on the story page. Times are estimates.</p>
+    <p><strong>Close to home</strong> and <strong>Proximity</strong> use a fixed, public list of people and groups, matched by
+      name in the story, its keywords and its top Reddit posts: <span id="orbitlist">loading</span>. "Who did what" for
+      Selective attention is tagged by Claude per story (the act and who was responsible, not whether it was justified).</p>
   </details>
 </main>
-<script src="common.js?v=2026112504"></script>
-<script src="feat.js?v=2026112504"></script>
+<script src="common.js?v=2026112505"></script>
+<script src="feat.js?v=2026112505"></script>
 <script>
 let data = null;
 const st = { badge: '', kind: '', q: '' };
 const qs = new URLSearchParams(location.search);
-const BADGE = { blindspot: ['Blindspot', 'Big on Reddit, barely on stream'], stream_focus: ['Stream focus', 'Big on stream, quiet on Reddit'] };
+const BADGE = { blindspot: ['Blindspot', 'Big on Reddit, barely on stream'], stream_focus: ['Stream focus', 'Big on stream, quiet on Reddit'],
+  close_to_home: ['Close to home', 'Someone in his orbit: talked about on Reddit, barely on stream'],
+  proximity_gap: ['Proximity', 'A politician or group he is close to: talked about on Reddit, barely on stream'] };
+const EVENT = { attacks_on_civilians: 'Attacks on civilians', war_or_invasion: 'War or invasion', crackdown_on_protest_or_dissent: 'Crackdowns on protest or dissent',
+  censorship_or_press_freedom: 'Censorship and the press', elections_and_democracy: 'Elections and democracy', human_rights_abuses: 'Human rights abuses', terrorism: 'Terrorism' };
 const GROUP_ORDER = ['Streamer communities', 'Left', 'Liberal & center', 'Right', 'Debate & mixed', 'News', 'Pop culture'];
 
 function badgeEl(b) {
@@ -65,8 +90,49 @@ function storyCard(s) {
       el('div', { class: 'stat' }, el('b', { text: s.hasan_minutes ? mins(s.hasan_minutes) : '0 min' }),
         el('span', { text: s.streams ? ` on stream · ${s.streams} stream${s.streams === 1 ? '' : 's'}` : ' on stream' })),
       el('div', { class: 'stat' }, el('b', { text: s.reddit_mentions.toLocaleString() }), el('span', { text: ' Reddit posts and comments' }))),
+    evidence(s),
     groups.length ? hbars(groups, '‰') : null,
     s.quote ? el('blockquote', { text: `“${s.quote.quote}”` }) : null);
+}
+
+// The facts behind a blindspot, in one line: who in his orbit, his subreddit and LSF, his own minutes and mentions
+function evidence(s) {
+  const bits = [];
+  const who = [...(s.who?.orbit || []), ...(s.who?.proximity || [])];
+  if (who.length) bits.push(el('span', { class: 'orbit' }, el('b', { text: 'Involves: ' }), who.join(', ')));
+  const c = Object.entries(s.community || {}).map(([k, n]) => `r/${k} ${n.toLocaleString()}`);
+  if (c.length) bits.push(el('span', { text: c.join(' · ') }));
+  if (s.badge && s.on_both) bits.push(el('span', { text: `On the ${s.on_both.days} day${s.on_both.days === 1 ? '' : 's'} with both a stream and Reddit data: ` +
+    `${s.on_both.reddit.toLocaleString()} Reddit posts and comments; Hasan ${s.on_both.hasan_minutes ? mins(s.on_both.hasan_minutes) : '0 min'}, ` +
+    `said its keywords ${s.on_both.said} time${s.on_both.said === 1 ? '' : 's'}` }));
+  return bits.length ? el('div', { class: 'evid' }, ...bits) : null;
+}
+
+function renderBlind() {
+  const fill = (id, items, none) => $(id).replaceChildren(...(items.length ? items.slice(0, 40).map(storyCard) : [el('p', { class: 'note small', text: none })]));
+  const gap = s => (s.badge ? 1e9 : 0) + (s.on_both?.reddit || 0) - 50 * (s.on_both?.hasan_minutes || 0);
+  const orbit = data.stories.filter(s => s.who?.orbit?.length).sort((a, b) => gap(b) - gap(a));
+  const prox = data.stories.filter(s => s.who?.proximity?.length).sort((a, b) => gap(b) - gap(a));
+  fill('#b-orbit', orbit, 'Nothing involving people in his orbit in the data yet.');
+  fill('#b-prox', prox, 'Nothing involving these politicians or groups in the data yet.');
+  fill('#b-other', data.stories.filter(s => s.badge === 'blindspot'), 'None yet.');
+  const blocs = data.blocs || {}, rows = Object.keys(EVENT).filter(k => data.attention?.[k]);
+  if (!rows.length) { $('#b-attn').replaceChildren(el('p', { class: 'note small', text: 'Not enough tagged world events yet.' })); return; }
+  const byId = Object.fromEntries(data.stories.map(s => [s.id, s]));
+  const show = (k, b) => {
+    const ids = data.attention[k][b].ids;
+    $('#b-attn-list').replaceChildren(el('h3', { text: `${EVENT[k]} · ${blocs[b]} (${ids.length})` }),
+      ...ids.map(i => byId[i]).filter(Boolean).sort((x, y) => y.reddit_mentions - x.reddit_mentions).map(storyCard));
+  };
+  $('#b-attn').replaceChildren(el('table', { class: 'attn' },
+    el('thead', {}, el('tr', {}, el('th', { text: 'What happened' }), ...Object.values(blocs).map(b => el('th', { text: `Done by ${b}` })))),
+    el('tbody', {}, ...rows.map(k => el('tr', {}, el('th', { scope: 'row', text: EVENT[k] }), ...Object.keys(blocs).map(b => {
+      const c = data.attention[k][b];
+      if (!c) return el('td', { class: 'num', text: '—' });
+      const btn = el('button', { type: 'button', class: 'linkish', text: `${c.covered} of ${c.stories} covered` });
+      btn.addEventListener('click', () => show(k, b));
+      return el('td', {}, btn, el('div', { class: 'note small', text: c.minutes ? `${mins(c.minutes)} total` : 'no time on stream' }));
+    }))))));
 }
 
 function renderList() {
@@ -80,7 +146,7 @@ function renderList() {
 }
 
 function renderFilters() {
-  chips($('#badges'), [['', 'All'], ['blindspot', 'Blindspots'], ['stream_focus', 'Stream focus']], st.badge,
+  chips($('#badges'), [['', 'All'], ['close_to_home', 'Close to home'], ['proximity_gap', 'Proximity'], ['blindspot', 'Blindspots'], ['stream_focus', 'Stream focus']], st.badge,
     v => { st.badge = v; renderFilters(); renderList(); }, 'Show');
   const kinds = [...new Set(data.stories.map(s => s.kind))].sort((a, b) => Object.keys(KIND_LABEL).indexOf(a) - Object.keys(KIND_LABEL).indexOf(b));
   chips($('#kinds'), [['', 'All topics'], ...kinds.map(k => [k, KIND_LABEL[k] || k])], st.kind,
@@ -139,6 +205,11 @@ async function showDetail(sid) {
       el('ul', { class: 'said' }, ...(d.positions.length ? d.positions.slice(-10).reverse() : d.quotes.slice(0, 8)).map(p => el('li', {},
         p.position ? el('p', { text: p.position }) : null, el('blockquote', { text: `“${p.quote}”` }),
         el('a', { href: watchAt(p.video_id, p.t), text: `▶ ${niceDay(p.date)} at ${fmtTime(p.t)}` }))))) : null,
+    (d.who?.orbit || d.who?.proximity) ? el('p', { class: 'evid' }, el('span', { class: 'orbit' }, el('b', { text: 'Involves: ' }),
+      [...(d.who.orbit || []), ...(d.who.proximity || [])].join(', '))) : null,
+    el('details', { class: 'more' }, el('summary', { text: `Every time he said its keywords (${d.said_total})` }),
+      d.said.length ? el('ul', { class: 'segs' }, ...d.said.map(m => el('li', {}, el('a', { href: watchAt(m.video_id, m.t), text: `${niceDay(m.date)} ${fmtTime(m.t)}` }),
+        ` · “${m.text}”`))) : el('p', { class: 'note small', text: 'He never said them in the transcribed streams.' })),
     d.segments.length ? el('details', { class: 'more' }, el('summary', { text: `Every time it came up on stream (${d.segments.length})` }),
       el('ul', { class: 'segs' }, ...d.segments.map(s => el('li', {}, el('a', { href: watchAt(s.video_id, s.t), text: `${niceDay(s.date)} ${fmtTime(s.t)}` }),
         ` · about ${mins(s.minutes)} · ${s.label}`)))) : null,
@@ -156,7 +227,9 @@ function setView(v) {
   for (const b of document.querySelectorAll('#views button')) b.classList.toggle('on', b.dataset.view === v);
   $('#storiesview').hidden = v !== 'stories';
   $('#weeksview').hidden = v !== 'weeks';
+  $('#blindview').hidden = v !== 'blind';
   if (v === 'weeks') renderWeeks();
+  if (v === 'blind') renderBlind();
 }
 
 (async () => {
@@ -166,6 +239,10 @@ function setView(v) {
   for (const b of document.querySelectorAll('#views button')) b.addEventListener('click', () => setView(b.dataset.view));
   accessibleTabs($('#views'), 'Spotlight views');
   $('#q').addEventListener('input', e => { st.q = e.target.value; renderList(); });
+  const ol = data.orbit || [];
+  const grp = g => ol.filter(o => o.group === g).map(o => `${o.name}${o.tie ? ` (${o.tie})` : ''}`).join(', ');
+  $('#orbitlist').textContent = ol.length ? `orbit: ${grp('orbit')}. Proximity: ${grp('proximity')}.` : 'not set yet';
   renderFilters(); renderList();
+  if (qs.get('view') === 'blind') setView('blind');
 })();
 </script></body></html>
