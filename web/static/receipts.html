@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Receipts · VOD archive</title>
+<meta name="description" content="Moments on different days where Hasan's own stated positions on the same question conflict, with both clips.">
+<link rel="stylesheet" href="style.css?v=2026112501"></head>
+<body><main class="feat">
+  <h1>Receipts</h1>
+  <p class="lede">Two moments, on different days, where Hasan's own stated positions on the same question don't line up. Both
+    clips are linked, so you can watch them in full and decide for yourself.</p>
+  <div class="filters"><div id="topics" class="chips"></div></div>
+  <div id="list" class="cards"><p class="note">Loading…</p></div>
+  <details class="method"><summary>How a receipt gets here</summary>
+    <ol>
+      <li>Claude (AI) lists the positions Hasan states on each story, copying his exact words from the transcript.</li>
+      <li>It looks across weeks for pairs that conflict on the same question. Jokes, bits, reading something out, conditional
+        statements and changes that follow new facts don't count.</li>
+      <li>A second, stricter check reads the transcript around both quotes and rejects anything that falls apart in context.</li>
+      <li>A person reads each one that passes and approves it or throws it out. Only approved receipts appear here.</li>
+    </ol>
+    <p>Transcripts are machine-made and can mishear words. The linked video is the authoritative record. Think one is unfair?
+      Use the contact on the <a href="about.html">About</a> page.</p>
+  </details>
+</main>
+<script src="common.js?v=2026112501"></script>
+<script src="feat.js?v=2026112501"></script>
+<script>
+const KIND = { reversal: 'Changed position', contradiction: 'Contradiction', double_standard: 'Double standard' };
+const qs = new URLSearchParams(location.search);
+let all = [], topic = '';
+
+function side(label, s, said) {
+  return el('div', { class: 'side' },
+    el('div', { class: 'when' }, el('b', { text: label }), ` · ${niceDay(s.date)}`),
+    el('p', { text: said }),
+    el('blockquote', { text: `“${s.quote}”` }),
+    el('a', { class: 'watch', href: watchAt(s.video_id, s.t), text: `▶ Watch at ${fmtTime(s.t)}` }));
+}
+
+function card(r) {
+  const share = el('button', { type: 'button', class: 'linkish', text: 'Share' });
+  share.addEventListener('click', () => copyLink(`${location.origin}/receipts.html?r=${r.id}`, share));
+  return el('article', { class: 'fcard receipt', id: 'r-' + r.id },
+    el('div', { class: 'fmeta' }, el('span', { class: 'kind', text: KIND[r.kind] || r.kind }),
+      el('a', { class: 'when', href: `spotlight.html?story=${r.story}`, text: r.story_title })),
+    el('h2', { text: r.title }),
+    el('p', { class: 'q', text: r.question }),
+    el('div', { class: 'pair' }, side('First', r.a, r.then_said), side('Later', r.b, r.now_said)),
+    r.context ? el('p', { class: 'ctx' }, el('b', { text: 'Context: ' }), r.context) : null,
+    share);
+}
+
+function render() {
+  const items = all.filter(r => !topic || r.story === topic);
+  $('#list').replaceChildren(...(items.length ? items.map(card) : [el('div', { class: 'empty' },
+    el('p', { text: 'The first receipts are still being checked.' }),
+    el('p', { class: 'note small', text: 'Each one is found by AI, checked again against the full transcript, then approved by a person before it shows up here.' }))]));
+}
+
+(async () => {
+  await chrome('receipts.html');
+  all = ((await feature('receipts')) || {}).receipts || [];
+  const topics = [...new Map(all.map(r => [r.story, r.story_title])).entries()];
+  const draw = () => chips($('#topics'), [['', 'All'], ...topics], topic, v => { topic = v; draw(); render(); }, 'Story');
+  if (topics.length > 1) draw();
+  render();
+  const want = qs.get('r');
+  if (want && document.getElementById('r-' + want)) {
+    const n = document.getElementById('r-' + want);
+    n.classList.add('focus'); n.scrollIntoView({ block: 'start' });
+  }
+})();
+</script></body></html>

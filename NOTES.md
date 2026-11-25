@@ -184,6 +184,11 @@ Run `python -m pytest` from the repo root (27 tests, no GPU or network needed).
   cloudflared passes the visitor address in X-Forwarded-For, which uvicorn already trusts from 127.0.0.1. Untested
   from the build container (Cloudflare unreachable there); syntax-checked only.
 
+- **Featured pages (not in the spec, 2026-11-25): `features.py`.** Spotlight (stream topics against the owner's Reddit
+  pulls), Receipts (owner approves each one before it is public), Chat vs Hasan and a quiz. Working state is in
+  `archive/features/` (private); the public site reads only `features/` (`paths.features`), which holds no usernames.
+  `reel.run_cli` now looks up effort as `<kind>_effort`, so other scripts can add their own request kinds.
+
 ## Library versions checked
 Signatures were read from the wheels, not run: whisperx 3.8.6 (`whisperx.diarize.DiarizationPipeline(token=...)`,
 `__call__(..., return_embeddings=True)` returning `(df, {speaker: vector})`), pyannote.audio 4.0.7

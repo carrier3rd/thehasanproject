@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Review receipts · VOD archive admin</title><link rel="stylesheet" href="style.css?v=2026112501"></head>
+<body><main class="feat">
+  <h1>Review receipts</h1>
+  <p class="lede">Pairs the checks found. Nothing here is public until you approve it. Watch both clips before deciding.</p>
+  <div class="filters"><div id="show" class="chips"></div></div>
+  <div id="list" class="cards"><p class="note">Loading…</p></div>
+</main>
+<script src="common.js?v=2026112501"></script>
+<script src="feat.js?v=2026112501"></script>
+<script>
+let all = [], show = 'pending';
+const LABEL = { pending: 'Waiting', approved: 'Approved (public)', rejected: 'Rejected by you', rejected_by_check: 'Rejected by the AI check' };
+
+function side(label, s, said) {
+  return el('div', { class: 'side' }, el('div', { class: 'when' }, el('b', { text: label }), ` · ${s.date}`),
+    el('p', { text: said || s.position }), el('blockquote', { text: `“${s.quote}”` }),
+    el('a', { class: 'watch', href: watchAt(s.video_id, s.t), target: '_blank', text: `▶ Watch at ${fmtTime(s.t)}` }));
+}
+
+async function decide(r, decision, note) {
+  const res = await fetch('/api/review/receipts/' + r.id, { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ decision, note }) });
+  if (!res.ok) { alert('Could not save: ' + res.status); return; }
+  Object.assign(r, await res.json());
+  render();
+}
+
+function card(r) {
+  const note = el('input', { type: 'text', placeholder: 'Note (optional, private)', value: r.note || '', 'aria-label': 'Note' });
+  const btn = (text, d, cls) => { const b = el('button', { type: 'button', class: cls || '', text }); b.addEventListener('click', () => decide(r, d, note.value)); return b; };
+  return el('article', { class: 'fcard receipt' },
+    el('div', { class: 'fmeta' }, el('span', { class: 'kind', text: r.kind }), el('span', { text: r.story_title }),
+      el('span', { text: `strength ${r.strength}/5 · check confidence ${r.confidence}` }), el('b', { text: LABEL[r.status] || r.status })),
+    el('h2', { text: r.title || r.question }), el('p', { class: 'q', text: r.question }),
+    el('div', { class: 'pair' }, side('First', r.a, r.then_said), side('Later', r.b, r.now_said)),
+    r.context ? el('p', { class: 'ctx' }, el('b', { text: 'Context: ' }), r.context) : null,
+    el('p', { class: 'ctx' }, el('b', { text: 'AI check: ' }), r.check),
+    el('div', { class: 'row' }, note, btn('Approve: publish it', 'approved', 'big'), btn('Reject', 'rejected', 'big ghost'),
+      r.status !== 'pending' ? btn('Back to waiting', 'pending') : null));
+}
+
+function render() {
+  const items = all.filter(r => r.status === show);
+  const draw = () => chips($('#show'), Object.entries(LABEL).map(([k, t]) => [k, `${t} (${all.filter(r => r.status === k).length})`]),
+    show, v => { show = v; render(); }, 'Show');
+  draw();
+  $('#list').replaceChildren(...(items.length ? items.map(card) : [el('p', { class: 'note', text: 'Nothing here.' })]));
+}
+
+(async () => {
+  await chrome('review.html');
+  all = (await api('/api/review/receipts')).receipts;
+  render();
+})();
+</script></body></html>

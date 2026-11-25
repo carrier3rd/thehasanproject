@@ -299,8 +299,7 @@ def in_flight(cfg) -> set[str]:
 
 def submit(cfg, st: dict, kind: str, reqs: list[tuple[str, str, str, dict | None]], client) -> str:
     """reqs: (cache key, system, user prompt, JSON schema or None)."""
-    effort = {"screen": st["screen_effort"], "judge": st["judge_effort"], "fact": st["fact_effort"],
-              "chat": st["chat_effort"], "verify": st["verify_effort"]}[kind]
+    effort = st[f"{kind}_effort"]
     requests = []
     for i, (key, system, user, schema) in enumerate(reqs):
         params = {"model": st["model"], "max_tokens": 16000,
@@ -422,8 +421,7 @@ def cli_env() -> dict:
 
 
 def cli_args(st: dict, kind: str, system: str, schema: dict | None) -> list[str]:
-    effort = {"screen": st["screen_effort"], "judge": st["judge_effort"], "fact": st["fact_effort"],
-              "chat": st["chat_effort"], "verify": st["verify_effort"]}[kind]
+    effort = st[f"{kind}_effort"]      # screen, judge, fact, chat, verify here; features.py adds its own kinds
     args = [st["claude_bin"], "-p", "--model", st["model"], "--effort", effort,
             "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--strict-mcp-config",
             "--disable-slash-commands", "--setting-sources", "", "--system-prompt", system]

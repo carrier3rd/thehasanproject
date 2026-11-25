@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spotlight · VOD archive</title>
+<meta name="description" content="What Hasan talked about on stream, set against what Reddit communities were discussing at the same time.">
+<link rel="stylesheet" href="style.css?v=2026112501"></head>
+<body><main class="feat">
+  <div id="listview">
+    <h1>Spotlight</h1>
+    <p class="lede">What Hasan talked about on stream, set against what two dozen Reddit communities were discussing on the same days. Find
+      the stories he went all in on, and the big ones he barely touched.</p>
+    <nav class="tabs" id="views" aria-label="Spotlight views">
+      <button type="button" class="on" data-view="stories">Stories</button>
+      <button type="button" data-view="weeks">Week by week</button>
+    </nav>
+    <section id="storiesview">
+      <div class="filters">
+        <div id="badges" class="chips"></div>
+        <div id="kinds" class="chips"></div>
+        <label class="fsearch"><span class="sr-only">Find a story</span>
+          <input type="search" id="q" placeholder="Find a story…"></label>
+      </div>
+      <p id="count" class="note small" aria-live="polite"></p>
+      <div id="list" class="cards"><p class="note">Loading…</p></div>
+    </section>
+    <section id="weeksview" hidden>
+      <p class="note small">His biggest stories each week by time on stream.</p>
+      <div id="weeks"></div>
+    </section>
+  </div>
+  <article id="detail" hidden></article>
+  <details class="method"><summary>How this works</summary>
+    <p>Claude (AI) reads each stream's machine transcript and notes the stories Hasan spent real time on, roughly how long, and
+      what he said about them, copying his exact words. Stories are then matched to Reddit by a few specific keywords per story
+      (listed on each story page). The Reddit numbers count posts and comments that mention those keywords, as a share of all
+      posts and comments in that community over the same days. Moderator-removed posts are left out. Reddit usernames are never
+      stored or shown.</p>
+    <p>The Reddit data covers some weeks and not others. Days without data are hatched in the charts and never counted as zero.
+      <strong>Blindspot</strong> means Reddit discussed it a lot on days Hasan streamed, while he spent under 3 minutes on it.
+      <strong>Stream focus</strong> means an hour or more on stream on days the subreddits barely mentioned it. Groupings of
+      communities are only a reading aid; every subreddit is listed by name on the story page. Times are estimates.</p>
+  </details>
+</main>
+<script src="common.js?v=2026112501"></script>
+<script src="feat.js?v=2026112501"></script>
+<script>
+let data = null;
+const st = { badge: '', kind: '', q: '' };
+const qs = new URLSearchParams(location.search);
+const BADGE = { blindspot: ['Blindspot', 'Big on Reddit, barely on stream'], stream_focus: ['Stream focus', 'Big on stream, quiet on Reddit'] };
+const GROUP_ORDER = ['Streamer communities', 'Left', 'Liberal & center', 'Right', 'Debate & mixed', 'News', 'Pop culture'];
+
+function badgeEl(b) {
+  return b ? el('span', { class: 'fbadge ' + b, title: BADGE[b][1] }, el('span', { 'aria-hidden': 'true', text: b === 'blindspot' ? '◐ ' : '● ' }), BADGE[b][0]) : null;
+}
+
+function storyCard(s) {
+  const groups = GROUP_ORDER.filter(g => s.groups[g]).map(g => ({ label: g, value: s.groups[g].per_1000,
+    text: s.groups[g].per_1000 ? `${s.groups[g].per_1000}‰` : '0' }));
+  return el('a', { class: 'fcard story', href: `spotlight.html?story=${s.id}` },
+    el('div', { class: 'fmeta' }, el('span', { class: 'kind', text: KIND_LABEL[s.kind] || s.kind }), badgeEl(s.badge),
+      el('span', { class: 'when', text: s.first === s.last ? niceDay(s.first) : `${shortDay(s.first)} – ${niceDay(s.last)}` })),
+    el('h2', { text: s.title }),
+    el('p', { class: 'sum', text: s.summary }),
+    el('div', { class: 'stats' },
+      el('div', { class: 'stat' }, el('b', { text: s.hasan_minutes ? mins(s.hasan_minutes) : '0 min' }),
+        el('span', { text: s.streams ? ` on stream · ${s.streams} stream${s.streams === 1 ? '' : 's'}` : ' on stream' })),
+      el('div', { class: 'stat' }, el('b', { text: s.reddit_mentions.toLocaleString() }), el('span', { text: ' Reddit posts and comments' }))),
+    groups.length ? hbars(groups, '‰') : null,
+    s.quote ? el('blockquote', { text: `“${s.quote.quote}”` }) : null);
+}
+
+function renderList() {
+  const q = st.q.toLowerCase();
+  const items = data.stories.filter(s => (!st.badge || s.badge === st.badge) && (!st.kind || s.kind === st.kind) &&
+    (!q || (s.title + ' ' + s.summary).toLowerCase().includes(q)));
+  $('#count').textContent = `${items.length} stor${items.length === 1 ? 'y' : 'ies'}` +
+    (data.stories.length ? '. Bars: mentions per 1,000 posts and comments in each group of subreddits (‰).' : '');
+  $('#list').replaceChildren(...(items.length ? items.slice(0, 120).map(storyCard) :
+    [el('p', { class: 'note', text: data.stories.length ? 'No stories match.' : 'The first stories are being indexed. Check back soon.' })]));
+}
+
+function renderFilters() {
+  chips($('#badges'), [['', 'All'], ['blindspot', 'Blindspots'], ['stream_focus', 'Stream focus']], st.badge,
+    v => { st.badge = v; renderFilters(); renderList(); }, 'Show');
+  const kinds = [...new Set(data.stories.map(s => s.kind))].sort((a, b) => Object.keys(KIND_LABEL).indexOf(a) - Object.keys(KIND_LABEL).indexOf(b));
+  chips($('#kinds'), [['', 'All topics'], ...kinds.map(k => [k, KIND_LABEL[k] || k])], st.kind,
+    v => { st.kind = v; renderFilters(); renderList(); }, 'Topic');
+}
+
+function renderWeeks() {
+  const byId = Object.fromEntries(data.stories.map(s => [s.id, s]));
+  const weeks = [...data.timeline].reverse();
+  $('#weeks').replaceChildren(...(weeks.length ? weeks.map(w => {
+    const top = w.top.filter(x => byId[x.id]);
+    return el('section', { class: 'week' }, el('h2', { text: `Week of ${niceDay(w.week)}` }),
+      hbars(top.map(x => ({ label: byId[x.id].title, value: x.minutes, text: mins(x.minutes), href: `spotlight.html?story=${x.id}` })), 'min'));
+  }) : [el('p', { class: 'note', text: 'Nothing indexed yet.' })]));
+}
+
+async function showDetail(sid) {
+  const d = await feature('story/' + sid);
+  $('#listview').hidden = true;
+  const box = $('#detail');
+  box.hidden = false;
+  if (!d) { box.replaceChildren(el('p', { class: 'note', text: 'That story is not available.' }), el('a', { href: 'spotlight.html', text: '← All stories' })); return; }
+  document.title = `${d.title} · Spotlight`;
+  const allDays = [...Object.keys(d.hasan_days), ...Object.keys(d.reddit_days)].sort();
+  const lo = allDays[0], hi = allDays[allDays.length - 1];
+  // pad the window a little so a one-day story still reads as a chart
+  const pad = n => { const x = new Date(n + 'T12:00:00'); return x; };
+  const a = pad(lo); a.setDate(a.getDate() - 3); const b = pad(hi); b.setDate(b.getDate() + 3);
+  const days = daysBetween(isoDay(a), isoDay(b));
+  const redditDays = new Set(data ? data.reddit_days : []), live = data ? data.stream_days : {};
+  const hasanChart = barChart({ title: 'Hasan: minutes on stream per day', days, color: 'var(--accent)', unit: 'min',
+    emptyNote: 'no stream that day', value: x => live[x] ? (d.hasan_days[x] || 0) : null });
+  const redditChart = barChart({ title: 'Reddit: posts and comments mentioning it per day (all subreddits in the data)', days,
+    color: 'var(--reddit)', unit: 'posts and comments', emptyNote: 'no Reddit data for this day',
+    value: x => redditDays.has(x) ? (d.reddit_days[x] || 0) : null });
+  const groups = GROUP_ORDER.filter(g => d.groups[g]).map(g => ({ label: g, value: d.groups[g].per_1000,
+    text: `${d.groups[g].per_1000}‰ · ${d.groups[g].mentions.toLocaleString()}` }));
+  const subs = Object.entries(d.per_1000_sub).filter(([, v]) => v > 0).map(([s, v]) => ({ label: 'r/' + s, value: v,
+    text: `${v}‰ · ${(d.by_sub[s] || 0).toLocaleString()}` }));
+  const byGroup = {};
+  for (const p of d.reddit_top) (byGroup[p.group] = byGroup[p.group] || []).push(p);
+  const share = el('button', { type: 'button', class: 'linkish', text: 'Share this story' });
+  share.addEventListener('click', () => copyLink(location.href, share));
+  box.replaceChildren(
+    el('a', { href: 'spotlight.html', class: 'back', text: '← All stories' }),
+    el('div', { class: 'fmeta' }, el('span', { class: 'kind', text: KIND_LABEL[d.kind] || d.kind }), badgeEl(d.badge)),
+    el('h1', { text: d.title }), el('p', { class: 'lede', text: d.summary }),
+    d.badge ? el('p', { class: 'note small', text: BADGE[d.badge][1] + ', counting only days with both a stream and Reddit data.' }) : null,
+    share,
+    el('h2', { text: 'Airtime against Reddit' }), hasanChart, redditChart,
+    groups.length ? el('section', {}, el('h2', { text: 'Which communities talked about it' }),
+      el('p', { class: 'note small', text: 'Mentions per 1,000 posts and comments in each group over these days (‰), then the count.' }),
+      hbars(groups, '‰'),
+      subs.length ? el('details', { class: 'more' }, el('summary', { text: 'By subreddit' }), hbars(subs, '‰')) : null) : null,
+    d.quotes.length || d.positions.length ? el('section', {}, el('h2', { text: 'What Hasan said' }),
+      el('ul', { class: 'said' }, ...(d.positions.length ? d.positions.slice(-10).reverse() : d.quotes.slice(0, 8)).map(p => el('li', {},
+        p.position ? el('p', { text: p.position }) : null, el('blockquote', { text: `“${p.quote}”` }),
+        el('a', { href: watchAt(p.video_id, p.t), text: `▶ ${niceDay(p.date)} at ${fmtTime(p.t)}` }))))) : null,
+    d.segments.length ? el('details', { class: 'more' }, el('summary', { text: `Every time it came up on stream (${d.segments.length})` }),
+      el('ul', { class: 'segs' }, ...d.segments.map(s => el('li', {}, el('a', { href: watchAt(s.video_id, s.t), text: `${niceDay(s.date)} ${fmtTime(s.t)}` }),
+        ` · about ${mins(s.minutes)} · ${s.label}`)))) : null,
+    d.reddit_top.length ? el('section', {}, el('h2', { text: 'Top Reddit posts about it' }),
+      ...GROUP_ORDER.filter(g => byGroup[g]).map(g => el('div', { class: 'rgroup' }, el('h3', { text: g }),
+        el('ul', { class: 'rposts' }, ...byGroup[g].slice(0, 4).map(p => el('li', {},
+          el('a', { href: p.url, rel: 'noopener', target: '_blank', text: p.title }),
+          el('span', { class: 'note small', text: ` r/${p.sub} · ${p.score.toLocaleString()} points · ${p.comments.toLocaleString()} comments · ${shortDay(p.date)}` }))))))) : null,
+    el('p', { class: 'note small', text: `Matched on Reddit by: ${d.keywords.join(', ')}.` }));
+  box.querySelector('h1').setAttribute('tabindex', '-1');
+  box.querySelector('h1').focus();
+}
+
+function setView(v) {
+  for (const b of document.querySelectorAll('#views button')) b.classList.toggle('on', b.dataset.view === v);
+  $('#storiesview').hidden = v !== 'stories';
+  $('#weeksview').hidden = v !== 'weeks';
+  if (v === 'weeks') renderWeeks();
+}
+
+(async () => {
+  await chrome('spotlight.html');
+  data = await feature('stories') || { stories: [], timeline: [], reddit_days: [], stream_days: {} };
+  if (qs.get('story')) return showDetail(qs.get('story'));
+  for (const b of document.querySelectorAll('#views button')) b.addEventListener('click', () => setView(b.dataset.view));
+  accessibleTabs($('#views'), 'Spotlight views');
+  $('#q').addEventListener('input', e => { st.q = e.target.value; renderList(); });
+  renderFilters(); renderList();
+})();
+</script></body></html>

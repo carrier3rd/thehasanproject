@@ -1,0 +1,13 @@
+[Unit]
+Description=Featured content: topics, Spotlight vs Reddit, Receipts queue, Chat vs Hasan, quiz (claude -p, the owner's subscription)
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/thehasanproject
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+# each Claude step is capped per run (features.* in config), so subscription usage is spread over nights; resumes next night
+ExecStart=%h/thehasanproject/.venv/bin/python pipeline/features.py run
+StandardOutput=append:%h/thehasanproject/logs/features.log
+StandardError=append:%h/thehasanproject/logs/features.log
+TimeoutStartSec=10h
+Nice=10

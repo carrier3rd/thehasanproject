@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from common import ROOT, Anchors, P, cfg_file
 from search import Index, fts_execute, hybrid, window_results
 import chatflags
+import features
 import feedback
 
 PAGE = 50
@@ -354,6 +355,43 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
             if m["id"] in got:
                 m["flag"] = got[m["id"]]
         return msgs
+
+    feat_dir = P(cfg, "features") if "features" in cfg.get("paths", {}) else None
+
+    def feature_file(p: Path):
+        if feat_dir is None or not p.is_file():
+            raise HTTPException(404, "not built yet")
+        return FileResponse(p, media_type="application/json", headers={"Cache-Control": "no-cache"})
+
+    @app.get("/api/features/{name}")
+    def feature(name: str):
+        """Spotlight (stories), Chat vs Hasan, approved Receipts and the quiz pool, as built by features.py."""
+        if name not in ("stories", "chatvs", "receipts", "quiz"):
+            raise HTTPException(404, "not found")
+        return feature_file(feat_dir / f"{name}.json" if feat_dir else Path("-"))
+
+    @app.get("/api/features/story/{sid}")
+    def feature_story(sid: str):
+        if not re.fullmatch(r"[0-9a-f]{10}", sid):
+            raise HTTPException(404, "not found")
+        return feature_file(feat_dir / "stories" / f"{sid}.json" if feat_dir else Path("-"))
+
+    if admin:
+        @app.get("/api/review/receipts")
+        def review_receipts():
+            """The receipts queue: everything the checks found, for the owner to approve or reject (admin only)."""
+            q = features.load_json(features.queue_path(cfg), {})
+            return {"receipts": sorted(q.values(), key=lambda r: (r["status"] != "pending", r["found"]), reverse=False)}
+
+        @app.post("/api/review/receipts/{rid}")
+        async def review_receipt(rid: str, request: Request):
+            body = await request.json()
+            try:
+                return features.decide(cfg, rid, str(body.get("decision", "")), str(body.get("note", "")))
+            except KeyError:
+                raise HTTPException(404, "no such receipt")
+            except ValueError as e:
+                raise HTTPException(400, str(e))
 
     @app.get("/api/trophies/{week}")
     def week_trophies(week: str):

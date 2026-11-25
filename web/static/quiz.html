@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Who said it? · VOD archive</title>
+<meta name="description" content="A quick quiz: was it Hasan, his chat, or a Reddit post? Every answer links to the real source.">
+<link rel="stylesheet" href="style.css?v=2026112501"></head>
+<body><main class="feat quiz">
+  <section id="start">
+    <h1>Who said it?</h1>
+    <p class="lede">Ten rounds. Each line is real: something Hasan said on stream, something his chat typed, or the title of a
+      Reddit post. Some rounds ask which story he spent more time on. Every answer links to the source.</p>
+    <button type="button" id="go" class="big">Start</button>
+    <p id="pool" class="note small"></p>
+  </section>
+  <section id="play" hidden>
+    <div class="qtop"><span id="progress" class="note small"></span><span id="score" class="note small"></span></div>
+    <h2 id="prompt" tabindex="-1"></h2>
+    <blockquote id="line" hidden></blockquote>
+    <div id="choices" class="choices"></div>
+    <div id="result" aria-live="polite"></div>
+    <button type="button" id="next" class="big" hidden>Next</button>
+  </section>
+  <section id="end" hidden>
+    <h2 id="final" tabindex="-1"></h2>
+    <p id="verdict" class="lede"></p>
+    <div class="row"><button type="button" id="share" class="big">Share my score</button>
+      <button type="button" id="again" class="big ghost">Play again</button></div>
+    <p class="note small">Want the full picture? See <a href="spotlight.html">Spotlight</a>, <a href="receipts.html">Receipts</a>
+      and <a href="chatvs.html">Chat vs Hasan</a>.</p>
+  </section>
+</main>
+<script src="common.js?v=2026112501"></script>
+<script src="feat.js?v=2026112501"></script>
+<script>
+const WHO = { hasan: 'Hasan', chat: 'His chat', reddit: 'A Reddit post' };
+let pool = null, rounds = [], i = 0, score = 0;
+const pick = (arr, n) => { const a = [...arr]; for (let k = a.length - 1; k > 0; k--) { const j = Math.floor(Math.random() * (k + 1)); [a[k], a[j]] = [a[j], a[k]]; } return a.slice(0, n); };
+
+function makeRounds() {
+  const who = pool.who || [], more = pool.more || [], first = pool.first || [];
+  const byAnswer = a => who.filter(w => w.answer === a);
+  // keep the three answers roughly even, so guessing "Hasan" every time doesn't win
+  const each = Math.ceil(7 / 3);
+  let qs = [...pick(byAnswer('hasan'), each), ...pick(byAnswer('chat'), each), ...pick(byAnswer('reddit'), each)].map(x => ({ type: 'who', ...x }));
+  qs = pick(qs, Math.min(qs.length, 10 - Math.min(2, more.length) - Math.min(1, first.length)));
+  qs.push(...pick(more, Math.min(2, more.length)).map(x => ({ type: 'more', ...x })));
+  qs.push(...pick(first, Math.min(1, first.length)).map(x => ({ type: 'first', ...x })));
+  return pick(qs, Math.min(10, qs.length));
+}
+
+function choice(text, ok, reveal) {
+  const b = el('button', { type: 'button', class: 'choice', text });
+  b.addEventListener('click', () => answer(b, ok, reveal));
+  return b;
+}
+
+function answer(btn, ok, reveal) {
+  for (const b of document.querySelectorAll('#choices button')) { b.disabled = true; if (b.dataset.right) b.classList.add('right'); }
+  btn.classList.add(ok ? 'right' : 'wrong');
+  if (ok) score++;
+  $('#score').textContent = `Score ${score}`;
+  $('#result').replaceChildren(el('p', { class: 'verdict ' + (ok ? 'ok' : 'no') },
+    el('span', { 'aria-hidden': 'true', text: ok ? '✓ ' : '✗ ' }), ok ? 'Right. ' : 'Not quite. '), ...reveal);
+  $('#next').hidden = false;
+  $('#next').textContent = i + 1 < rounds.length ? 'Next' : 'See my score';
+  $('#next').focus();
+}
+
+function show() {
+  const r = rounds[i];
+  $('#progress').textContent = `Round ${i + 1} of ${rounds.length}`;
+  $('#score').textContent = `Score ${score}`;
+  $('#result').replaceChildren(); $('#next').hidden = true; $('#line').hidden = true;
+  let buttons = [];
+  if (r.type === 'who') {
+    $('#prompt').textContent = 'Who said it?';
+    $('#line').hidden = false; $('#line').textContent = `“${r.text}”`;
+    const src = r.answer === 'reddit' ? `${r.source} post title` : r.answer === 'chat' ? 'a message in his chat' : 'Hasan on stream';
+    const reveal = [el('span', { text: `It was ${src}, ${niceDay(r.date)}. ` }),
+      el('a', { href: r.link, target: r.answer === 'reddit' ? '_blank' : null, rel: 'noopener', text: r.answer === 'reddit' ? 'See the post' : 'Watch the moment' }),
+      r.story ? el('span', { class: 'note small', text: ` · ${r.story}` }) : null];
+    buttons = Object.entries(WHO).map(([k, t]) => { const b = choice(t, k === r.answer, reveal); if (k === r.answer) b.dataset.right = '1'; return b; });
+  } else if (r.type === 'more') {
+    $('#prompt').textContent = 'Which story did Hasan spend more time on?';
+    const [x, y] = Math.random() < 0.5 ? [r.a, r.b] : [r.b, r.a];
+    const win = x.minutes > y.minutes ? x : y;
+    const reveal = [el('span', { text: `${x.title}: about ${mins(x.minutes)}. ${y.title}: about ${mins(y.minutes)}. ` }),
+      el('a', { href: `spotlight.html?story=${win.id}`, text: 'See it in Spotlight' })];
+    buttons = [x, y].map(s => { const b = choice(s.title, s === win, reveal); if (s === win) b.dataset.right = '1'; return b; });
+  } else {
+    $('#prompt').textContent = 'Which did he say first?';
+    const [x, y] = Math.random() < 0.5 ? [r.a, r.b] : [r.b, r.a];
+    const reveal = [el('span', { text: `“${r.a.quote}” came first (${niceDay(r.a.date)}), then “${r.b.quote}” (${niceDay(r.b.date)}). ` }),
+      el('a', { href: `receipts.html?r=${r.id}`, text: 'See the receipt' })];
+    buttons = [x, y].map(s => { const b = choice(`“${s.quote}”`, s === r.a, reveal); if (s === r.a) b.dataset.right = '1'; return b; });
+  }
+  $('#choices').replaceChildren(...buttons);
+  $('#prompt').focus();
+}
+
+function finish() {
+  $('#play').hidden = true; $('#end').hidden = false;
+  $('#final').textContent = `You got ${score} out of ${rounds.length}`;
+  const p = score / rounds.length;
+  $('#verdict').textContent = p >= 0.9 ? 'You have clearly watched too many of these streams.' : p >= 0.6 ? 'Solid. You know the content.'
+    : p >= 0.3 ? 'Harder than it looks, right?' : 'Turns out everyone sounds alike on the internet.';
+  $('#final').focus();
+}
+
+function begin() {
+  rounds = makeRounds(); i = 0; score = 0;
+  if (!rounds.length) { $('#pool').textContent = 'The quiz is still being built from the archive. Check back soon.'; return; }
+  $('#start').hidden = true; $('#end').hidden = true; $('#play').hidden = false;
+  show();
+}
+
+(async () => {
+  await chrome('quiz.html');
+  pool = (await feature('quiz')) || { who: [], more: [], first: [] };
+  const n = (pool.who || []).length + (pool.more || []).length + (pool.first || []).length;
+  $('#pool').textContent = n ? `${n.toLocaleString()} questions in the pool; every game is a new mix.` : 'The quiz is still being built from the archive. Check back soon.';
+  $('#go').disabled = !n;
+  $('#go').addEventListener('click', begin);
+  $('#again').addEventListener('click', begin);
+  $('#next').addEventListener('click', () => { i++; if (i < rounds.length) show(); else finish(); });
+  $('#share').addEventListener('click', () => {
+    const text = `I got ${score}/${rounds.length} on "Who said it?": Hasan, his chat, or Reddit?`;
+    const url = `${location.origin}/quiz.html`;
+    if (navigator.share) navigator.share({ text, url }).catch(() => {});
+    else if (navigator.clipboard) navigator.clipboard.writeText(`${text} ${url}`).then(() => { $('#share').textContent = 'Copied'; });
+    else prompt('Copy this', `${text} ${url}`);
+  });
+})();
+</script></body></html>

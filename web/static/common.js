@@ -143,9 +143,16 @@ async function chrome(active) {
   if (main && !main.id) main.id = 'main';
   document.body.prepend(el('a', { class: 'skip', href: '#main', text: 'Skip to content' }), el('header', { role: 'banner' },
     el('a', { href: '/', class: 'brand', text: 'VOD archive', 'aria-label': 'VOD archive home' }),
-    link('reel.html', 'Weekly'), link('factchecks.html', 'Fact-checks'), link('videos.html', 'Videos'), link('index.html', 'Search'), link('about.html', 'About'), box,
+    // one row; on a phone it scrolls sideways instead of wrapping onto three lines
+    el('nav', { class: 'mainnav', 'aria-label': 'Main' },
+      link('reel.html', 'Weekly'), link('spotlight.html', 'Spotlight'), link('receipts.html', 'Receipts'),
+      link('chatvs.html', 'Chat vs Hasan'), link('quiz.html', 'Quiz'), link('factchecks.html', 'Fact-checks'),
+      link('videos.html', 'Videos'), link('index.html', 'Search'), link('about.html', 'About')), box,
     cfg.mode === 'admin' ? link('flags.html', 'Reports') : null,
+    cfg.mode === 'admin' ? link('review.html', 'Review receipts') : null,
     cfg.mode === 'admin' ? el('span', { class: 'badge', text: 'ADMIN · private' }) : null));
+  const cur = document.querySelector('.mainnav [aria-current]');
+  if (cur) requestAnimationFrame(() => cur.scrollIntoView({ block: 'nearest', inline: 'center' }));
   document.body.append(el('footer', { text: 'Transcripts and speaker labels are machine-generated and may contain errors. ' +
     'The linked video is the authoritative record.' }));
   return cfg;

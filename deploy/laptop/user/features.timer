@@ -1,0 +1,9 @@
+[Unit]
+Description=Nightly featured content (pipeline/features.py run), after the chat check
+
+[Timer]
+OnCalendar=*-*-* 02:30
+Persistent=true
+
+[Install]
+WantedBy=timers.target
