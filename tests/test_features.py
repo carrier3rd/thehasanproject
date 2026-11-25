@@ -186,7 +186,19 @@ def test_site_serves_features_and_admin_review(feat):
     assert admin.post("/api/review/receipts/nope", json={"decision": "approved"}).status_code == 404
     assert admin.post(f"/api/review/receipts/{r['id']}", json={"decision": "yes"}).status_code == 400
     assert client.get("/api/features/receipts").json()["receipts"][0]["id"] == r["id"]
-    for page in ("spotlight.html", "receipts.html", "chatvs.html", "quiz.html"):
+    # share links: preview tags for Reddit/Discord/X, then on to the page; unknown or malformed ids are 404s
+    page = client.get(f"/s/story/{sid}")
+    assert page.status_code == 200 and 'og:title' in page.text and f"url=/spotlight.html?story={sid}" in page.text
+    assert f"url=/receipts.html?r={r['id']}" in client.get(f"/s/receipt/{r['id']}").text
+    mid = client.get("/api/features/chatvs").json()["moments"][0]["id"]
+    assert "Chat vs Hasan:" in client.get(f"/s/moment/{mid}").text
+    for bad in ("/s/story/ffffffffff", "/s/receipt/zz", "/s/nope/abcdef12", "/s/moment/<script>"):
+        assert client.get(bad).status_code == 404
+    # where he stood: every position on the story, in order, each with his exact words
+    [t] = client.get("/api/features/timelines").json()["timelines"]
+    assert [p["quote"] for p in t["positions"]][0] == EARLY and LATE in [p["quote"] for p in t["positions"]]
+    assert "all_positions" not in client.get(f"/api/features/story/{sid}").text
+    for page in ("spotlight.html", "receipts.html", "chatvs.html", "quiz.html", "home.html"):
         assert client.get("/" + page).status_code == 200
     assert client.get("/review.html").status_code == 404                     # the review page is admin only
     assert admin.get("/review.html").status_code == 200

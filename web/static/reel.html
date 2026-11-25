@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Weekly reel · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112502"></head>
+<title>Weekly reel · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112504"></head>
 <body><main class="reel">
   <h1 class="sr-only">Weekly reel</h1>
   <p class="intro">Each week, Claude reads every line of every stream and picks the moments worth a look, with the chat at the time and fact-checks of his claims.</p>
@@ -14,12 +14,14 @@
     <button type="button" data-view="clips" class="on">Clips</button>
     <button type="button" data-view="facts">Fact-checks</button>
     <button type="button" data-view="trends">Trends</button>
+    <button type="button" data-view="chatvs">Chat vs Hasan</button>
     <button type="button" data-view="trophies">🏆 Trophies</button>
   </nav>
   <div id="empty" class="note" hidden></div>
   <div id="facts" hidden></div>
   <div id="trends" hidden></div>
   <div id="trophies" hidden></div>
+  <div id="wchatvs" hidden></div>
   <div id="tip" class="tip" role="tooltip" hidden></div>
   <div id="stage" hidden>
     <!-- computer: the video and the chat column stay on screen while the write-up scrolls under the video.
@@ -56,7 +58,7 @@
   <p class="note small">Picked and written by Claude (AI) from machine-made transcripts, counting only Hasan's own words.
     Watch the moment before relying on it.</p>
 </main>
-<script src="common.js?v=2026112502"></script>
+<script src="common.js?v=2026112504"></script>
 <script>
 let lastNow = 0;
 let cfg, reel = null, idx = 0, clip = null, player = null, chat = [], playing = false, sim = null, mounting = 0;
@@ -494,6 +496,33 @@ function trophyCard(p, medal) {
       el('a', { href: `/api/chat/author.csv?author=${encodeURIComponent(p.author)}`, download: '', text: 'Export CSV' })));
 }
 
+// ---------- Chat vs Hasan: this week's moments (built by features.py; the full list is chatvs.html) ----------
+let chatvsAll = null;
+async function renderWeekChatvs() {
+  const box = $('#wchatvs'), week = $('#week').value;
+  if (!chatvsAll) {
+    box.replaceChildren(el('div', { class: 'note', text: 'Loading…' }));
+    try { chatvsAll = (await api('/api/features/chatvs')).moments; } catch (e) { chatvsAll = []; }
+  }
+  if (week !== $('#week').value) return;
+  const end = new Date(week + 'T12:00:00'); end.setDate(end.getDate() + 6);
+  const hi = end.toISOString().slice(0, 10);
+  const items = chatvsAll.filter(m => m.date >= week && m.date <= hi);
+  const KIND = { pushback: 'Pushback', split: 'Chat split', mass_deletion: 'Mod sweep' };
+  box.replaceChildren(...[
+    el('p', { class: 'note', style: 'padding:0 0 10px' }, document.createTextNode(
+      'Moments this week when his chat pushed back, split, or got swept by the mods. '),
+      el('a', { href: 'chatvs.html', text: 'All moments' })),
+    ...(items.length ? items.map(m => el('article', { class: 'wcvh' },
+      el('div', { class: 'cmeta' }, el('b', { text: KIND[m.kind] || m.kind }), document.createTextNode(` · ${m.date}`)),
+      el('h3', { text: m.title }),
+      el('p', {}, el('b', { text: 'Hasan: ' }), m.hasan_said),
+      el('p', {}, el('b', { text: 'Chat: ' }), m.chat_said),
+      m.examples.length ? el('p', { class: 'note', style: 'padding:0' }, m.examples.map(e => `“${e}”`).join('  ')) : null,
+      el('a', { href: watchUrl(m.video_id, Math.max(0, m.start - 5)), text: `▶ Watch with chat at ${fmtTime(m.start)}` })))
+      : [el('div', { class: 'note', text: 'Nothing picked out for this week yet.' })])]);
+}
+
 let view = 'clips';
 function setView(v) {
   view = v;
@@ -501,6 +530,7 @@ function setView(v) {
   $('#facts').hidden = v !== 'facts';
   $('#trends').hidden = v !== 'trends';
   $('#trophies').hidden = v !== 'trophies';
+  $('#wchatvs').hidden = v !== 'chatvs';
   const hasClips = reel && reel.clips.length;
   $('#stage').hidden = v !== 'clips' || !hasClips;
   $('#empty').hidden = v !== 'clips' || hasClips;
@@ -509,6 +539,7 @@ function setView(v) {
   if (v === 'facts') renderFacts();
   if (v === 'trends') renderTrends();
   if (v === 'trophies') renderTrophies();
+  if (v === 'chatvs') renderWeekChatvs();
 }
 
 // ---------- flipping ----------
@@ -533,6 +564,7 @@ async function loadWeek(week) {
   catch (e) { reel = null; }
   if (view === 'facts') renderFacts();
   if (view === 'trophies') renderTrophies();
+  if (view === 'chatvs') renderWeekChatvs();
   if (!reel || !reel.clips.length) {
     $('#stage').hidden = true; $('#empty').hidden = view !== 'clips';
     $('#empty').textContent = reel ? `Nothing from this week met the bar (${reel.candidates_judged} moments were judged).` : 'This week’s reel is not available.';
@@ -609,7 +641,7 @@ function tick() {
     $('#lines').hidden = b.dataset.pane !== 'lines';
   });
   await loadWeek($('#week').value);
-  if (['facts', 'trends', 'trophies'].includes(qs.get('view'))) setView(qs.get('view'));
+  if (['facts', 'trends', 'trophies', 'chatvs'].includes(qs.get('view'))) setView(qs.get('view'));
   setInterval(() => { for (const f of document.querySelectorAll('#player iframe:not([title])')) f.title = 'Video player'; }, 2000);
   setInterval(tick, 400);
 })();

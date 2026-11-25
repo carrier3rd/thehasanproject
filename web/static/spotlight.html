@@ -2,7 +2,7 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Spotlight · VOD archive</title>
 <meta name="description" content="What Hasan talked about on stream, set against what Reddit communities were discussing at the same time.">
-<link rel="stylesheet" href="style.css?v=2026112502"></head>
+<link rel="stylesheet" href="style.css?v=2026112504"></head>
 <body><main class="feat">
   <div id="listview">
     <h1>Spotlight</h1>
@@ -40,8 +40,8 @@
       communities are only a reading aid; every subreddit is listed by name on the story page. Times are estimates.</p>
   </details>
 </main>
-<script src="common.js?v=2026112502"></script>
-<script src="feat.js?v=2026112502"></script>
+<script src="common.js?v=2026112504"></script>
+<script src="feat.js?v=2026112504"></script>
 <script>
 let data = null;
 const st = { badge: '', kind: '', q: '' };
@@ -123,7 +123,7 @@ async function showDetail(sid) {
   const byGroup = {};
   for (const p of d.reddit_top) (byGroup[p.group] = byGroup[p.group] || []).push(p);
   const share = el('button', { type: 'button', class: 'linkish', text: 'Share this story' });
-  share.addEventListener('click', () => copyLink(location.href, share));
+  share.addEventListener('click', () => copyLink(`${location.origin}/s/story/${sid}`, share));
   box.replaceChildren(...[
     el('a', { href: 'spotlight.html', class: 'back', text: '← All stories' }),
     el('div', { class: 'fmeta' }, el('span', { class: 'kind', text: KIND_LABEL[d.kind] || d.kind }), badgeEl(d.badge)),

@@ -136,13 +136,13 @@ async function chrome(active) {
   const link = (href, text) => el('a', { href, text, style: active === href ? 'font-weight:600' : null,
     'aria-current': active === href ? 'page' : null });
   // every page but the search page itself gets a search box in the header; it opens the search page
-  const box = active === 'index.html' ? null : el('form', { class: 'hsearch', action: 'index.html', role: 'search' },
+  const box = ['index.html', 'home.html'].includes(active) ? null : el('form', { class: 'hsearch', action: 'index.html', role: 'search' },
     el('input', { type: 'search', name: 'q', placeholder: 'Search stream and chat…', 'aria-label': 'Search' }),
     el('input', { type: 'hidden', name: 'tab', value: 'transcripts' }));
   const main = document.querySelector('main');
   if (main && !main.id) main.id = 'main';
   document.body.prepend(el('a', { class: 'skip', href: '#main', text: 'Skip to content' }), el('header', { role: 'banner' },
-    el('a', { href: '/', class: 'brand', text: 'VOD archive', 'aria-label': 'VOD archive home' }),
+    el('a', { href: '/', class: 'brand', text: 'The Hasan Project', 'aria-label': 'The Hasan Project home' }),
     // one row; on a phone it scrolls sideways instead of wrapping onto three lines
     el('nav', { class: 'mainnav', 'aria-label': 'Main' },
       link('reel.html', 'Weekly'), link('spotlight.html', 'Spotlight'), link('receipts.html', 'Receipts'),

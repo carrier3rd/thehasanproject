@@ -366,7 +366,7 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
     @app.get("/api/features/{name}")
     def feature(name: str):
         """Spotlight (stories), Chat vs Hasan, approved Receipts and the quiz pool, as built by features.py."""
-        if name not in ("stories", "chatvs", "receipts", "quiz"):
+        if name not in ("stories", "chatvs", "receipts", "quiz", "timelines"):
             raise HTTPException(404, "not found")
         return feature_file(feat_dir / f"{name}.json" if feat_dir else Path("-"))
 
@@ -375,6 +375,52 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
         if not re.fullmatch(r"[0-9a-f]{10}", sid):
             raise HTTPException(404, "not found")
         return feature_file(feat_dir / "stories" / f"{sid}.json" if feat_dir else Path("-"))
+
+    def preview_page(request: Request, title: str, desc: str, target: str) -> HTMLResponse:
+        """A tiny page with link-preview tags (Reddit, Discord, X read these; they don't run JavaScript) that sends a
+        person on to the real page."""
+        desc = (desc[:297] + "...") if len(desc) > 300 else desc
+        e = lambda t: html_escape(t, quote=True)
+        url = str(request.url)
+        return HTMLResponse(f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{e(title)}</title><meta name="description" content="{e(desc)}">
+<meta property="og:type" content="article"><meta property="og:site_name" content="The Hasan Project">
+<meta property="og:title" content="{e(title)}"><meta property="og:description" content="{e(desc)}">
+<meta property="og:url" content="{e(url)}"><meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="{e(title)}"><meta name="twitter:description" content="{e(desc)}">
+<meta http-equiv="refresh" content="0; url={e(target)}"><link rel="canonical" href="{e(url)}">
+</head><body><p><a href="{e(target)}">{e(title)}</a></p></body></html>""")
+
+    @app.get("/s/{kind}/{item}")
+    def share_feature(kind: str, item: str, request: Request):
+        """Share links for a Spotlight story, a receipt or a Chat vs Hasan moment."""
+        if feat_dir is None or not re.fullmatch(r"[0-9a-f]{6,16}", item):
+            raise HTTPException(404, "not found")
+        if kind == "story":
+            d = features.load_json(feat_dir / "stories" / f"{item}.json", None)
+            if not d:
+                raise HTTPException(404, "not found")
+            mins = sum(d["hasan_days"].values())
+            reddit = sum(d["reddit_days"].values())
+            badge = {"blindspot": "Blindspot: ", "stream_focus": "Stream focus: "}.get(d.get("badge") or "", "")
+            return preview_page(request, f"{badge}{d['title']}",
+                                f"Hasan: about {round(mins)} min on stream. Reddit: {reddit:,} posts and comments across "
+                                f"{len(d['by_sub'])} subreddits. {d['summary']}", f"/spotlight.html?story={item}")
+        if kind == "receipt":
+            r = next((x for x in features.load_json(feat_dir / "receipts.json", {}).get("receipts", []) if x["id"] == item), None)
+            if not r:
+                raise HTTPException(404, "not found")
+            return preview_page(request, f"Receipt: {r['title']}",
+                                f"{r['a']['date']}: “{r['a']['quote']}”  {r['b']['date']}: “{r['b']['quote']}”",
+                                f"/receipts.html?r={item}")
+        if kind == "moment":
+            m = next((x for x in features.load_json(feat_dir / "chatvs.json", {}).get("moments", []) if x["id"] == item), None)
+            if not m:
+                raise HTTPException(404, "not found")
+            return preview_page(request, f"Chat vs Hasan: {m['title']}",
+                                f"{m['date']}. Hasan: {m['hasan_said']} Chat: {m['chat_said']}", f"/chatvs.html?m={item}")
+        raise HTTPException(404, "not found")
 
     if admin:
         @app.get("/api/review/receipts")
@@ -705,7 +751,7 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
 
     @app.get("/{path:path}")
     def static(path: str):
-        path = path or "reel.html"          # the landing page is the weekly reel; search is index.html
+        path = path or "home.html"          # the landing page is the hub; the weekly reel is reel.html, search index.html
         for base in static_dirs:
             target = (base / path).resolve()
             if target.is_file() and base.resolve() in target.parents:

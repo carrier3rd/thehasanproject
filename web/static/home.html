@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Hasan Project</title>
+<meta name="description" content="Every HasanAbi stream transcribed and searchable, with chat on the same timeline. What he said, what chat said back, and what the rest of the internet was talking about.">
+<meta property="og:title" content="The Hasan Project: Hasan's streams, on the record">
+<meta property="og:description" content="Every stream transcribed and searchable, with chat on the same timeline. Daily quiz, receipts, Chat vs Hasan, and what Reddit was talking about while he streamed.">
+<meta property="og:site_name" content="The Hasan Project"><meta property="og:type" content="website"><meta name="twitter:card" content="summary">
+<link rel="stylesheet" href="style.css?v=2026112504"></head>
+<body><main class="feat hub">
+  <section class="hero">
+    <h1>Hasan's streams, on the record</h1>
+    <p class="lede">Every stream transcribed and searchable, with his chat on the same timeline. See what he said, what chat said
+      back, and what the rest of the internet was talking about at the time. Everything links to the moment in the stream.</p>
+    <form class="herosearch" action="index.html" role="search">
+      <label for="hq" class="sr-only">Search everything he said</label>
+      <input type="search" id="hq" name="q" placeholder="Search everything he said…">
+      <input type="hidden" name="tab" value="transcripts"><button>Search</button>
+    </form>
+    <p id="stats" class="note small"></p>
+  </section>
+  <div class="hubgrid">
+    <a class="hubcard quizcard" href="quiz.html">
+      <span class="hk">Daily quiz</span>
+      <h2>Who said it?</h2>
+      <p>Hasan, his chat, or a Reddit post? Ten rounds, two minutes, a new set every day.</p>
+      <span class="go" id="quizgo">Play today's quiz →</span>
+    </a>
+    <div id="cards" class="hubcards"></div>
+  </div>
+  <section class="explore">
+    <h2>Explore</h2>
+    <ul class="explist">
+      <li><a href="reel.html">Weekly</a><span>His most controversial moments each week, with fact-checks and chat.</span></li>
+      <li><a href="spotlight.html">Spotlight</a><span>His airtime on each story against how much Reddit talked about it.</span></li>
+      <li><a href="receipts.html">Receipts</a><span>Where he stood on a story, every time he talked about it.</span></li>
+      <li><a href="chatvs.html">Chat vs Hasan</a><span>When his own chat pushed back.</span></li>
+      <li><a href="factchecks.html">Fact-checks</a><span>Claims he made, checked against sources.</span></li>
+      <li><a href="videos.html">All streams</a><span>Every transcribed stream, with a synced player and chat replay.</span></li>
+    </ul>
+  </section>
+  <p class="note small">Transcripts, summaries and picks are machine-made (speech recognition and Claude, an AI) and can be wrong.
+    This is an independent archive, not affiliated with Hasan Piker. <a href="about.html">About and corrections</a>.</p>
+</main>
+<script src="common.js?v=2026112504"></script>
+<script src="feat.js?v=2026112504"></script>
+<script>
+function hubcard(kind, title, body, href, go, extra) {
+  return el('a', { class: 'hubcard', href }, ...[el('span', { class: 'hk', text: kind }), el('h2', { text: title }),
+    body ? el('p', { text: body }) : null, extra || null, el('span', { class: 'go', text: go })].filter(x => x != null));
+}
+
+async function weekCard() {
+  try {
+    const weeks = (await api('/api/reels')).weeks;
+    for (const w of weeks.slice(0, 3)) {
+      const r = await api('/api/reels/' + w.week);
+      if (!r.clips.length) continue;
+      const c = [...r.clips].sort((a, b) => b.severity - a.severity)[0];
+      return hubcard(`This week · ${shortDay(r.week)} – ${shortDay(r.week_end)}`, c.title, c.summary,
+        `reel.html?week=${r.week}&clip=${r.clips.indexOf(c) + 1}`, r.clips.length === 1 ? 'See the clip →' : `See all ${r.clips.length} clips →`);
+    }
+  } catch (e) { /* no reels yet */ }
+  return null;
+}
+
+async function factCard() {
+  try {
+    const weeks = (await api('/api/reels')).weeks;
+    for (const w of weeks.slice(0, 3)) {
+      const r = await api('/api/reels/' + w.week);
+      const f = (r.fact_checks || []).find(x => x.verdict === 'false') || (r.fact_checks || []).find(x => x.verdict === 'misleading');
+      if (f) return hubcard(`Fact-check · ${f.verdict === 'false' ? 'False' : 'Misleading'}`, f.claim, f.correction,
+        `reel.html?week=${r.week}&view=facts&item=${f.id}`, 'See the sources →');
+    }
+  } catch (e) { /* none */ }
+  return null;
+}
+
+async function spotCard() {
+  const d = await feature('stories');
+  if (!d || !d.stories.length) return null;
+  const s = d.stories.find(x => x.badge === 'blindspot') || d.stories.find(x => x.badge === 'stream_focus') || d.stories[0];
+  const label = s.badge === 'blindspot' ? 'Blindspot' : s.badge === 'stream_focus' ? 'Stream focus' : 'Spotlight';
+  return hubcard(label, s.title, `Hasan: ${s.hasan_minutes ? mins(s.hasan_minutes) : 'under a minute'} on stream. Reddit: ${s.reddit_mentions.toLocaleString()} posts and comments.`,
+    `spotlight.html?story=${s.id}`, 'Compare →');
+}
+
+async function chatCard() {
+  const d = await feature('chatvs');
+  const m = d && d.moments[0];
+  if (!m) return null;
+  return hubcard(`Chat vs Hasan · ${shortDay(m.date)}`, m.title, `Hasan: ${m.hasan_said} Chat: ${m.chat_said}`,
+    `chatvs.html?m=${m.id}`, 'See the moment →');
+}
+
+async function receiptCard() {
+  const [r, t] = await Promise.all([feature('receipts'), feature('timelines')]);
+  const x = r && r.receipts[0];
+  if (x) return hubcard('Receipt', x.title, `${niceDay(x.a.date)}: “${x.a.quote}” Then ${niceDay(x.b.date)}: “${x.b.quote}”`,
+    `receipts.html?r=${x.id}`, 'See both clips →');
+  const tl = t && t.timelines[0];
+  if (tl) return hubcard('Where he stood', tl.title, `${tl.positions.length} things he said about it, ${shortDay(tl.first)} to ${shortDay(tl.last)}.`,
+    `receipts.html`, 'Read them in order →');
+  return null;
+}
+
+(async () => {
+  await chrome('home.html');
+  try {
+    const v = await api('/api/videos', { page: 1 });
+    if (v.total) $('#stats').textContent = `${v.total.toLocaleString()} streams transcribed so far, newest first.`;
+  } catch (e) { /* fine */ }
+  try {
+    const d0 = new Date(), today = `${d0.getFullYear()}-${String(d0.getMonth() + 1).padStart(2, '0')}-${String(d0.getDate()).padStart(2, '0')}`, done = JSON.parse(localStorage.getItem('quiz-' + today) || 'null');
+    if (done) $('#quizgo').textContent = `You scored ${done.score}/${done.n} today · play practice rounds →`;
+  } catch (e) { /* storage blocked */ }
+  const cards = (await Promise.all([weekCard(), spotCard(), chatCard(), receiptCard(), factCard()])).filter(Boolean);
+  $('#cards').replaceChildren(...cards);
+})();
+</script></body></html>

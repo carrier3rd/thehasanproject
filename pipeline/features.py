@@ -900,7 +900,8 @@ def build_stories(cfg, st: dict, con, entries: list[dict], reddit: dict | None) 
                         "segments": sorted(({"video_id": e["video_id"], "date": e["date"], "t": e["start"],
                                              "minutes": e["minutes"], "label": e["label"]} for e in es),
                                            key=lambda x: (x["date"], x["t"])),
-                        "quotes": quotes[:12], "positions": positions[-30:], "reddit_top": tops}
+                        "quotes": quotes[:12], "positions": positions[-30:], "reddit_top": tops,
+                        "all_positions": positions}
     summaries.sort(key=lambda s: (s["last"], s["hasan_minutes"] + s["reddit_mentions"] / 20), reverse=True)
     return summaries, details
 
@@ -939,7 +940,7 @@ def publish(cfg, st: dict, con, entries: list[dict], reddit: dict | None, chatvs
     sd = od / "stories"
     sd.mkdir(exist_ok=True)
     for sid, d in details.items():
-        save_json(sd / f"{sid}.json", d)
+        save_json(sd / f"{sid}.json", {k: v for k, v in d.items() if k != "all_positions"})
     for p in sd.glob("*.json"):
         if p.stem not in details:
             p.unlink()
@@ -954,6 +955,16 @@ def publish(cfg, st: dict, con, entries: list[dict], reddit: dict | None, chatvs
     now = dt.datetime.now().isoformat(timespec="seconds")
     save_json(od / "stories.json", {"generated": now, "stories": stories, "timeline": timeline,
                                     "reddit_days": covered, "groups": GROUPS, "stream_days": stream_days(con)})
+    # "Where he stood": every position he stated on a story, in order (documented, not judged; no approval needed:
+    # each line is his exact words with a link, and the one-sentence summary is labelled as Claude's)
+    timelines = []
+    for sid, d in details.items():
+        ps = d["all_positions"]
+        if len(ps) >= 3 and len({p["date"] for p in ps}) >= 2:
+            timelines.append({"story": sid, "title": d["title"], "kind": d["kind"], "first": ps[0]["date"],
+                              "last": ps[-1]["date"], "positions": ps[-40:]})
+    timelines.sort(key=lambda t: (t["last"], len(t["positions"])), reverse=True)
+    save_json(od / "timelines.json", {"generated": now, "timelines": timelines})
     chatvs = sorted(chatvs, key=lambda c: c["date"], reverse=True)
     save_json(od / "chatvs.json", {"generated": now, "moments": chatvs})
     n = publish_receipts(cfg)

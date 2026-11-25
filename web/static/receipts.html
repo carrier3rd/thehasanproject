@@ -1,32 +1,49 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Receipts · VOD archive</title>
-<meta name="description" content="Moments on different days where Hasan's own stated positions on the same question conflict, with both clips.">
-<link rel="stylesheet" href="style.css?v=2026112502"></head>
+<title>Receipts · The Hasan Project</title>
+<meta name="description" content="Where Hasan stood on each story over time, and moments where his own positions on the same question conflict, with the clips.">
+<meta property="og:title" content="Receipts: what Hasan said, then and now">
+<meta property="og:description" content="Every position he stated on a story, in order, with the clips. Plus the cases where they don't line up.">
+<meta property="og:site_name" content="The Hasan Project"><meta name="twitter:card" content="summary">
+<link rel="stylesheet" href="style.css?v=2026112504"></head>
 <body><main class="feat">
   <h1>Receipts</h1>
-  <p class="lede">Two moments, on different days, where Hasan's own stated positions on the same question don't line up. Both
-    clips are linked, so you can watch them in full and decide for yourself.</p>
-  <div class="filters"><div id="topics" class="chips"></div></div>
-  <div id="list" class="cards"><p class="note">Loading…</p></div>
-  <details class="method"><summary>How a receipt gets here</summary>
+  <p class="lede">What Hasan said about a story, every time he said it, in order, with the clips. Plus the cases where his own
+    positions on the same question don't line up. Watch them and decide for yourself.</p>
+  <nav class="tabs" id="views" aria-label="Receipts views">
+    <button type="button" class="on" data-view="stood">Where he stood</button>
+    <button type="button" data-view="pairs">Then vs now</button>
+  </nav>
+  <section id="stoodview">
+    <div class="filters"><label class="fsearch"><span class="sr-only">Find a story</span>
+      <input type="search" id="q" placeholder="Find a story…"></label></div>
+    <div id="stood" class="cards"><p class="note">Loading…</p></div>
+  </section>
+  <section id="pairsview" hidden>
+    <div class="filters"><div id="topics" class="chips"></div></div>
+    <div id="list" class="cards"></div>
+  </section>
+  <details class="method"><summary>How this works</summary>
+    <p><b>Where he stood:</b> Claude (AI) reads each stream's transcript and notes the positions Hasan states on each story,
+      in one plain sentence, next to his exact words copied from the transcript and a link to the moment. Nothing is judged
+      here; the sentence is Claude's summary and the quote is what he said.</p>
+    <p><b>Then vs now</b> is stricter:</p>
     <ol>
-      <li>Claude (AI) lists the positions Hasan states on each story, copying his exact words from the transcript.</li>
-      <li>It looks across weeks for pairs that conflict on the same question. Jokes, bits, reading something out, conditional
-        statements and changes that follow new facts don't count.</li>
+      <li>Claude looks across weeks for pairs of his positions that conflict on the same question. Jokes, bits, reading
+        something out, conditional statements and changes that follow new facts don't count.</li>
       <li>A second, stricter check reads the transcript around both quotes and rejects anything that falls apart in context.</li>
-      <li>A person reads each one that passes and approves it or throws it out. Only approved receipts appear here.</li>
+      <li>A person reads each one that passes and approves it or throws it out. Only approved pairs appear.</li>
     </ol>
-    <p>Transcripts are machine-made and can mishear words. The linked video is the authoritative record. Think one is unfair?
-      Use the contact on the <a href="about.html">About</a> page.</p>
+    <p>Transcripts are machine-made and can mishear words. The linked video is the authoritative record. Think something is
+      unfair? Use the contact on the <a href="about.html">About</a> page.</p>
   </details>
 </main>
-<script src="common.js?v=2026112502"></script>
-<script src="feat.js?v=2026112502"></script>
+<script src="common.js?v=2026112504"></script>
+<script src="feat.js?v=2026112504"></script>
 <script>
 const KIND = { reversal: 'Changed position', contradiction: 'Contradiction', double_standard: 'Double standard' };
 const qs = new URLSearchParams(location.search);
-let all = [], topic = '';
+let all = [], timelines = [], topic = '', q = '';
 
 function side(label, s, said) {
   return el('div', { class: 'pside' },
@@ -38,35 +55,74 @@ function side(label, s, said) {
 
 function card(r) {
   const share = el('button', { type: 'button', class: 'linkish', text: 'Share' });
-  share.addEventListener('click', () => copyLink(`${location.origin}/receipts.html?r=${r.id}`, share));
-  return el('article', { class: 'fcard receipt', id: 'r-' + r.id },
+  share.addEventListener('click', () => copyLink(`${location.origin}/s/receipt/${r.id}`, share));
+  return el('article', { class: 'fcard receipt', id: 'r-' + r.id }, ...[
     el('div', { class: 'fmeta' }, el('span', { class: 'kind', text: KIND[r.kind] || r.kind }),
       el('a', { class: 'when', href: `spotlight.html?story=${r.story}`, text: r.story_title })),
     el('h2', { text: r.title }),
     el('p', { class: 'q', text: r.question }),
     el('div', { class: 'pair' }, side('First', r.a, r.then_said), side('Later', r.b, r.now_said)),
     r.context ? el('p', { class: 'ctx' }, el('b', { text: 'Context: ' }), r.context) : null,
-    share);
+    share].filter(x => x != null));
+}
+
+function timeline(t) {
+  const shown = 4;
+  const item = p => el('li', {},
+    el('div', { class: 'tdate' }, el('a', { href: watchAt(p.video_id, p.t), text: `${niceDay(p.date)} · ${fmtTime(p.t)}` })),
+    el('p', { class: 'tsum', text: p.position }),
+    el('blockquote', { text: `“${p.quote}”` }));
+  const ps = [...t.positions].reverse();
+  const list = el('ol', { class: 'tline', reversed: '' }, ...ps.slice(0, shown).map(item));
+  const kids = [
+    el('div', { class: 'fmeta' }, el('span', { class: 'kind', text: KIND_LABEL[t.kind] || t.kind }),
+      el('span', { class: 'when', text: `${t.positions.length} statements · ${shortDay(t.first)} – ${niceDay(t.last)}` })),
+    el('h2', {}, el('a', { href: `spotlight.html?story=${t.story}`, text: t.title })),
+    list];
+  if (ps.length > shown) {
+    const more = el('button', { type: 'button', class: 'linkish', text: `Show all ${ps.length}`, 'aria-expanded': 'false' });
+    more.addEventListener('click', () => { list.replaceChildren(...ps.map(item)); more.remove(); });
+    kids.push(more);
+  }
+  return el('article', { class: 'fcard' }, ...kids);
+}
+
+function renderStood() {
+  const items = timelines.filter(t => !q || t.title.toLowerCase().includes(q.toLowerCase()));
+  $('#stood').replaceChildren(...(items.length ? items.slice(0, 60).map(timeline) : [el('p', { class: 'note',
+    text: timelines.length ? 'No story matches.' : 'Stories are still being indexed. Check back soon.' })]));
 }
 
 function render() {
   const items = all.filter(r => !topic || r.story === topic);
   $('#list').replaceChildren(...(items.length ? items.map(card) : [el('div', { class: 'empty' },
-    el('p', { text: 'The first receipts are still being checked.' }),
+    el('p', { text: 'The first pairs are still being checked.' }),
     el('p', { class: 'note small', text: 'Each one is found by AI, checked again against the full transcript, then approved by a person before it shows up here.' }))]));
+}
+
+function setView(v) {
+  for (const b of document.querySelectorAll('#views button')) b.classList.toggle('on', b.dataset.view === v);
+  $('#stoodview').hidden = v !== 'stood';
+  $('#pairsview').hidden = v !== 'pairs';
 }
 
 (async () => {
   await chrome('receipts.html');
-  all = ((await feature('receipts')) || {}).receipts || [];
+  const [r, t] = await Promise.all([feature('receipts'), feature('timelines')]);
+  all = (r || {}).receipts || [];
+  timelines = (t || {}).timelines || [];
   const topics = [...new Map(all.map(r => [r.story, r.story_title])).entries()];
   const draw = () => chips($('#topics'), [['', 'All'], ...topics], topic, v => { topic = v; draw(); render(); }, 'Story');
   if (topics.length > 1) draw();
-  render();
+  for (const b of document.querySelectorAll('#views button')) b.addEventListener('click', () => setView(b.dataset.view));
+  accessibleTabs($('#views'), 'Receipts views');
+  $('#q').addEventListener('input', e => { q = e.target.value; renderStood(); });
+  render(); renderStood();
   const want = qs.get('r');
-  if (want && document.getElementById('r-' + want)) {
+  if (want) {
+    setView('pairs');
     const n = document.getElementById('r-' + want);
-    n.classList.add('focus'); n.scrollIntoView({ block: 'start' });
-  }
+    if (n) { n.classList.add('focus'); n.scrollIntoView({ block: 'start' }); }
+  } else if (qs.get('view') === 'pairs' || (!timelines.length && all.length)) setView('pairs');
 })();
 </script></body></html>
