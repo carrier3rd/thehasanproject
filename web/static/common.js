@@ -71,6 +71,26 @@ const FLAG_LABEL = { slur: 'slur', antisemitism: 'antisemitism', nazi_or_holocau
   racism_or_bigotry: 'racism / bigotry', dehumanizing: 'dehumanizing', violent_threat_or_glorification: 'violence',
   harassment_or_doxxing: 'harassment', sexual_harassment: 'sexual harassment' };
 
+// destiny.gg-style chat scrolling. Chat follows new messages only while you are at the bottom. Scroll up and it
+// holds still so you can read; a "More messages below" bar (with how many arrived) takes you back to live, and so
+// does scrolling back down. `box` is the scrolling element; onResume re-renders it.
+function chatScroll(box, onResume) {
+  const bar = el('button', { type: 'button', class: 'morebelow', text: 'More messages below' });
+  const s = { pinned: true, lastT: -Infinity, enabled: () => true };
+  const atBottom = () => box.scrollHeight - box.scrollTop - box.clientHeight < 30;
+  s.stick = () => { if (s.pinned) box.scrollTop = box.scrollHeight; };
+  s.resume = () => { s.pinned = true; bar.remove(); onResume(); s.stick(); };
+  s.unseen = n => { bar.textContent = n > 0 ? `More messages below (${n > 99 ? '99+' : n} new)` : 'More messages below'; };
+  s.paused = () => !s.pinned && s.enabled();
+  box.addEventListener('scroll', () => {
+    if (!s.enabled()) return;
+    if (atBottom()) { if (!s.pinned) s.resume(); }
+    else if (s.pinned && box.scrollHeight > box.clientHeight) { s.pinned = false; s.unseen(0); box.append(bar); }
+  }, { passive: true });
+  bar.addEventListener('click', s.resume);
+  return s;
+}
+
 async function api(path, params = {}) {
   const qs = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) if (v !== '' && v !== null && v !== undefined) qs.set(k, v);

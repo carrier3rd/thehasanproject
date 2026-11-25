@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Watch · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112406"></head>
+<title>Watch · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112407"></head>
 <body><main class="watch" data-pane="transcript">
   <nav id="panes" class="tabs" aria-label="Show">
     <button type="button" data-pane="transcript" class="on">Transcript</button>
@@ -28,7 +28,7 @@
     <div id="chat"><div class="note" style="padding:10px">No chat for this moment.</div></div>
   </div>
 </main>
-<script src="common.js?v=2026112406"></script>
+<script src="common.js?v=2026112407"></script>
 <script>
 const params = new URLSearchParams(location.search);
 const VID = params.get('v'), T0 = Math.max(+params.get('t') || 0, 0);
@@ -147,7 +147,10 @@ function fetchBucket(b) {
     .then(r => { buckets.set(b, r.messages); lastChatKey = ''; })
     .catch(() => buckets.delete(b));
 }
+let wscroll = null, lastT = 0;
 function renderChat(t) {
+  if (!wscroll) wscroll = chatScroll($('#chat'), () => { lastChatKey = ''; renderChat(lastT); });
+  lastT = t;
   const win = cfg.chat_window_seconds, from = t - win;
   const b0 = Math.floor(Math.max(from, 0) / 60), b1 = Math.floor(t / 60);
   const msgs = [];
@@ -157,6 +160,7 @@ function renderChat(t) {
     if (Array.isArray(got)) for (const m of got) if (m.t > from && m.t <= t) msgs.push(m);
   }
   fetchBucket(b1 + 1);   // warm the next bucket
+  if (wscroll.paused()) return wscroll.unseen(msgs.filter(m => m.t > wscroll.lastT).length);   // reading: hold still
   const key = msgs.length ? `${msgs[0].id}-${msgs[msgs.length - 1].id}-${msgs.length}` : 'empty';
   if (key === lastChatKey) return;
   lastChatKey = key;
@@ -173,7 +177,8 @@ function renderChat(t) {
       m.deleted && !revealable(m) ? el('span', { class: 'tag del', text: 'deleted by mods' }) : null,
       m.flag ? el('span', { class: 'tag hottag flagtag', title: m.flag.why, text: FLAG_LABEL[m.flag.category] || m.flag.category }) : null);
   }));
-  box.scrollTop = box.scrollHeight;
+  wscroll.lastT = msgs[msgs.length - 1].t;
+  wscroll.stick();
 }
 
 // ---------- activity strip ----------

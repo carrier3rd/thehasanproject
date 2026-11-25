@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Weekly reel · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112406"></head>
+<title>Weekly reel · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112407"></head>
 <body><main class="reel">
   <p class="intro">Each week, Claude reads every line of every stream and picks the moments worth a look, with the chat at the time and fact-checks of his claims.</p>
   <div class="reelbar">
@@ -53,8 +53,9 @@
   <p class="note small">Picked and written by Claude (AI) from machine-made transcripts, counting only Hasan's own words.
     Watch the moment before relying on it.</p>
 </main>
-<script src="common.js?v=2026112406"></script>
+<script src="common.js?v=2026112407"></script>
 <script>
+let lastNow = 0;
 let cfg, reel = null, idx = 0, clip = null, player = null, chat = [], playing = false, sim = null, mounting = 0;
 const qs = new URLSearchParams(location.search);
 
@@ -276,10 +277,14 @@ function markHot(c) {
 }
 const FLAG = FLAG_LABEL;
 const HOT = { picked: 'notable', burst: 'copy-paste wave' };
-let lastKey = '';
+let lastKey = '', rscroll = null;
 function renderChat(now) {
+  if (!rscroll) { rscroll = chatScroll($('#rchat'), () => { lastKey = ''; renderChat(lastNow); });
+    rscroll.enabled = () => !$('#allchat').checked && !$('#onlyflags').checked; }
+  lastNow = now;
   const only = $('#onlyflags').checked, all = $('#allchat').checked || only;
   const msgs = only ? chat.filter(m => m.flag) : all ? chat : chat.filter(m => m.t <= now).slice(-60);
+  if (!all && rscroll.paused()) return rscroll.unseen(msgs.filter(m => m.t > rscroll.lastT).length);   // reading: hold still
   const key = `${all}-${only}-${msgs.length}-${msgs.length ? msgs[msgs.length - 1].id : 0}`;
   if (key === lastKey) return;
   lastKey = key;
@@ -297,7 +302,8 @@ function renderChat(now) {
       m.flag ? el('span', { class: 'tag hottag flagtag', title: m.flag.why, text: FLAG_LABEL[m.flag.category] || m.flag.category }) : null,
       HOT[m.hot] ? el('span', { class: 'tag hottag', text: HOT[m.hot] }) : null);
   }));
-  if (!all) box.scrollTop = box.scrollHeight;
+  rscroll.lastT = msgs.length ? msgs[msgs.length - 1].t : -Infinity;
+  if (!all) { rscroll.pinned = true; rscroll.stick(); }
 }
 
 // ---------- fact-checks ----------
@@ -495,6 +501,7 @@ async function show(i) {
   $('#count').textContent = `${idx + 1} / ${reel.clips.length}` + (reel.withdrawn ? ` · ${reel.withdrawn} withdrawn` : '');
   history.replaceState(null, '', `?week=${reel.week}&clip=${idx + 1}` + (view !== 'clips' ? `&view=${view}` : ''));
   renderCard(clip);
+  if (rscroll && !rscroll.pinned) rscroll.resume();   // a new clip starts live
   loadChat(clip);
   player = null;
   const token = ++mounting;            // a slower, older mount must not replace this clip's player
