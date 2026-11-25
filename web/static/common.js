@@ -53,6 +53,15 @@ function deletedBody(m, nodes) {
   return b;
 }
 
+// Twitch deletes past broadcasts about 60 days after the stream; its embed then only says "Failed to determine
+// content classification". Older Twitch streams start on the transcript-and-chat clock instead.
+// upload_date is YYYYMMDD.
+function twitchGone(embedType, uploadDate) {
+  const d = String(uploadDate || '');
+  if (embedType !== 'twitch' || d.length !== 8) return false;
+  return (Date.now() - Date.UTC(+d.slice(0, 4), +d.slice(4, 6) - 1, +d.slice(6, 8))) / 864e5 > 61;
+}
+
 async function api(path, params = {}) {
   const qs = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) if (v !== '' && v !== null && v !== undefined) qs.set(k, v);

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Weekly reel · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112402"></head>
+<title>Weekly reel · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112403"></head>
 <body><main class="reel">
   <p class="intro">Each week, Claude reads every line of every stream and picks the moments worth a look, with the chat at the time and fact-checks of his claims.</p>
   <div class="reelbar">
@@ -49,7 +49,7 @@
   <p class="note small">Picked and written by Claude (AI) from machine-made transcripts, counting only Hasan's own words.
     Watch the moment before relying on it.</p>
 </main>
-<script src="common.js?v=2026112402"></script>
+<script src="common.js?v=2026112403"></script>
 <script>
 let cfg, reel = null, idx = 0, clip = null, player = null, chat = [], playing = false, sim = null;
 const qs = new URLSearchParams(location.search);
@@ -65,7 +65,7 @@ async function mountPlayer(c) {
   box.replaceChildren(); box.hidden = false; $('#slider').hidden = true;
   if (sim) { clearInterval(sim); sim = null; }
   try {
-    if (c.embed_type === 'twitch') {
+    if (c.embed_type === 'twitch' && !twitchGone('twitch', c.date)) {
       await loadScript('https://player.twitch.tv/js/embed/v1.js');
       const tw = new Twitch.Player(box, { video: String(c.embed_id).replace(/^v/, ''), parent: [cfg.site_domain],
         width: '100%', height: '100%', autoplay: false, time: fmtTime(c.start).replace(/(\d+):(\d+):(\d+)/, '$1h$2m$3s') });
@@ -84,6 +84,9 @@ async function mountPlayer(c) {
   }
   // no embed (VOD deleted) or the embed failed: a clock over the clip
   box.hidden = true; $('#slider').hidden = false;
+  $('#slider .note').textContent = twitchGone(c.embed_type, c.date)
+    ? 'Twitch deletes past broadcasts about 60 days after the stream, so this video is gone. The clock below plays the clip's transcript and chat.'
+    : 'The original video is no longer available. The clock below plays the clip's transcript and chat.';
   const range = $('#range'); range.min = Math.floor(c.start); range.max = Math.ceil(c.end);
   let pos = c.start, last = 0; range.value = pos;
   range.oninput = () => { pos = +range.value; };
@@ -142,7 +145,7 @@ const SUBS = ['LivestreamFail', 'Hasan_Piker', 'Destiny'];
 function vodLink(c) {
   const t = Math.max(Math.floor(c.start) - 3, 0);
   const id = String(c.embed_id || '');
-  if (c.embed_type === 'twitch' && id)
+  if (c.embed_type === 'twitch' && id && !twitchGone('twitch', c.date))
     return `https://www.twitch.tv/videos/${id.replace(/^v/, '')}?t=${Math.floor(t / 3600)}h${Math.floor(t / 60) % 60}m${t % 60}s`;
   if (c.embed_type === 'youtube' && id) return `https://www.youtube.com/watch?v=${encodeURIComponent(id)}&t=${t}s`;
   return null;

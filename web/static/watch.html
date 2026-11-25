@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Watch · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112402"></head>
+<title>Watch · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112403"></head>
 <body><main class="watch" data-pane="transcript">
   <nav id="panes" class="tabs" aria-label="Show">
     <button type="button" data-pane="transcript" class="on">Transcript</button>
@@ -28,7 +28,7 @@
     <div id="chat"><div class="note" style="padding:10px">No chat for this moment.</div></div>
   </div>
 </main>
-<script src="common.js?v=2026112402"></script>
+<script src="common.js?v=2026112403"></script>
 <script>
 const params = new URLSearchParams(location.search);
 const VID = params.get('v'), T0 = Math.max(+params.get('t') || 0, 0);
@@ -50,7 +50,8 @@ async function initPlayer() {
         playerVars: { start: Math.floor(T0), rel: 0 }, events: { onReady: ok } });
       player = { getTime: () => (yt.getCurrentTime ? yt.getCurrentTime() : now), seek: t => yt.seekTo(t, true) };
     });
-  } else if (video.embed_type === 'twitch') {
+  } else if (video.embed_type === 'twitch' && (!twitchGone('twitch', video.upload_date)
+             || new URLSearchParams(location.search).get('player') === 'twitch')) {
     await loadScript('https://player.twitch.tv/js/embed/v1.js');
     const tw = new Twitch.Player(box, { video: String(video.embed_id).replace(/^v/, ''), parent: [cfg.site_domain],
       width: '100%', height: '100%', autoplay: false, time: fmtTime(T0).replace(/(\d+):(\d+):(\d+)/, '$1h$2m$3s') });
@@ -58,6 +59,12 @@ async function initPlayer() {
   } else {
     box.hidden = true;
     $('#slider').hidden = false;
+    if (video.embed_type === 'twitch') {   // past Twitch's 60 days: say why, and offer the player anyway
+      const u = new URL(location.href); u.searchParams.set('player', 'twitch');
+      $('#slider .note').replaceChildren(document.createTextNode('Twitch deletes past broadcasts about 60 days after the stream, '
+        + 'so this video is gone. The transcript and chat play with the clock below. '),
+        el('a', { href: u.pathname + u.search, text: 'Try the Twitch player anyway' }));
+    }
     const range = $('#range');
     range.max = Math.floor(video.duration || (turns.length ? turns[turns.length - 1].end : 0));
     let pos = T0, playing = null;
