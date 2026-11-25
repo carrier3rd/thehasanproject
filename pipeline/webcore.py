@@ -616,7 +616,9 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
         for base in static_dirs:
             target = (base / path).resolve()
             if target.is_file() and base.resolve() in target.parents:
-                return FileResponse(target)
+                # no-cache: browsers and Cloudflare must revalidate (cheap, ETag) so a deploy shows at once;
+                # Cloudflare otherwise keeps .css/.js for 4 hours and pairs new pages with old styles
+                return FileResponse(target, headers={"Cache-Control": "no-cache"})
         raise HTTPException(404, "not found")
 
     return app
