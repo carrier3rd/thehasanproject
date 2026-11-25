@@ -135,6 +135,47 @@ function shareButton(x, title) {
   return b;
 }
 
+// ---------- post a clip to Reddit ----------
+// r/LivestreamFail takes links to the stream itself (Twitch / YouTube / Kick), not to other sites, and wants
+// plain, non-editorialized titles. So the link is the original VOD cued to the moment, and the title is the
+// streamer's name plus his exact words. Reddit's own submit page opens prefilled; the poster still clicks Post.
+const SUBS = ['LivestreamFail', 'Hasan_Piker', 'Destiny'];
+function vodLink(c) {
+  const t = Math.max(Math.floor(c.start) - 3, 0);
+  const id = String(c.embed_id || '');
+  if (c.embed_type === 'twitch' && id)
+    return `https://www.twitch.tv/videos/${id.replace(/^v/, '')}?t=${Math.floor(t / 3600)}h${Math.floor(t / 60) % 60}m${t % 60}s`;
+  if (c.embed_type === 'youtube' && id) return `https://www.youtube.com/watch?v=${encodeURIComponent(id)}&t=${t}s`;
+  return null;
+}
+function redditTitle(c) {
+  const fit = (s, n) => s.length <= n ? s : s.slice(0, s.lastIndexOf(' ', n - 1) > n * 0.6 ? s.lastIndexOf(' ', n - 1) : n - 1).replace(/[\s,;:.-]+$/, '') + '…';
+  if (c.quote) return `HasanAbi: "${fit(c.quote.replace(/\s+/g, ' ').replace(/^["“]|["”]$/g, '').trim(), 270)}"`;
+  return fit(`HasanAbi ${c.title.replace(/^Hasan\b\s*/i, '')}`, 290);
+}
+function redditButton(c) {
+  const link = vodLink(c);
+  if (!link) return null;
+  const box = el('details', { class: 'reddit' }, el('summary', { class: 'share', text: 'Post to Reddit' }));
+  const title = el('textarea', { rows: 3, maxlength: 300, 'aria-label': 'Post title' });
+  title.value = redditTitle(c);
+  const left = el('span', { class: 'note', style: 'padding:0' });
+  const count = () => { left.textContent = `${300 - title.value.length} characters left`; };
+  title.addEventListener('input', count); count();
+  const sub = el('select', { 'aria-label': 'Subreddit' }, ...SUBS.map(x => el('option', { value: x, text: 'r/' + x })));
+  const go = el('a', { class: 'btn', target: '_blank', rel: 'noopener noreferrer', text: 'Open Reddit' });
+  const setHref = () => { go.href = `https://www.reddit.com/r/${sub.value}/submit?type=LINK&url=${encodeURIComponent(link)}&title=${encodeURIComponent(title.value.trim())}`; };
+  for (const x of [title, sub]) { x.addEventListener('input', setHref); x.addEventListener('change', setHref); }
+  setHref();
+  box.append(el('div', { class: 'rform' },
+    el('label', { text: 'Title (his exact words; LSF removes editorialized titles)' }), title, left,
+    el('div', { class: 'row' }, sub, go),
+    el('p', { class: 'note', style: 'padding:0' }, document.createTextNode('Links to the stream at '),
+      el('a', { href: link, target: '_blank', rel: 'noopener noreferrer', text: fmtTime(Math.max(c.start - 3, 0)) }),
+      document.createTextNode(`, so it plays from the moment; the clip runs ${fmtTime(c.end - c.start)}. For a cleaner post, make a Twitch clip there and paste its link on Reddit instead.`))));
+  return box;
+}
+
 function chatNumbers(m) {
   if (!m) return [];
   const pct = x => `${(x * 100).toFixed(x < 0.1 ? 1 : 0)}%`;
@@ -181,7 +222,7 @@ function renderCard(c) {
       ...chatNumbers(c.chat_metrics),
       c.segment_reason ? el('p', { class: 'cwhen', style: 'margin-top:10px',
         text: `Segment: ${fmtTime(c.end - c.start)}. ${c.segment_reason}` }) : null),
-    el('div', { class: 'row cfoot' }, shareButton(c, c.title), reportBox('clip', c))].filter(x => x != null));
+    el('div', { class: 'row cfoot' }, shareButton(c, c.title), redditButton(c), reportBox('clip', c))].filter(x => x != null));
   $('#full').href = watchUrl(c.video_id, c.start);
   $('#lines').replaceChildren(...c.lines.map(l => el('div', { class: 'turn' + (l.speaker === 'Media' ? ' media' : ''), 'data-t': l.t,
     onclick: () => { player && player.seek(l.t); } },
