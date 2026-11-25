@@ -51,7 +51,7 @@ DEFAULTS = {"model": "claude-opus-5-5", "screen_effort": "low", "judge_effort": 
             # Message Batches API, from the hourly `reel.py auto`; only when the config asks for it.
             "backend": "subscription", "claude_bin": "claude", "cli_workers": 2, "cli_timeout_s": 1200,
             "cli_backfill_per_run": 1,      # earlier weeks filled in per weekly run, so usage is spread out
-            "chat_effort": "low", "chat_per_request": 400}   # chat check: messages per request
+            "chat_effort": "low", "chat_per_request": 400, "verify_effort": "high"}   # chat check: messages per request
 CATEGORIES = ["antisemitism", "nazi_or_holocaust_comparison", "justifying_or_glorifying_violence",
               "dehumanization_or_bigotry", "targeting_individuals", "conspiracy", "anti_american",
               "misinformation", "other"]
@@ -300,7 +300,7 @@ def in_flight(cfg) -> set[str]:
 def submit(cfg, st: dict, kind: str, reqs: list[tuple[str, str, str, dict | None]], client) -> str:
     """reqs: (cache key, system, user prompt, JSON schema or None)."""
     effort = {"screen": st["screen_effort"], "judge": st["judge_effort"], "fact": st["fact_effort"],
-              "chat": st["chat_effort"]}[kind]
+              "chat": st["chat_effort"], "verify": st["verify_effort"]}[kind]
     requests = []
     for i, (key, system, user, schema) in enumerate(reqs):
         params = {"model": st["model"], "max_tokens": 16000,
@@ -423,7 +423,7 @@ def cli_env() -> dict:
 
 def cli_args(st: dict, kind: str, system: str, schema: dict | None) -> list[str]:
     effort = {"screen": st["screen_effort"], "judge": st["judge_effort"], "fact": st["fact_effort"],
-              "chat": st["chat_effort"]}[kind]
+              "chat": st["chat_effort"], "verify": st["verify_effort"]}[kind]
     args = [st["claude_bin"], "-p", "--model", st["model"], "--effort", effort,
             "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--strict-mcp-config",
             "--disable-slash-commands", "--setting-sources", "", "--system-prompt", system]

@@ -16,12 +16,17 @@ EXTRA = [  # id, author, badges, text, deleted
     (900002, "troll1", "", "BAD jews control the media", 0),
     (900003, "troll1", "", "holocaust never happened BAD", 0),
     (900011, "troll1", "", "BAD jews again", 0),
-    (900012, "troll1", "", "BAD jews once more", 0),
+    (900012, "troll1", "", "BAD QUOTE he said the jews run things, what a clown", 0),   # second review rejects it
     (900004, "troll1", "", "BAD nazi stuff the mods removed", 1),          # deleted: never counts toward trophies
-    (900005, "troll2", "", "BAD the jews again", 0),                       # 2 sure flags: below the minimum of 5
+    (900005, "troll2", "", "BAD the jews again", 0),                       # 2 sure flags: below the minimum of 3
     (900006, "troll2", "", "BAD jews jews", 0),
-    (900007, "troll2", "", "MAYBE jews, unclear", 0),                      # Claude not sure: doesn't count
-    (900008, "partnerguy", "partner/1", "BAD hitler had a point", 0),     # a streamer: listed under streamers
+    (900007, "troll2", "", "MAYBE jews, unclear", 0),                      # first pass not sure: doesn't count
+    (900014, "troll3", "", "BAD jews one", 0),                             # 3 flags, but only 2 survive the review
+    (900015, "troll3", "", "BAD jews two", 0),
+    (900016, "troll3", "", "BAD QUOTE jews three", 0),
+    (900008, "partnerguy", "partner/1", "BAD hitler had a point", 0),     # a streamer with 3 confirmed messages
+    (900017, "partnerguy", "partner/1", "BAD jews did it", 0),
+    (900018, "partnerguy", "partner/1", "BAD jews did it again", 0),
     (900009, "hasanabi", "broadcaster/1", "BAD nazi joke", 0),             # the broadcaster is never ranked
     (900010, "nice", "", "hello chat, union strong", 0),                   # no keyword: never sent to Claude
     (900013, "troll1", "", "=HYPERLINK(1) jews", 0),                       # a spreadsheet formula, unflagged
@@ -29,21 +34,32 @@ EXTRA = [  # id, author, badges, text, deleted
 
 
 class FakeClaude:
-    """`claude -p` for the chat check: flags lines with BAD (sure) and MAYBE (not sure)."""
+    """`claude -p`. First pass: flags lines with BAD (sure) and MAYBE (not sure). Second review (items start with
+    '### id'): confirms a message unless it contains QUOTE."""
     def __init__(self):
-        self.calls = []
+        self.calls, self.reviews = [], []
 
     def __call__(self, args, input=None, env=None, **kw):
         self.calls.append(input)
-        flags = []
-        for line in input.splitlines():
-            if "\t" not in line:
-                continue
-            mid, text = line.split("\t", 1)
-            if "BAD" in text or "MAYBE" in text:
-                flags.append({"id": int(mid), "category": "antisemitism", "why": "test", "sure": "BAD" in text})
-        out = {"type": "result", "subtype": "success", "is_error": False, "result": json.dumps({"flags": flags}),
-               "structured_output": {"flags": flags}, "stop_reason": "end_turn"}
+        if "### id " in input:
+            self.reviews.append(input)
+            verdicts = []
+            for block in input.split("### id ")[1:]:
+                mid = int(block.split("\n", 1)[0])
+                msg = next(line for line in block.splitlines() if line.startswith("MESSAGE: "))
+                verdicts.append({"id": mid, "confirmed": "QUOTE" not in msg, "category": "antisemitism", "why": "second look"})
+            body = {"verdicts": verdicts}
+        else:
+            flags = []
+            for line in input.splitlines():
+                if "\t" not in line:
+                    continue
+                mid, text = line.split("\t", 1)
+                if "BAD" in text or "MAYBE" in text:
+                    flags.append({"id": int(mid), "category": "antisemitism", "why": "test", "sure": "BAD" in text})
+            body = {"flags": flags}
+        out = {"type": "result", "subtype": "success", "is_error": False, "result": json.dumps(body),
+               "structured_output": body, "stop_reason": "end_turn"}
         return NS(returncode=0, stdout=json.dumps(out) + "\n", stderr="")
 
 
@@ -68,22 +84,31 @@ def flagged(project, tmp_path, monkeypatch):
     return cfg, fake
 
 
-def test_run_flags_candidates_once_and_ranks_the_week(flagged):
+def test_run_flags_reviews_and_ranks_the_week(flagged):
     cfg, fake = flagged
-    assert chatflags.run(cfg) == "done"
+    assert chatflags.run(cfg) == "done" and len(fake.calls) == 2     # one first-pass chunk, one second-review chunk
     sent = "\n".join(fake.calls)
-    assert "troll1" not in sent and "hello chat" not in sent       # ids and text only; keyword-less chat not sent
+    assert "troll1" not in sent and "partnerguy" not in sent       # ids and text only, never usernames
+    assert "hello chat, union strong" not in fake.calls[0]         # keyword-less chat is not sent to the first pass
+    [review] = fake.reviews
+    assert "MESSAGE: BAD jews again" in review and "MESSAGE: BAD the jews again" not in review   # troll2 cannot place
     con = sqlite3.connect(chatflags.db_path(cfg))
-    assert con.execute("SELECT count(*) FROM flags").fetchone()[0] == 11
+    assert con.execute("SELECT count(*) FROM flags").fetchone()[0] == 16
     assert con.execute("SELECT deleted FROM flags WHERE id=900004").fetchone()[0] == 1
-    assert chatflags.run(cfg) == "done" and len(fake.calls) == 1   # nothing new: no second call
-    t = chatflags.trophies(chatflags.db_path(cfg), reel.public_db(cfg), WEEK, chatflags.settings(cfg))
-    assert [p["author"] for p in t["antisemitism"]] == ["troll1"] and t["antisemitism"][0]["count"] == 5
-    assert [p["author"] for p in t["hateful"]] == ["troll1"]
-    assert t["streamers"] == []                                     # one flag is below the minimum for streamers too
-    low = chatflags.trophies(chatflags.db_path(cfg), reel.public_db(cfg), WEEK, {"trophy_min": 1})
-    assert [p["author"] for p in low["streamers"]] == ["partnerguy"] and low["streamers"][0]["partner"]
+    assert con.execute("SELECT count(*), sum(confirmed) FROM verified").fetchone() == (11, 9)
+    assert chatflags.run(cfg) == "done" and len(fake.calls) == 2   # nothing new: no more calls
+    args = (chatflags.db_path(cfg), reel.public_db(cfg), WEEK, chatflags.settings(cfg))
+    t = chatflags.trophies(*args)
+    assert [(p["author"], p["count"]) for p in t["antisemitism"]] == [("troll1", 4), ("partnerguy", 3)]
+    assert [p["author"] for p in t["hateful"]] == ["troll1", "partnerguy"]      # troll3: 2 confirmed, troll2: 2 flags
+    assert [p["author"] for p in t["streamers"]] == ["partnerguy"] and t["streamers"][0]["partner"]
     assert all("hasanabi" not in json.dumps(t[k]) for k in ("antisemitism", "hateful", "streamers"))
+    assert "QUOTE" not in json.dumps(t) and t["pending_review"] == 0 and t["min"] == 3
+    assert t["antisemitism"][0]["messages"][0]["why"] == "second look"         # the reviewer's reason is shown
+    con.execute("DELETE FROM verified")        # before the second review nobody places, and it says who is waiting
+    con.commit()
+    t = chatflags.trophies(*args)
+    assert t["antisemitism"] == t["hateful"] == t["streamers"] == [] and t["pending_review"] == 3
     assert chatflags.trophies(chatflags.db_path(cfg), reel.public_db(cfg), "2026-11-08")["antisemitism"] == []
     with pytest.raises(ValueError):
         chatflags.week_days("2026-11-02")                           # a Monday
@@ -100,7 +125,9 @@ def test_a_reused_message_id_never_inherits_a_flag(flagged):
     msgs = [{"id": 900001, "video_id": "v1001", "author": "innocent", "text": "hello jews, good stream"}]
     assert chatflags.flags_for(chatflags.db_path(cfg), msgs) == {}
     t = chatflags.trophies(chatflags.db_path(cfg), reel.public_db(cfg), WEEK, chatflags.settings(cfg))
-    assert t["antisemitism"] == []                                  # troll1 now has 4 matching flags: below 5
+    assert "innocent" not in json.dumps(t)
+    [troll1] = [p for p in t["antisemitism"] if p["author"] == "troll1"]
+    assert troll1["count"] == 3 and 900001 not in [m["id"] for m in troll1["messages"]]
     calls = len(fake.calls)
     assert chatflags.run(cfg) == "done" and len(fake.calls) == calls + 1   # the stream changed: the new text is checked
 

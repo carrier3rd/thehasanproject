@@ -2,6 +2,7 @@
 
     python pipeline/chatflags.py status                 how many candidates are checked, flagged, left
     python pipeline/chatflags.py run [--max-requests N] check the next candidates (claude -p, the owner's subscription)
+    python pipeline/chatflags.py verify                 second, stricter review of messages that could count toward a trophy
     python pipeline/chatflags.py week 2026-11-15        print that week's trophies
 
 A keyword pass picks candidates first (the rhetoric study's watchlist and dogwhistles, any mention of Jews, and a
@@ -12,7 +13,9 @@ it), keyed by the public chat message id. The site always joins them back to pub
 anything not published never show.
 
 Trophies (the weekly page): per Sunday-Saturday week, chatters ranked by flagged messages the mods did NOT delete,
-counting only flags Claude was sure of; at least `trophy_min` (5) of them to place. The broadcaster and bots are left out.
+counting only flags Claude was sure of AND a second, stricter Claude review confirmed (`verify`: the message in
+context, told to reject quoting, sarcasm, criticism of states or ideologies, and anything doubtful); at least
+`trophy_min` (3) confirmed messages to place. The broadcaster and bots are left out.
 Nazi/Holocaust comparisons are highlighted but don't count toward trophies (the site reports them as comparisons).
 """
 from __future__ import annotations
@@ -32,7 +35,8 @@ import reel  # noqa: E402
 
 log = get_logger("chatflags")
 VERSION = 2
-DEFAULTS = {"per_request": 300, "max_requests_per_run": 60, "trophy_min": 5, "trophy_top": 3,
+DEFAULTS = {"per_request": 300, "max_requests_per_run": 60, "trophy_min": 3, "trophy_top": 3,
+            "verify_per_request": 12, "verify_max_requests_per_run": 40, "verify_effort": "high",
             "exclude_authors": ["hasanabi", "fossabot", "nightbot", "streamelements", "moobot", "sery_bot",
                                 "streamlabs", "wizebot", "pokemoncommunitygame", "soundalerts"]}
 ANTISEMITISM = {"antisemitism"}
@@ -52,6 +56,7 @@ CREATE TABLE IF NOT EXISTS flags (
   fp TEXT PRIMARY KEY, id INTEGER, video_id TEXT, day TEXT, t REAL, author TEXT, category TEXT, why TEXT,
   sure INTEGER, deleted INTEGER, partner INTEGER, version INTEGER);
 CREATE INDEX IF NOT EXISTS flags_day ON flags(day);
+CREATE TABLE IF NOT EXISTS verified (fp TEXT PRIMARY KEY, confirmed INTEGER, category TEXT, why TEXT, version INTEGER);
 """
 # Flags are keyed by a fingerprint of the message itself (stream, author, text), never by the chat row id alone: row
 # ids are reused when a stream's chat is reloaded and renumbered by build_db --rebuild, and a flag must never land on
@@ -211,7 +216,137 @@ def run(cfg: dict, max_requests: int | None = None, retry_failed: bool = False) 
         if not progress:                   # every chunk failed once: they retry next run
             break
     log.info("answered %d chunks, %d messages flagged", answered, flagged)
-    return "more" if con.execute(UNCHECKED.format("count(*)")).fetchone()[0] else "done"
+    more = bool(con.execute(UNCHECKED.format("count(*)")).fetchone()[0])
+    con.close()
+    reviewed = verify(cfg)                  # the second review of whatever could now count toward a trophy
+    return "limit" if reviewed == "limit" else "more" if more or reviewed == "more" else "done"
+
+
+# ---------------------------------------------------------------- second review (the trophy checker)
+VERIFY_RUBRIC = """You are the second, stricter reviewer of Twitch chat messages from HasanAbi's (Hasan Piker's) stream.
+A first pass flagged each message below as hateful or abusive. A message you confirm counts toward publicly naming
+its author as one of the week's most hateful chatters, so a wrong confirmation harms a real person. Confirm only
+what is unambiguous.
+
+Each item gives: what was being said on stream around that moment, the chat just before it, the MESSAGE, and the
+first-pass label.
+
+Confirm (confirmed: true) only when, read in that context, the message is clearly the author's own hateful or abusive
+statement in one of these categories:
+- slur: a slur against a group (racial, ethnic, religious, homophobic, transphobic, ableist)
+- antisemitism: hostility to Jews as Jews, antisemitic tropes or conspiracy, Holocaust denial or mockery
+- racism_or_bigotry: hostility to people for their race, ethnicity, religion, nationality, gender, sexuality, disability
+- dehumanizing: a group of people described as animals, vermin, disease, subhuman, or deserving to die
+- violent_threat_or_glorification: threats, calls for violence or killing, celebrating deaths or attacks on civilians
+- harassment_or_doxxing: abuse aimed at a specific person beyond insult, or personal information about someone
+- sexual_harassment: sexual comments aimed at a specific person
+
+Reject (confirmed: false) when any of these could be true:
+- it quotes, repeats or paraphrases someone else in order to criticise, mock or report them (including the streamer,
+  a video on stream, or another chatter)
+- it is sarcasm or irony whose target is the hateful view itself
+- its target is a government, state, army, party, ideology or policy rather than people for who they are; criticism
+  of Israel or Zionism is not antisemitism, and comparisons of Israel to Nazi Germany are not counted here
+- it is an ordinary insult, swearing, an emote, spam or copypasta whose meaning is unclear
+- it is a joke with no target group, or you cannot tell who the target is
+- you hesitate for any reason. When in doubt, reject.
+
+For every item return its id, confirmed, the category that fits best (it may differ from the first pass), and one
+short reason (no more than 15 words)."""
+VERIFY_SCHEMA = {
+    "type": "object", "additionalProperties": False, "required": ["verdicts"],
+    "properties": {"verdicts": {"type": "array", "items": {
+        "type": "object", "additionalProperties": False, "required": ["id", "confirmed", "category", "why"],
+        "properties": {"id": {"type": "integer"}, "confirmed": {"type": "boolean"},
+                       "category": {"type": "string", "enum": reel.CHAT_CATEGORIES}, "why": {"type": "string"}}}}}}
+
+
+def week_of(day: str) -> str:
+    """The Sunday (YYYY-MM-DD) of the Sunday-Saturday week a YYYYMMDD stream day falls in."""
+    d = dt.date(int(day[:4]), int(day[4:6]), int(day[6:8]))
+    return (d - dt.timedelta(days=(d.weekday() + 1) % 7)).isoformat()
+
+
+def eligible(flags: list[dict], pub: sqlite3.Connection, st: dict) -> list[dict]:
+    """First-pass flags that could count toward a trophy: Claude was sure, the mods left the message up, it is
+    still published as written, in a hate category, and not from the broadcaster or a bot."""
+    skip = {a.lower() for a in st["exclude_authors"]}
+    return [r for r in _published_rows(pub, [f for f in flags if f["sure"] and f["category"] in HATEFUL])
+            if r["author"] and r["author"].lower() not in skip and not r["deleted"]]
+
+
+def to_verify(con: sqlite3.Connection, pub: sqlite3.Connection, st: dict) -> list[dict]:
+    """Messages still waiting for the second review: those of chatters who have at least trophy_min eligible flags
+    in a week, so only chatters who could place are reviewed."""
+    con.row_factory = sqlite3.Row
+    flags = [dict(r) for r in con.execute("SELECT * FROM flags WHERE sure=1")]
+    done = {r[0] for r in con.execute("SELECT fp FROM verified")}
+    per = {}
+    for r in eligible(flags, pub, st):
+        per.setdefault((week_of(r["date"]), r["author"].lower()), []).append(r)
+    out = [r for rows in per.values() if len(rows) >= st["trophy_min"] for r in rows if r["fp"] not in done]
+    return sorted(out, key=lambda r: (r["date"], r["video_id"], r["t"]))
+
+
+def context(pub: sqlite3.Connection, m: dict) -> tuple[str, str]:
+    """(what was said on stream around the message, the chat just before it): text only, no usernames."""
+    said = [f"{r['speaker']}: {' '.join((r['text'] or '').split())[:300]}" for r in pub.execute(
+        "SELECT speaker, text FROM turns WHERE video_id=? AND start <= ? AND end >= ? ORDER BY start LIMIT 5",
+        (m["video_id"], m["t"] + 5, m["t"] - 40))]
+    before = [" ".join((r["text"] or "").split())[:200] for r in pub.execute(
+        "SELECT text FROM chat WHERE video_id=? AND kind='msg' AND deleted=0 AND t < ? AND t >= ? ORDER BY t DESC LIMIT 6",
+        (m["video_id"], m["t"], m["t"] - 45))]
+    return "\n".join(said) or "(no transcript here)", "\n".join(f"- {x}" for x in reversed(before)) or "(none)"
+
+
+def verify_request(st: dict, pub: sqlite3.Connection, part: list[dict]) -> tuple[str, str, str, dict]:
+    items = []
+    for m in part:
+        said, before = context(pub, m)
+        items.append(f"### id {m['id']}\nON STREAM AROUND THEN:\n{said}\nCHAT JUST BEFORE:\n{before}\n"
+                     f"MESSAGE: {' '.join(m['text'].split())[:500]}\nFIRST PASS: {m['category']} ({m['why']})")
+    text = "\n\n".join(items)
+    return (reel.h("chatverify", VERSION, st["model"], text), VERIFY_RUBRIC,
+            f"{len(part)} flagged messages to review.\n\n{text}", VERIFY_SCHEMA)
+
+
+def verify(cfg: dict, max_requests: int | None = None) -> str:
+    """The second review of every message that could count toward a trophy. -> 'done', 'more' or 'limit'."""
+    st = {**reel.settings(cfg), **settings(cfg)}
+    con = open_db(cfg)
+    pub = reel.public_db(cfg)
+    limit = st["verify_max_requests_per_run"] if max_requests is None else max_requests
+    n = max(1, int(st["verify_per_request"]))
+    todo = to_verify(con, pub, st)
+    log.info("%d flagged messages await the second review (%d chunks); this run does at most %d", len(todo), -(-len(todo) // n), limit)
+    parts = [todo[i:i + n] for i in range(0, len(todo), n)][:limit]
+    reqs = [verify_request(st, pub, p) for p in parts]
+    need = [r for r in reqs if not reel.usable(reel.cache_get(cfg, "verify", r[0]))]
+    stop = None
+    try:
+        if need:
+            reel.run_cli(cfg, st, "verify", need)
+    except reel.UsageLimit as e:
+        log.warning("usage limit (%s); the review resumes next run", e)
+        stop = "limit"
+    confirmed = reviewed = 0
+    for p, (key, *_rest) in zip(parts, reqs):
+        got = reel.cache_get(cfg, "verify", key)
+        if not reel.usable(got):
+            continue
+        r = got.get("result") if got.get("status") == "succeeded" else None
+        verdicts = {v.get("id"): v for v in (r or {}).get("verdicts", []) if isinstance(v, dict)} if isinstance(r, dict) else {}
+        for m in p:                          # no verdict (refused, failed twice, or left out) never counts
+            v = verdicts.get(m["id"])
+            ok = bool(v and v.get("confirmed") is True and v.get("category") in HATEFUL)
+            con.execute("INSERT OR REPLACE INTO verified VALUES(?,?,?,?,?)",
+                        (m["fp"], int(ok), (v or {}).get("category") or m["category"],
+                         str((v or {}).get("why") or f"not reviewed ({got.get('status')})")[:160], VERSION))
+            confirmed += ok
+            reviewed += 1
+    con.commit()
+    log.info("second review: %d messages reviewed, %d confirmed", reviewed, confirmed)
+    return stop or ("more" if len(todo) > reviewed else "done")
 
 
 # ---------------------------------------------------------------- reading (used by the site too)
@@ -242,12 +377,13 @@ def _published_rows(pub: sqlite3.Connection, flags: list[dict]) -> list[dict]:
 
 
 def trophies(flags_db: Path, pub: sqlite3.Connection, week: str, st: dict | None = None) -> dict:
-    """The week's podiums: flags Claude was sure of, on messages the mods left up, in the hate categories, at least
-    trophy_min per chatter. Streamers (partner badge) are listed by the same rules."""
+    """The week's podiums: messages the first pass was sure of AND the second review confirmed, that the mods left
+    up, in the hate categories, at least trophy_min per chatter. Streamers (partner badge) are listed by the same
+    rules. pending_review: chatters who could place but still have messages awaiting the second review."""
     st = {**DEFAULTS, **(st or {})}
     lo, hi = week_days(week)
     empty = {"week": week, "antisemitism": [], "hateful": [], "streamers": [], "checked_through": None,
-             "min": st["trophy_min"]}
+             "min": st["trophy_min"], "pending_review": 0}
     if not Path(flags_db).exists():
         return empty
     fcon = sqlite3.connect(f"file:{flags_db}?mode=ro", uri=True)
@@ -255,11 +391,18 @@ def trophies(flags_db: Path, pub: sqlite3.Connection, week: str, st: dict | None
     try:
         flags = [dict(r) for r in fcon.execute("SELECT * FROM flags WHERE day BETWEEN ? AND ?", (lo, hi))]
         empty["checked_through"] = fcon.execute("SELECT max(day) FROM flags").fetchone()[0]
+        has = fcon.execute("SELECT 1 FROM sqlite_master WHERE name='verified'").fetchone()
+        verdicts = {r["fp"]: dict(r) for r in fcon.execute("SELECT * FROM verified")} if has else {}
     finally:
         fcon.close()
-    skip = {a.lower() for a in st["exclude_authors"]}
-    rows = [r for r in _published_rows(pub, flags) if r["author"] and r["author"].lower() not in skip
-            and r["sure"] and not r["deleted"]]
+    could = eligible(flags, pub, st)
+    per = {}
+    for r in could:
+        per.setdefault(r["author"].lower(), []).append(r)
+    empty["pending_review"] = sum(1 for v in per.values() if len(v) >= st["trophy_min"]
+                                  and any(x["fp"] not in verdicts for x in v))
+    rows = [{**r, "category": verdicts[r["fp"]]["category"], "why": verdicts[r["fp"]]["why"]}
+            for r in could if verdicts.get(r["fp"], {}).get("confirmed")]       # confirmed by the second review
 
     def ranked(cats: set[str], only_partners: bool = False) -> list[list[dict]]:
         per = {}
@@ -312,10 +455,12 @@ def status(cfg: dict) -> None:
     cands = con.execute("SELECT count(*) FROM cands").fetchone()[0]
     checked = con.execute("SELECT count(*) FROM checked").fetchone()[0]
     failed = con.execute("SELECT count(*) FROM failed").fetchone()[0]
+    rev = con.execute("SELECT count(*), coalesce(sum(confirmed), 0) FROM verified").fetchone()
     flagged = con.execute("SELECT count(*) FROM flags").fetchone()[0]
     streams = con.execute("SELECT count(*) FROM scanned").fetchone()[0]
     print(f"{streams} streams scanned, {cands:,} candidates, {checked:,} checked, {flagged:,} flagged, "
           f"{failed:,} in refused/failed chunks (retry: run --retry-failed) ({db_path(cfg)})")
+    print(f"second review: {rev[0]:,} messages reviewed, {rev[1]:,} confirmed")
     for cat, n in con.execute("SELECT category, count(*) FROM flags GROUP BY category ORDER BY 2 DESC"):
         print(f"  {cat}: {n:,}")
 
@@ -327,12 +472,16 @@ def main():
     r = sub.add_parser("run")
     r.add_argument("--max-requests", type=int)
     r.add_argument("--retry-failed", action="store_true", help="re-queue refused/failed chunks in chunks of 50")
+    v = sub.add_parser("verify")
+    v.add_argument("--max-requests", type=int)
     w = sub.add_parser("week")
     w.add_argument("week")
     a = ap.parse_args()
     cfg = load_config()
     if a.cmd == "status":
         status(cfg)
+    elif a.cmd == "verify":
+        print(verify(cfg, a.max_requests))
     elif a.cmd == "run":
         print(run(cfg, a.max_requests, a.retry_failed))
     else:

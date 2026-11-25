@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Weekly reel · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112407"></head>
+<title>Weekly reel · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112408"></head>
 <body><main class="reel">
   <p class="intro">Each week, Claude reads every line of every stream and picks the moments worth a look, with the chat at the time and fact-checks of his claims.</p>
   <div class="reelbar">
@@ -21,8 +21,9 @@
   <div id="trophies" hidden></div>
   <div id="tip" class="tip" role="tooltip" hidden></div>
   <div id="stage" hidden>
-    <!-- the video (and on a computer the chat column) stay on screen while the write-up scrolls;
-         on a phone the chat stays pinned to the bottom of the screen instead -->
+    <!-- computer: the video and the chat column stay on screen while the write-up scrolls under the video.
+         phone: video on top, chat below it; the write-up is a one-line strip (#cardopen) that opens it as an
+         overlay (#card.open) while the video keeps playing underneath -->
     <div class="pane">
       <div id="player"></div>
       <div id="slider" hidden>
@@ -35,6 +36,7 @@
         <a id="full">Full stream</a>
       </div>
     </div>
+    <button type="button" id="cardopen" class="cardopen" aria-controls="card"></button>
     <article id="card"></article>
     <div class="rcol side">
       <nav class="tabs" id="rtabs">
@@ -53,7 +55,7 @@
   <p class="note small">Picked and written by Claude (AI) from machine-made transcripts, counting only Hasan's own words.
     Watch the moment before relying on it.</p>
 </main>
-<script src="common.js?v=2026112407"></script>
+<script src="common.js?v=2026112408"></script>
 <script>
 let lastNow = 0;
 let cfg, reel = null, idx = 0, clip = null, player = null, chat = [], playing = false, sim = null, mounting = 0;
@@ -200,6 +202,15 @@ function chatNumbers(m) {
 }
 
 // ---------- the card ----------
+// phones: the write-up opens over everything (the video keeps playing underneath); Close, Esc or Back shuts it
+function sheet(open, fromHistory) {
+  const was = $('#card').classList.contains('open');
+  if (open && !was) history.pushState({ sheet: true }, '');                       // so Back closes it
+  if (!open && was && !fromHistory && history.state && history.state.sheet) return history.back();   // popstate closes
+  $('#card').classList.toggle('open', open);
+  document.body.classList.toggle('sheet', open);
+  if (open) $('#card').scrollTop = 0;
+}
 const STANCE = { own_view: 'His own view', joke_or_bait: 'Joke or bait', unclear: 'Stance unclear' };
 const CAT = c => c.replace(/_/g, ' ');
 // a long section shows its first 4 lines, with "Read all" to open the rest
@@ -221,7 +232,11 @@ function renderCard(c) {
   const ex = c.chat_examples.length ? el('ul', { class: 'cex' }, ...c.chat_examples.map(m => el('li', { text: m }))) : null;
   // the essentials stay open (what he said, and the context so it isn't read out of context);
   // the rest folds away under "More"
+  $('#cardopen').replaceChildren(
+    el('span', { class: sev.className, text: sev.textContent }), el('span', { class: 'cotitle', text: c.title }),
+    el('span', { class: 'cogo', text: 'Read ▸' }));
   $('#card').replaceChildren(...[
+    el('button', { type: 'button', class: 'cardclose', onclick: () => sheet(false) }, 'Close ✕'),
     meta, correctionNote(c),
     el('h2', { text: c.title }),
     el('div', { class: 'cwhen', text: `${fmtDate(c.date)} · ${c.stream_title} · ${fmtTime(c.start)}–${fmtTime(c.end)}` }),
@@ -445,13 +460,15 @@ async function renderTrophies() {
   const podium = (title, sub, people) => el('section', { class: 'podium' },
     el('h2', { class: 'fh', text: title }), el('p', { class: 'note', style: 'padding:0 0 8px', text: sub }),
     people.length ? el('div', { class: 'medals' }, ...people.map((p, i) => trophyCard(p, MEDALS[i])))
-      : el('div', { class: 'note', text: `Nobody this week had ${t.min || 5} or more such messages that the mods left up.` }));
+      : el('div', { class: 'note', text: `Nobody this week had ${t.min || 3} or more such messages that the mods left up.` }));
   box.replaceChildren(
     el('p', { class: 'note', style: 'padding:0 0 10px' },
-      document.createTextNode(`Ranked by chat messages Claude (AI) flagged and the channel's mods left up, ${t.min || 5} or more to place. ` +
-        'Only flags Claude was sure of count; Nazi/Holocaust comparisons are not counted. AI labels can be wrong: read the messages. '),
+      document.createTextNode(`Ranked by chat messages Claude (AI) flagged and the channel's mods left up, ${t.min || 3} or more to place. ` +
+        'Each message was flagged by one Claude pass and confirmed by a second, stricter one that saw it in context; ' +
+        'Nazi/Holocaust comparisons are not counted. AI labels can still be wrong: read the messages. '),
       contact ? el('a', { href: `mailto:${contact}?subject=${encodeURIComponent('Trophy error, week of ' + week)}`, text: 'Report a mistake' }) : null,
-      t.checked_through ? document.createTextNode(` · Chat checked through ${fmtDate(t.checked_through)}.`) : null),
+      t.checked_through ? document.createTextNode(` · Chat checked through ${fmtDate(t.checked_through)}.`) : null,
+      t.pending_review ? document.createTextNode(` · ${t.pending_review} chatter${t.pending_review === 1 ? '' : 's'} awaiting the second review.`) : null),
     podium('Most antisemitic chatter', 'Antisemitism only: slurs for Jews, tropes, Holocaust denial or mockery, hostility to Jews as Jews.', t.antisemitism),
     podium('Most hateful chatter', 'Any kind: slurs, antisemitism, racism and bigotry, dehumanizing language, threats, harassment.', t.hateful),
     t.streamers.length ? el('section', { class: 'podium' }, el('h2', { class: 'fh', text: '🎙️ Streamers in chat' }),
@@ -499,7 +516,7 @@ async function show(i) {
   clip = reel.clips[idx];
   playing = false; $('#play').textContent = 'Play clip';
   $('#count').textContent = `${idx + 1} / ${reel.clips.length}` + (reel.withdrawn ? ` · ${reel.withdrawn} withdrawn` : '');
-  history.replaceState(null, '', `?week=${reel.week}&clip=${idx + 1}` + (view !== 'clips' ? `&view=${view}` : ''));
+  history.replaceState(history.state, '', `?week=${reel.week}&clip=${idx + 1}` + (view !== 'clips' ? `&view=${view}` : ''));
   renderCard(clip);
   if (rscroll && !rscroll.pinned) rscroll.resume();   // a new clip starts live
   loadChat(clip);
@@ -577,6 +594,9 @@ function tick() {
     else { player.play(); playing = true; $('#play').textContent = 'Pause'; }
   });
   $('#allchat').addEventListener('change', () => { lastKey = ''; });
+  $('#cardopen').addEventListener('click', () => sheet(true));
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') sheet(false); });
+  addEventListener('popstate', () => sheet(false, true));
   $('#onlyflags').addEventListener('change', () => { lastKey = ''; });
   for (const b of document.querySelectorAll('#views button')) b.addEventListener('click', () => setView(b.dataset.view));
   for (const b of document.querySelectorAll('#rtabs button')) b.addEventListener('click', () => {
