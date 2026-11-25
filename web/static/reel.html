@@ -18,34 +18,36 @@
   <div id="trends" hidden></div>
   <div id="tip" class="tip" role="tooltip" hidden></div>
   <div id="stage" hidden>
-    <div class="rcol">
-      <div id="player"></div>
-      <div id="slider" hidden>
-        <div class="note" style="padding:0 0 6px">The original video is no longer available. The clock below plays the clip's transcript and chat.</div>
-        <input type="range" id="range" step="1" aria-label="Position">
+    <!-- video + chat stay on screen (sticky) while the write-up scrolls underneath -->
+    <div class="live">
+      <div class="rcol">
+        <div id="player"></div>
+        <div id="slider" hidden>
+          <div class="note" style="padding:0 0 6px">The original video is no longer available. The clock below plays the clip's transcript and chat.</div>
+          <input type="range" id="range" step="1" aria-label="Position">
+        </div>
+        <div class="bar clipctl">
+          <button id="play">Play clip</button>
+          <span id="clock" class="num"></span>
+          <a id="full">Full stream</a>
+        </div>
       </div>
-      <div class="bar clipctl">
-        <button id="play">Play clip</button>
-        <span id="clock" class="num"></span>
-        <a id="full">Open full stream here</a>
+      <div class="rcol side">
+        <nav class="tabs" id="rtabs">
+          <button type="button" data-pane="chat" class="on">Chat at the time</button>
+          <button type="button" data-pane="lines">Transcript</button>
+        </nav>
+        <div id="chatbox">
+          <label class="allchat"><input type="checkbox" id="allchat"> whole clip <span id="hotcount"></span></label>
+          <div id="rchat"></div>
+        </div>
+        <div id="lines" hidden></div>
       </div>
-      <article id="card"></article>
     </div>
-    <div class="rcol">
-      <nav class="tabs" id="rtabs">
-        <button type="button" data-pane="chat" class="on">Chat at the time</button>
-        <button type="button" data-pane="lines">Transcript</button>
-      </nav>
-      <div id="chatbox">
-        <label class="allchat"><input type="checkbox" id="allchat"> show the whole clip's chat</label>
-        <div id="rchat"></div>
-      </div>
-      <div id="lines" hidden></div>
-    </div>
+    <article id="card"></article>
   </div>
-  <p class="note small">Clips and fact-checks are by Claude (AI) from machine-made transcripts. Clips use a fixed rubric
-    that counts only Hasan's own words; fact-checks use web search and judge accuracy as of the day he spoke, not whether
-    he believed it. Transcripts can mishear; watch the moment before relying on it.</p>
+  <p class="note small">Picked and written by Claude (AI) from machine-made transcripts, counting only Hasan's own words.
+    Watch the moment before relying on it.</p>
 </main>
 <script src="common.js"></script>
 <script>
@@ -148,6 +150,15 @@ function chatNumbers(m) {
 // ---------- the card ----------
 const STANCE = { own_view: 'His own view', joke_or_bait: 'Joke or bait', unclear: 'Stance unclear' };
 const CAT = c => c.replace(/_/g, ' ');
+// a long section shows its first 4 lines, with "Read all" to open the rest
+function clamped(h, t) {
+  if (!t) return [];
+  const p = el('p', { class: 'clamp', text: t });
+  const b = el('button', { type: 'button', class: 'linkish', text: 'Read all' });
+  b.addEventListener('click', () => { const open = p.classList.toggle('open'); b.textContent = open ? 'Show less' : 'Read all'; });
+  requestAnimationFrame(() => { if (p.scrollHeight <= p.clientHeight + 2) b.remove(); });
+  return [el('h3', { text: h }), p, b];
+}
 function renderCard(c) {
   const sev = el('span', { class: `sev s${Math.min(Math.max(c.severity, 1), 10)}`, title: 'Severity on the rubric, 1-10', text: `${c.severity}/10` });
   const meta = el('div', { class: 'cmeta' }, sev,
@@ -156,18 +167,20 @@ function renderCard(c) {
     el('span', { class: 'tag', text: `${c.confidence} confidence` }));
   const sec = (h, t) => t ? [el('h3', { text: h }), el('p', { text: t })] : [];
   const ex = c.chat_examples.length ? el('ul', { class: 'cex' }, ...c.chat_examples.map(m => el('li', { text: m }))) : null;
+  // the essentials stay open (what he said, and the context so it isn't read out of context);
+  // the rest folds away under "More"
   $('#card').replaceChildren(
     meta, correctionNote(c),
     el('h2', { text: c.title }),
     el('div', { class: 'cwhen', text: `${fmtDate(c.date)} · ${c.stream_title} · ${fmtTime(c.start)}–${fmtTime(c.end)}` }),
     c.quote ? el('blockquote', { text: `“${c.quote}”` }) : null,
-    ...sec('What he said', c.summary), ...sec('Why it’s here', c.why_notable),
-    ...sec('Context and nuance', c.nuance), ...sec('Chat’s reaction', c.chat_reaction), ex,
-    ...chatNumbers(c.chat_metrics),
-    c.segment_reason ? el('p', { class: 'cwhen', style: 'margin-top:10px',
-      text: `Segment: ${fmtTime(c.end - c.start)}. ${c.segment_reason}` }) : null,
-    el('div', { class: 'row' }, shareButton(c, c.title)),
-    reportBox('clip', c));
+    ...sec('What he said', c.summary), ...clamped('Context', c.nuance),
+    el('details', { class: 'more' }, el('summary', { text: 'More: why it’s here, chat’s reaction, chat in numbers' }),
+      ...sec('Why it’s here', c.why_notable), ...sec('Chat’s reaction', c.chat_reaction), ex,
+      ...chatNumbers(c.chat_metrics),
+      c.segment_reason ? el('p', { class: 'cwhen', style: 'margin-top:10px',
+        text: `Segment: ${fmtTime(c.end - c.start)}. ${c.segment_reason}` }) : null),
+    el('div', { class: 'row cfoot' }, shareButton(c, c.title), reportBox('clip', c)));
   $('#full').href = watchUrl(c.video_id, c.start);
   $('#lines').replaceChildren(...c.lines.map(l => el('div', { class: 'turn' + (l.speaker === 'Media' ? ' media' : ''), 'data-t': l.t,
     onclick: () => { player && player.seek(l.t); } },
@@ -182,8 +195,31 @@ async function loadChat(c) {
     const r = await api(`/api/videos/${encodeURIComponent(c.video_id)}/chat`, { start: Math.max(c.start - 10, 0), end: c.end + 60 });
     if (clip === c) chat = r.messages;
   } catch (e) { /* shown as empty */ }
+  if (clip === c) markHot(c);
   lastKey = '';
 }
+
+// ---------- highlight the messages worth noticing ----------
+// grounded, not guessed: the messages Claude quoted as examples of chat's reaction, copy-paste bursts
+// (5+ accounts in a minute), and messages the mods deleted
+const normMsg = s => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+function markHot(c) {
+  const picked = (c.chat_examples || []).map(normMsg).filter(Boolean);
+  const bursts = ((c.chat_metrics || {}).burst_examples || []).map(b => [normMsg(b.text), b.accounts]).filter(b => b[0]);
+  const same = (a, b) => a === b || (b.length >= 12 && a.includes(b)) || (a.length >= 12 && b.includes(a));
+  let n = 0;
+  for (const m of chat) {
+    if (m.kind === 'mod_action') continue;
+    const t = normMsg(m.text);
+    m.hot = null;
+    if (t && picked.some(p => same(t, p))) m.hot = 'picked';
+    else if (t && bursts.some(([b]) => same(t, b))) m.hot = 'burst';
+    else if (m.deleted) m.hot = 'deleted';
+    if (m.hot) n++;
+  }
+  $('#hotcount').textContent = n ? `· ${n} highlighted` : '';
+}
+const HOT = { picked: 'notable', burst: 'copy-paste wave' };
 let lastKey = '';
 function renderChat(now) {
   const all = $('#allchat').checked;
@@ -198,9 +234,10 @@ function renderChat(now) {
     const time = el('span', { class: 't', text: fmtTime(m.t) });
     const who = el('span', { class: 'who', text: m.author || '?' });
     if (m.kind === 'mod_action') return el('div', { class: 'msg mod' }, time, who, document.createTextNode(' ' + m.text));
-    return el('div', { class: 'msg' + (m.deleted ? ' deleted' : '') }, time,
+    return el('div', { class: 'msg' + (m.deleted ? ' deleted' : '') + (m.hot ? ` hot ${m.hot}` : '') }, time,
       m.first_msg ? el('span', { class: 'first', text: 'first' }) : null, who, document.createTextNode(': '),
-      el('span', { class: 'body', text: m.text }), m.deleted ? el('span', { class: 'tag del', text: 'deleted by mods' }) : null);
+      el('span', { class: 'body', text: m.text }), m.deleted ? el('span', { class: 'tag del', text: 'deleted by mods' }) : null,
+      HOT[m.hot] ? el('span', { class: 'tag hottag', text: HOT[m.hot] }) : null);
   }));
   if (!all) box.scrollTop = box.scrollHeight;
 }
