@@ -750,17 +750,18 @@ PUSHBACK = re.compile(
     r"ratio|embarrassing|dishonest|misinfo\w*|cap)\b|\?{3,}", re.I)
 
 # Identity-politics language in chat, and chat going after people outside the left
-IDPOL = re.compile(
-    r"\b(woke|problematic|transphob\w*|homophob\w*|racis[tm]\w*|misogyn\w*|ableis[tm]\w*|sexis[tm]\w*|bigot\w*|cis|"
-    r"privilege[d]?|pronouns?|white (?:people|men|women|guys?)|colonizers?|settlers?|terfs?|islamophob\w*|"
-    r"anti-?black|whiteness|microaggression\w*|harmful|yikes|cancel+ed|apologi[sz]e|do better)\b", re.I)
+IDPOL = re.compile(      # words that frame things as identity politics; not war words like settlers or colonizers
+    r"\b(woke|problematic|transphob\w*|homophob\w*|racis[tm]\w*|misogyn\w*|ableis[tm]\w*|sexis[tm]\w*|bigot\w*|"
+    r"privilege[d]?|pronouns?|terfs?|islamophob\w*|anti-?black|whiteness|microaggression\w*|do better|"
+    r"apologi[sz]e to|cishet|white feminis\w*)\b", re.I)
 OUTSIDER_CHAT = re.compile(
     r"\b(libs?|liberals?|neolibs?|shitlibs?|centrists?|never ?trump\w*|republicans?|ex-?republicans?|grift\w*|sell-?outs?|"
     r"neocons?|warmongers?|war criminals?|fascists?|chuds?|rightoids?|bulwark|traitors?|ghouls?|sold out|platforming|"
     r"why (?:is|are) (?:he|you|they) (?:here|on)|dont trust|don't trust|cringe|gross|ew+)\b", re.I)
+# Named people outside the left he might court (not "liberals" in general: when he attacks libs, chat agrees with him)
 DEFAULT_OUTSIDERS = ["Bulwark", "Tim Miller", "Sarah Longwell", "JVL", "Jonathan V. Last", "Charlie Sykes", "Never Trump",
-                     "Never Trumpers", "Liz Cheney", "Adam Kinzinger", "Pakman", "Ezra Klein", "Douthat", "centrists",
-                     "moderates", "liberals", "Democratic establishment"]
+                     "Never Trumper", "Never Trumpers", "Liz Cheney", "Adam Kinzinger", "Pakman", "Ezra Klein", "Douthat",
+                     "Mark Cuban", "Joe Rogan", "Theo Von", "Flagrant", "Andrew Schulz", "Tucker", "ex-Republican"]
 
 CHATVS_RUBRIC = """You review moments from HasanAbi's (Hasan Piker's) Twitch streams for a neutral public archive's
 "Chat vs Hasan" section: political moments where his own chat and he were not on the same page. You get the
@@ -823,7 +824,7 @@ def chat_candidates(cfg, st: dict, con, entries: list[dict] | None = None) -> li
     out = []
     for v in con.execute("SELECT id, upload_date FROM videos ORDER BY upload_date DESC"):
         vid = v["id"]
-        sig = "v2:" + str(con.execute("SELECT count(*) || ':' || coalesce(max(id), 0) FROM chat WHERE video_id=?", (vid,)).fetchone()[0])
+        sig = "v4:" + str(con.execute("SELECT count(*) || ':' || coalesce(max(id), 0) FROM chat WHERE video_id=?", (vid,)).fetchone()[0])
         if cache.get(vid, {}).get("sig") != sig:
             mins: dict[int, list[int]] = defaultdict(lambda: [0, 0, 0, 0, 0])      # msgs, pushback, deleted, idpol, outsider
             for t, text, deleted, kind in con.execute("SELECT t, text, deleted, kind FROM chat WHERE video_id=?", (vid,)):
@@ -856,12 +857,12 @@ def chat_candidates(cfg, st: dict, con, entries: list[dict] | None = None) -> li
                    "idpol": idp, "outsider": outs}
             hostile = (outs + push) / n
             if k in near_talk and outs + push >= 8 and hostile >= max(2 * (base["out"] + base["push"]), 0.08):
-                found.append({**row, "why": "outsider", "score": 10 + hostile / max(base["out"] + base["push"], 0.01)})
+                found.append({**row, "why": "outsider", "tier": 0, "score": hostile / max(base["out"] + base["push"], 0.01)})
             elif idp >= 8 and idp / n >= max(st["chatvs_ratio"] * base["idpol"], 0.05):
-                found.append({**row, "why": "idpol", "score": 5 + (idp / n) / max(base["idpol"], 0.01)})
+                found.append({**row, "why": "idpol", "tier": 1, "score": (idp / n) / max(base["idpol"], 0.01)})
             elif push >= st["chatvs_min_pushback"] and push / n >= max(base["push"] * st["chatvs_ratio"], 0.06):
-                found.append({**row, "why": "pushback", "score": (push / n) / max(base["push"], 0.01)})
-        found.sort(key=lambda c: -c["score"])
+                found.append({**row, "why": "pushback", "tier": 2, "score": (push / n) / max(base["push"], 0.01)})
+        found.sort(key=lambda c: (c["tier"], -c["score"]))
         picked = []
         for c in found:                      # one per 5 minutes; the strongest few per stream
             if all(abs(c["minute"] - p["minute"]) > 5 for p in picked):
@@ -870,7 +871,7 @@ def chat_candidates(cfg, st: dict, con, entries: list[dict] | None = None) -> li
                 break
         out += picked
     save_json(work_dir(cfg) / "chatvs_minutes.json", cache)
-    return sorted(out, key=lambda c: -c["score"])      # outsider moments first, then identity politics, then pushback
+    return sorted(out, key=lambda c: (c["tier"], -c["score"]))   # outsider moments first, then identity politics, then pushback
 
 
 def chatvs_request(st: dict, con, c: dict) -> tuple:
