@@ -291,7 +291,7 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
         try:
             get_video(con, vid)
             if not admin:
-                return {"messages": with_flags(rows(con.execute(
+                return {"messages": with_flags(vid, rows(con.execute(
                     "SELECT id, t, author, badges, first_msg, subscriber, text, deleted, kind FROM chat "
                     "WHERE video_id=? AND t >= ? AND t < ? ORDER BY t, id", (vid, start, end))))}
             out = []
@@ -302,7 +302,7 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
                     d = dict(r)
                     d["t"] = round(d["t"] - off, 3)
                     out.append(d)
-            return {"messages": with_flags(out)}
+            return {"messages": with_flags(vid, out)}
         finally:
             con.close()
 
@@ -347,9 +347,9 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
     reels = P(cfg, "reels") if "reels" in cfg.get("paths", {}) else None
     flags_db = chatflags.db_path(cfg)
 
-    def with_flags(msgs: list[dict]) -> list[dict]:
-        """Claude's archive-wide chat check (chatflags.py): a 'flag' on each message it flagged."""
-        got = chatflags.flags_for(flags_db, [m["id"] for m in msgs if m.get("kind") == "msg"])
+    def with_flags(vid: str, msgs: list[dict]) -> list[dict]:
+        """Claude's archive-wide chat check (chatflags.py): a 'flag' on each message it flagged (fingerprint-matched)."""
+        got = chatflags.flags_for(flags_db, [{**m, "video_id": vid} for m in msgs if m.get("kind") == "msg"])
         for m in msgs:
             if m["id"] in got:
                 m["flag"] = got[m["id"]]
@@ -358,7 +358,9 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
     @app.get("/api/trophies/{week}")
     def week_trophies(week: str):
         """The week's most antisemitic / most hateful chatters by flagged messages mods left up (chatflags.trophies)."""
-        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", week):
+        try:
+            chatflags.week_days(week)              # a real date that is a Sunday, or 404
+        except ValueError:
             raise HTTPException(404, "not found")
         con = db()
         try:
@@ -375,21 +377,25 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
         try:
             got = rows(con.execute(
                 "SELECT c.id, c.video_id, c.t, c.author, c.text, c.deleted, c.kind, v.title, v.upload_date FROM chat c "
-                "JOIN videos v ON v.id = c.video_id WHERE lower(c.author) = lower(?) AND c.kind = 'msg' "
+                "JOIN videos v ON v.id = c.video_id WHERE c.author = ? COLLATE NOCASE AND c.kind = 'msg' "
                 "ORDER BY v.upload_date, c.t LIMIT 100000", (author,)))
         finally:
             con.close()
         if not got:
             raise HTTPException(404, "no messages from that chatter")
-        flags = chatflags.flags_for(flags_db, [r["id"] for r in got])
+        flags = chatflags.flags_for(flags_db, got)
+
+        def cell(v):                               # no spreadsheet formulas from chat text (=, +, -, @ ...)
+            v = "" if v is None else str(v)
+            return "'" + v if v[:1] in ("=", "+", "-", "@", "\t", "\r") else v
         buf = io.StringIO()
         w = csv.writer(buf)
         w.writerow(["date", "stream", "time", "author", "message", "deleted_by_mods", "flag", "flag_reason", "link"])
         for r in got:
             d, t, f = r["upload_date"] or "", int(r["t"] or 0), flags.get(r["id"]) or {}
-            w.writerow([f"{d[:4]}-{d[4:6]}-{d[6:]}", r["title"], f"{t // 3600:02d}:{t // 60 % 60:02d}:{t % 60:02d}",
-                        r["author"], r["text"], "yes" if r["deleted"] else "", f.get("category", ""), f.get("why", ""),
-                        f"/watch.html?v={r['video_id']}&t={max(t - 5, 0)}"])
+            w.writerow([f"{d[:4]}-{d[4:6]}-{d[6:]}", cell(r["title"]), f"{t // 3600:02d}:{t // 60 % 60:02d}:{t % 60:02d}",
+                        cell(r["author"]), cell(r["text"]), "yes" if r["deleted"] else "", f.get("category", ""),
+                        cell(f.get("why", "")), f"/watch.html?v={r['video_id']}&t={max(t - 5, 0)}"])
         safe = re.sub(r"[^A-Za-z0-9_]", "_", author)[:40]
         return HTMLResponse(buf.getvalue(), media_type="text/csv",
                             headers={"Content-Disposition": f"attachment; filename=chat-{safe}.csv"})

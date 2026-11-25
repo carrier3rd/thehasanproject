@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Watch · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112405"></head>
+<title>Watch · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112406"></head>
 <body><main class="watch" data-pane="transcript">
   <nav id="panes" class="tabs" aria-label="Show">
     <button type="button" data-pane="transcript" class="on">Transcript</button>
@@ -28,7 +28,7 @@
     <div id="chat"><div class="note" style="padding:10px">No chat for this moment.</div></div>
   </div>
 </main>
-<script src="common.js?v=2026112405"></script>
+<script src="common.js?v=2026112406"></script>
 <script>
 const params = new URLSearchParams(location.search);
 const VID = params.get('v'), T0 = Math.max(+params.get('t') || 0, 0);
@@ -41,25 +41,35 @@ const buckets = new Map();   // 60 s bucket index -> messages array | 'loading'
 function loadScript(src) {
   return new Promise((ok, fail) => document.head.append(el('script', { src, onload: ok, onerror: fail })));
 }
+// a blocked player script may never load or answer: give up after a while and use the clock instead
+const within = (ms, p) => Promise.race([p, new Promise((_, fail) => setTimeout(() => fail(new Error('timeout')), ms))]);
 async function initPlayer() {
   const box = $('#player');
   if (video.embed_type === 'youtube') {
-    await new Promise(ok => { window.onYouTubeIframeAPIReady = ok; loadScript('https://www.youtube.com/iframe_api'); });
-    await new Promise(ok => {
+    await within(15000, new Promise((ok, fail) => { window.onYouTubeIframeAPIReady = ok; loadScript('https://www.youtube.com/iframe_api').catch(fail); }));
+    await within(15000, new Promise(ok => {
       const yt = new YT.Player(box.appendChild(el('div')), { videoId: video.embed_id, width: '100%', height: '100%',
         playerVars: { start: Math.floor(T0), rel: 0 }, events: { onReady: ok } });
       player = { getTime: () => (yt.getCurrentTime ? yt.getCurrentTime() : now), seek: t => yt.seekTo(t, true) };
-    });
+    }));
   } else if (video.embed_type === 'twitch' && (!twitchGone('twitch', video.upload_date)
              || new URLSearchParams(location.search).get('player') === 'twitch')) {
-    await loadScript('https://player.twitch.tv/js/embed/v1.js');
+    await within(15000, loadScript('https://player.twitch.tv/js/embed/v1.js'));
     const tw = new Twitch.Player(box, { video: String(video.embed_id).replace(/^v/, ''), parent: [cfg.site_domain],
       width: '100%', height: '100%', autoplay: false, time: fmtTime(T0).replace(/(\d+):(\d+):(\d+)/, '$1h$2m$3s') });
     player = { getTime: () => tw.getCurrentTime() || now, seek: t => tw.seek(t) };
   } else {
+    useClock();
+  }
+}
+function useClock(reason) {
+  {
+    const box = $('#player');
+    box.replaceChildren();
     box.hidden = true;
     $('#slider').hidden = false;
-    if (video.embed_type === 'twitch') {   // past Twitch's 60 days: say why, and offer the player anyway
+    if (reason) $('#slider .note').textContent = reason;
+    if (!reason && video.embed_type === 'twitch') {   // past Twitch's 60 days: say why, and offer the player anyway
       const u = new URL(location.href); u.searchParams.set('player', 'twitch');
       $('#slider .note').replaceChildren(document.createTextNode('Twitch deletes past broadcasts about 60 days after the stream, '
         + 'so this video is gone. The transcript and chat play with the clock below. '),
@@ -249,7 +259,7 @@ function tick() {
     seek((e.clientX - box.left) / box.width * (video.duration || 0));
   });
   try { await initPlayer(); }
-  catch (e) { $('#player').replaceChildren(el('div', { class: 'note', style: 'padding:16px;color:#ccc', text: 'The video player could not load. Transcript and chat still work.' })); }
+  catch (e) { useClock('The video player could not load (an ad or script blocker can cause this). Use the slider to move through the transcript and chat.'); }
   tick();
   setInterval(tick, 500);
 })();

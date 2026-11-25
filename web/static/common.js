@@ -1,7 +1,7 @@
 // Shared helpers. All DB/user text goes into the DOM through textContent, never innerHTML.
 // The Twitch player refuses to load on a plain-http page, so a public http visit moves to https
 // (the Cloudflare and Tailscale addresses both serve https; local addresses are left alone).
-if (location.protocol === 'http:' && !/^(localhost|127\.|10\.|192\.168\.|\[?::1)/.test(location.hostname))
+if (location.protocol === 'http:' && !location.port && !/^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.|\[?::1)/.test(location.hostname))
   location.replace('https://' + location.host + location.pathname + location.search + location.hash);
 const $ = (sel, root = document) => root.querySelector(sel);
 
@@ -41,13 +41,17 @@ function snippetNodes(s) {
 // (only the placeholder came back), there is nothing to reveal.
 const revealable = m => !!(m.deleted && m.kind !== 'mod_action' && m.text && !/^\[deleted by mods\]$/i.test(m.text.trim())
   && !(CONFIG && CONFIG.mode === 'admin'));
+const REVEALED = new Set();   // ids opened this visit: the chat panes re-render often, opened stays opened
 function deletedBody(m, nodes) {
   if (!revealable(m)) return el('span', { class: 'body', text: m.text || '[deleted by mods]' });
   const text = m.text;
+  if (m.id !== undefined && REVEALED.has(m.id))
+    return el('span', { class: 'body revealed' }, ...(nodes || [document.createTextNode(text)]));
   const b = el('button', { type: 'button', class: 'reveal', title: 'Show what the message said',
     text: 'deleted by mods · tap to show' });
   b.addEventListener('click', e => {
     e.stopPropagation();
+    if (m.id !== undefined) REVEALED.add(m.id);
     b.replaceWith(el('span', { class: 'body revealed' }, ...(nodes || [document.createTextNode(text)])));
   });
   return b;

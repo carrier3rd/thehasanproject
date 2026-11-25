@@ -4,6 +4,7 @@
   :root { --bg:#151517; --panel:#1e1e21; --ink:#ecebe7; --muted:#9a978f; --line:#313136; --accent:#b58cff; --mark:#6b5a12;
           --media:#85827b; --band:#2a2a2e; --warn:#ff8a80; } }
 * { box-sizing: border-box; }
+[hidden] { display:none !important; }
 html, body { margin:0; } html { height:100%; } body { min-height:100%; }
 body:has(main.watch) { height:100%; }   /* only the watch page is a fixed-height app; other pages scroll, footer at the end */
 body { background:var(--bg); color:var(--ink); font:15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; display:flex; flex-direction:column; }

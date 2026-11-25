@@ -24,6 +24,7 @@ EXTRA = [  # id, author, badges, text, deleted
     (900008, "partnerguy", "partner/1", "BAD hitler had a point", 0),     # a streamer: listed under streamers
     (900009, "hasanabi", "broadcaster/1", "BAD nazi joke", 0),             # the broadcaster is never ranked
     (900010, "nice", "", "hello chat, union strong", 0),                   # no keyword: never sent to Claude
+    (900013, "troll1", "", "=HYPERLINK(1) jews", 0),                       # a spreadsheet formula, unflagged
 ]
 
 
@@ -79,9 +80,29 @@ def test_run_flags_candidates_once_and_ranks_the_week(flagged):
     t = chatflags.trophies(chatflags.db_path(cfg), reel.public_db(cfg), WEEK, chatflags.settings(cfg))
     assert [p["author"] for p in t["antisemitism"]] == ["troll1"] and t["antisemitism"][0]["count"] == 5
     assert [p["author"] for p in t["hateful"]] == ["troll1"]
-    assert [p["author"] for p in t["streamers"]] == ["partnerguy"] and t["streamers"][0]["partner"]
+    assert t["streamers"] == []                                     # one flag is below the minimum for streamers too
+    low = chatflags.trophies(chatflags.db_path(cfg), reel.public_db(cfg), WEEK, {"trophy_min": 1})
+    assert [p["author"] for p in low["streamers"]] == ["partnerguy"] and low["streamers"][0]["partner"]
     assert all("hasanabi" not in json.dumps(t[k]) for k in ("antisemitism", "hateful", "streamers"))
     assert chatflags.trophies(chatflags.db_path(cfg), reel.public_db(cfg), "2026-11-08")["antisemitism"] == []
+    with pytest.raises(ValueError):
+        chatflags.week_days("2026-11-02")                           # a Monday
+
+
+def test_a_reused_message_id_never_inherits_a_flag(flagged):
+    """Chat reloads reuse row ids: the flag belongs to the message (stream, author, text), not the id."""
+    cfg, fake = flagged
+    chatflags.run(cfg)
+    pub = sqlite3.connect(reel.public_db(cfg).execute("PRAGMA database_list").fetchone()[2])
+    pub.execute("UPDATE chat SET author='innocent', text='hello jews, good stream' WHERE id=900001")
+    pub.commit()
+    pub.close()
+    msgs = [{"id": 900001, "video_id": "v1001", "author": "innocent", "text": "hello jews, good stream"}]
+    assert chatflags.flags_for(chatflags.db_path(cfg), msgs) == {}
+    t = chatflags.trophies(chatflags.db_path(cfg), reel.public_db(cfg), WEEK, chatflags.settings(cfg))
+    assert t["antisemitism"] == []                                  # troll1 now has 4 matching flags: below 5
+    calls = len(fake.calls)
+    assert chatflags.run(cfg) == "done" and len(fake.calls) == calls + 1   # the stream changed: the new text is checked
 
 
 def test_site_shows_flags_trophies_and_exports_csv(flagged):
@@ -93,10 +114,12 @@ def test_site_shows_flags_trophies_and_exports_csv(flagged):
     assert msgs[900001]["flag"]["category"] == "antisemitism" and "flag" not in msgs[900010]
     t = client.get(f"/api/trophies/{WEEK}").json()
     assert t["antisemitism"][0]["author"] == "troll1"
-    assert client.get("/api/trophies/not-a-week").status_code == 404
+    for bad in ("not-a-week", "2026-02-30", "2026-11-02"):
+        assert client.get(f"/api/trophies/{bad}").status_code == 404, bad
     r = client.get("/api/chat/author.csv", params={"author": "TROLL1"})
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/csv")
     lines = r.text.strip().splitlines()
-    assert lines[0].startswith("date,stream,time,author,message") and len(lines) == 7
+    assert lines[0].startswith("date,stream,time,author,message") and len(lines) == 8
+    assert "'=HYPERLINK" in r.text and ",=HYPERLINK" not in r.text      # no formulas reach a spreadsheet
     assert "antisemitism" in r.text and "/watch.html?v=v1001" in r.text
     assert client.get("/api/chat/author.csv", params={"author": "nobody_here"}).status_code == 404

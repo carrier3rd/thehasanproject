@@ -500,6 +500,8 @@ def run_cli(cfg, st: dict, kind: str, reqs: list[tuple[str, str, str, dict | Non
     with ThreadPoolExecutor(max_workers=max(1, st["cli_workers"])) as pool:
         futures = [pool.submit(one, r) for r in reqs]
         for fut in futures:
+            if fut.cancelled():                    # dropped after a usage limit; asked again next run
+                continue
             try:
                 key, value = fut.result()
             except UsageLimit as e:

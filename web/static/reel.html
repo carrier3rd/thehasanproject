@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Weekly reel · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112405"></head>
+<title>Weekly reel · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112406"></head>
 <body><main class="reel">
   <p class="intro">Each week, Claude reads every line of every stream and picks the moments worth a look, with the chat at the time and fact-checks of his claims.</p>
   <div class="reelbar">
@@ -53,9 +53,9 @@
   <p class="note small">Picked and written by Claude (AI) from machine-made transcripts, counting only Hasan's own words.
     Watch the moment before relying on it.</p>
 </main>
-<script src="common.js?v=2026112405"></script>
+<script src="common.js?v=2026112406"></script>
 <script>
-let cfg, reel = null, idx = 0, clip = null, player = null, chat = [], playing = false, sim = null;
+let cfg, reel = null, idx = 0, clip = null, player = null, chat = [], playing = false, sim = null, mounting = 0;
 const qs = new URLSearchParams(location.search);
 
 function loadScript(src) {
@@ -67,6 +67,7 @@ function loadScript(src) {
 async function mountPlayer(c) {
   const box = $('#player');
   box.replaceChildren(); box.hidden = false; $('#slider').hidden = true;
+  let failed = false;
   if (sim) { clearInterval(sim); sim = null; }
   try {
     if (c.embed_type === 'twitch' && !twitchGone('twitch', c.date)) {
@@ -84,11 +85,13 @@ async function mountPlayer(c) {
       });
     }
   } catch (e) {
-    box.replaceChildren(el('div', { class: 'note', style: 'padding:16px;color:#ccc', text: 'The video player could not load. Transcript and chat still work.' }));
+    failed = true;
   }
   // no embed (VOD deleted) or the embed failed: a clock over the clip
   box.hidden = true; $('#slider').hidden = false;
-  $('#slider .note').textContent = twitchGone(c.embed_type, c.date)
+  $('#slider .note').textContent = failed
+    ? 'The video player could not load (an ad or script blocker can cause this). The clock below plays the clip\u2019s transcript and chat.'
+    : twitchGone(c.embed_type, c.date)
     ? "Twitch deletes past broadcasts about 60 days after the stream, so this video is gone. The clock below plays the clip's transcript and chat."
     : "The original video is no longer available. The clock below plays the clip's transcript and chat.";
   const range = $('#range'); range.min = Math.floor(c.start); range.max = Math.ceil(c.end);
@@ -240,7 +243,7 @@ async function loadChat(c) {
   chat = [];
   $('#rchat').replaceChildren(el('div', { class: 'note', style: 'padding:10px', text: 'Loading chat…' }));
   try {
-    const r = await api(`/api/videos/${encodeURIComponent(c.video_id)}/chat`, { start: Math.max(c.start - 10, 0), end: c.end + 60 });
+    const r = await api(`/api/videos/${encodeURIComponent(c.video_id)}/chat`, { start: Math.max(c.start - 60, 0), end: c.end + 60 });
     if (clip === c) chat = r.messages;
   } catch (e) { /* shown as empty */ }
   if (clip === c) markHot(c);
@@ -490,11 +493,13 @@ async function show(i) {
   clip = reel.clips[idx];
   playing = false; $('#play').textContent = 'Play clip';
   $('#count').textContent = `${idx + 1} / ${reel.clips.length}` + (reel.withdrawn ? ` · ${reel.withdrawn} withdrawn` : '');
-  history.replaceState(null, '', `?week=${reel.week}&clip=${idx + 1}`);
+  history.replaceState(null, '', `?week=${reel.week}&clip=${idx + 1}` + (view !== 'clips' ? `&view=${view}` : ''));
   renderCard(clip);
   loadChat(clip);
   player = null;
-  player = await mountPlayer(clip);
+  const token = ++mounting;            // a slower, older mount must not replace this clip's player
+  const p = await mountPlayer(clip);
+  if (token === mounting) player = p;
 }
 
 async function loadWeek(week) {
@@ -545,7 +550,7 @@ function tick() {
   $('#prev').addEventListener('click', () => show(idx - 1));
   $('#next').addEventListener('click', () => show(idx + 1));
   document.addEventListener('keydown', e => {
-    if (e.target.matches('input, select, textarea')) return;
+    if (e.target.matches('input, select, textarea') || view !== 'clips') return;
     if (e.key === 'ArrowLeft') show(idx - 1);
     if (e.key === 'ArrowRight') show(idx + 1);
   });
