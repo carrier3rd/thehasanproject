@@ -32,6 +32,23 @@ function snippetNodes(s) {
   return out;
 }
 
+// A mod-deleted chat message: hidden behind "deleted by mods · tap to show"; a click shows the text.
+// `nodes` is what to show once opened (defaults to the message text). If the text was not published
+// (only the placeholder came back), there is nothing to reveal.
+const revealable = m => !!(m.deleted && m.kind !== 'mod_action' && m.text && !/^\[deleted by mods\]$/i.test(m.text.trim())
+  && !(CONFIG && CONFIG.mode === 'admin'));
+function deletedBody(m, nodes) {
+  if (!revealable(m)) return el('span', { class: 'body', text: m.text || '[deleted by mods]' });
+  const text = m.text;
+  const b = el('button', { type: 'button', class: 'reveal', title: 'Show what the message said',
+    text: 'deleted by mods · tap to show' });
+  b.addEventListener('click', e => {
+    e.stopPropagation();
+    b.replaceWith(el('span', { class: 'body revealed' }, ...(nodes || [document.createTextNode(text)])));
+  });
+  return b;
+}
+
 async function api(path, params = {}) {
   const qs = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) if (v !== '' && v !== null && v !== undefined) qs.set(k, v);

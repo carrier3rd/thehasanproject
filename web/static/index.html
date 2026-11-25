@@ -182,11 +182,13 @@ async function run() {
         link: h.t === null ? watchUrl(h.video_id, 0) : watchUrl(h.video_id, Math.max(h.t - 5, 0)), h }));
       box.replaceChildren(...state.rows.map(r => {
         const h = r.h, tags = [];
-        if (h.deleted) tags.push('deleted by mods');
+        const hidden = revealable({ deleted: h.deleted, kind: h.kind, text: plain(h.snippet) });
+        if (h.deleted && !hidden) tags.push('deleted by mods');
         if (h.kind === 'mod_action') tags.push('mod action');
         if (h.first_msg) tags.push('first message');
         if (h.user_id) tags.push('id ' + h.user_id);
-        return hitRow(r, snippetNodes(h.snippet), tags);
+        return hitRow(r, hidden ? [deletedBody({ deleted: 1, text: plain(h.snippet) }, snippetNodes(h.snippet))]
+          : snippetNodes(h.snippet), tags);
       }));
     } else {
       if (!q) return box.replaceChildren(el('div', { class: 'note', text: 'Ask a question or describe a topic.' }));

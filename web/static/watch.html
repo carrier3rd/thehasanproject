@@ -152,8 +152,8 @@ function renderChat(t) {
     if (m.kind === 'mod_action') return el('div', { class: 'msg mod' }, time, who, document.createTextNode(' ' + m.text));
     return el('div', { class: 'msg' + (m.deleted ? ' deleted' : '') }, time,
       m.first_msg ? el('span', { class: 'first', title: 'First message in this channel', text: 'first' }) : null,
-      who, document.createTextNode(': '), el('span', { class: 'body', text: m.text }),
-      m.deleted ? el('span', { class: 'tag del', text: 'deleted by mods' }) : null);
+      who, document.createTextNode(': '), m.deleted ? deletedBody(m) : el('span', { class: 'body', text: m.text }),
+      m.deleted && !revealable(m) ? el('span', { class: 'tag del', text: 'deleted by mods' }) : null);
   }));
   box.scrollTop = box.scrollHeight;
 }

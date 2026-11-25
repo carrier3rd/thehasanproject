@@ -170,7 +170,7 @@ function renderCard(c) {
   const ex = c.chat_examples.length ? el('ul', { class: 'cex' }, ...c.chat_examples.map(m => el('li', { text: m }))) : null;
   // the essentials stay open (what he said, and the context so it isn't read out of context);
   // the rest folds away under "More"
-  $('#card').replaceChildren(
+  $('#card').replaceChildren(...[
     meta, correctionNote(c),
     el('h2', { text: c.title }),
     el('div', { class: 'cwhen', text: `${fmtDate(c.date)} · ${c.stream_title} · ${fmtTime(c.start)}–${fmtTime(c.end)}` }),
@@ -181,7 +181,7 @@ function renderCard(c) {
       ...chatNumbers(c.chat_metrics),
       c.segment_reason ? el('p', { class: 'cwhen', style: 'margin-top:10px',
         text: `Segment: ${fmtTime(c.end - c.start)}. ${c.segment_reason}` }) : null),
-    el('div', { class: 'row cfoot' }, shareButton(c, c.title), reportBox('clip', c)));
+    el('div', { class: 'row cfoot' }, shareButton(c, c.title), reportBox('clip', c))].filter(x => x != null));
   $('#full').href = watchUrl(c.video_id, c.start);
   $('#lines').replaceChildren(...c.lines.map(l => el('div', { class: 'turn' + (l.speaker === 'Media' ? ' media' : ''), 'data-t': l.t,
     onclick: () => { player && player.seek(l.t); } },
@@ -201,8 +201,8 @@ async function loadChat(c) {
 }
 
 // ---------- highlight the messages worth noticing ----------
-// grounded, not guessed: the messages Claude quoted as examples of chat's reaction, copy-paste bursts
-// (5+ accounts in a minute), and messages the mods deleted
+// grounded, not guessed: the messages Claude quoted as examples of chat's reaction and copy-paste bursts
+// (5+ accounts in a minute). Mod-deleted messages have their own tap-to-show look, so they aren't counted here.
 const normMsg = s => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
 function markHot(c) {
   const picked = (c.chat_examples || []).map(normMsg).filter(Boolean);
@@ -215,7 +215,6 @@ function markHot(c) {
     m.hot = null;
     if (t && picked.some(p => same(t, p))) m.hot = 'picked';
     else if (t && bursts.some(([b]) => same(t, b))) m.hot = 'burst';
-    else if (m.deleted) m.hot = 'deleted';
     if (m.hot) n++;
   }
   $('#hotcount').textContent = n ? `· ${n} highlighted` : '';
@@ -237,7 +236,8 @@ function renderChat(now) {
     if (m.kind === 'mod_action') return el('div', { class: 'msg mod' }, time, who, document.createTextNode(' ' + m.text));
     return el('div', { class: 'msg' + (m.deleted ? ' deleted' : '') + (m.hot ? ` hot ${m.hot}` : '') }, time,
       m.first_msg ? el('span', { class: 'first', text: 'first' }) : null, who, document.createTextNode(': '),
-      el('span', { class: 'body', text: m.text }), m.deleted ? el('span', { class: 'tag del', text: 'deleted by mods' }) : null,
+      m.deleted ? deletedBody(m) : el('span', { class: 'body', text: m.text }),
+      m.deleted && !revealable(m) ? el('span', { class: 'tag del', text: 'deleted by mods' }) : null,
       HOT[m.hot] ? el('span', { class: 'tag hottag', text: HOT[m.hot] }) : null);
   }));
   if (!all) box.scrollTop = box.scrollHeight;
