@@ -455,7 +455,9 @@ async function loadWeek(week) {
 function tick() {
   if (!clip || !player) return;
   let t = clip.start;
-  try { const g = player.get(); if (typeof g === 'number' && isFinite(g)) t = g; } catch (e) { /* not ready */ }
+  // before the first play some players (Twitch on phones) report 0, not the cued time: treat that as the clip start
+  // so chat shows what led up to the moment instead of "Chat appears here as the clip plays"
+  try { const g = player.get(); if (typeof g === 'number' && isFinite(g) && g > 1) t = g; } catch (e) { /* not ready */ }
   if (playing && t >= clip.end) { player.pause(); playing = false; $('#play').textContent = 'Replay clip'; }
   $('#clock').textContent = `${fmtTime(Math.max(t - clip.start, 0))} / ${fmtTime(clip.end - clip.start)}`;
   for (const n of document.querySelectorAll('#lines .turn')) {
