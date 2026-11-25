@@ -612,7 +612,7 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
 
     @app.get("/{path:path}")
     def static(path: str):
-        path = path or "index.html"
+        path = path or "reel.html"          # the landing page is the weekly reel; search is index.html
         for base in static_dirs:
             target = (base / path).resolve()
             if target.is_file() and base.resolve() in target.parents:

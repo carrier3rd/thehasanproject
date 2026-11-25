@@ -114,6 +114,7 @@ main.watch { max-width:none; display:grid; grid-template-columns:minmax(0,1fr) 3
 
 /* weekly reel */
 main.reel { max-width:1200px; }
+.intro { margin:0 0 10px; color:var(--muted); font-size:14px; }
 .reelbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
 .reelbar select { flex:1; min-width:200px; }
 .reelbar button { font-size:18px; padding:4px 14px; }

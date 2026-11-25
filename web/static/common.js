@@ -58,7 +58,7 @@ async function chrome(active) {
     el('input', { type: 'search', name: 'q', placeholder: 'Search stream and chat…', 'aria-label': 'Search' }),
     el('input', { type: 'hidden', name: 'tab', value: 'transcripts' }));
   document.body.prepend(el('header', {},
-    el('a', { href: 'index.html', class: 'brand', text: 'VOD archive' }),
+    el('a', { href: '/', class: 'brand', text: 'VOD archive' }),
     link('index.html', 'Search'), link('videos.html', 'Videos'), link('reel.html', 'Weekly'), link('factchecks.html', 'Fact-checks'), link('about.html', 'About'), box,
     cfg.mode === 'admin' ? link('flags.html', 'Reports') : null,
     cfg.mode === 'admin' ? el('span', { class: 'badge', text: 'ADMIN · private' }) : null));
