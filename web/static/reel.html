@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Weekly reel · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112403"></head>
+<title>Weekly reel · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112404"></head>
 <body><main class="reel">
   <p class="intro">Each week, Claude reads every line of every stream and picks the moments worth a look, with the chat at the time and fact-checks of his claims.</p>
   <div class="reelbar">
@@ -40,7 +40,9 @@
         <button type="button" data-pane="lines">Transcript</button>
       </nav>
       <div id="chatbox">
-        <label class="allchat"><input type="checkbox" id="allchat"> whole clip <span id="hotcount"></span></label>
+        <div class="allchat"><label><input type="checkbox" id="allchat"> whole clip</label>
+          <label id="flagonly" hidden><input type="checkbox" id="onlyflags"> flagged only</label>
+          <span id="hotcount"></span></div>
         <div id="rchat"></div>
       </div>
       <div id="lines" hidden></div>
@@ -49,7 +51,7 @@
   <p class="note small">Picked and written by Claude (AI) from machine-made transcripts, counting only Hasan's own words.
     Watch the moment before relying on it.</p>
 </main>
-<script src="common.js?v=2026112403"></script>
+<script src="common.js?v=2026112404"></script>
 <script>
 let cfg, reel = null, idx = 0, clip = null, player = null, chat = [], playing = false, sim = null;
 const qs = new URLSearchParams(location.search);
@@ -251,23 +253,30 @@ function markHot(c) {
   const picked = (c.chat_examples || []).map(normMsg).filter(Boolean);
   const bursts = ((c.chat_metrics || {}).burst_examples || []).map(b => [normMsg(b.text), b.accounts]).filter(b => b[0]);
   const same = (a, b) => a === b || (b.length >= 12 && a.includes(b)) || (a.length >= 12 && b.includes(a));
-  let n = 0;
+  // messages Claude flagged as hateful or abusive when the reel was built (by message id)
+  const flags = new Map((c.chat_flags || []).map(f => [f.id, f]));
+  let n = 0, nf = 0;
   for (const m of chat) {
     if (m.kind === 'mod_action') continue;
     const t = normMsg(m.text);
-    m.hot = null;
-    if (t && picked.some(p => same(t, p))) m.hot = 'picked';
+    m.hot = null; m.flag = flags.get(m.id) || null;
+    if (m.flag) { m.hot = 'flag'; nf++; }
+    else if (t && picked.some(p => same(t, p))) m.hot = 'picked';
     else if (t && bursts.some(([b]) => same(t, b))) m.hot = 'burst';
-    if (m.hot) n++;
+    if (m.hot && m.hot !== 'flag') n++;
   }
-  $('#hotcount').textContent = n ? `· ${n} highlighted` : '';
+  $('#hotcount').textContent = [nf ? `${nf} flagged` : '', n ? `${n} notable` : ''].filter(Boolean).join(' · ');
+  $('#flagonly').hidden = !nf;
+  if (!nf) $('#onlyflags').checked = false;
 }
+const FLAG = { slur: 'slur', antisemitism: 'antisemitism', nazi_or_holocaust_comparison: 'Nazi comparison', racism_or_bigotry: 'racism / bigotry', dehumanizing: 'dehumanizing',
+  violent_threat_or_glorification: 'violence', harassment_or_doxxing: 'harassment', sexual_harassment: 'sexual harassment' };
 const HOT = { picked: 'notable', burst: 'copy-paste wave' };
 let lastKey = '';
 function renderChat(now) {
-  const all = $('#allchat').checked;
-  const msgs = all ? chat : chat.filter(m => m.t <= now).slice(-60);
-  const key = `${all}-${msgs.length}-${msgs.length ? msgs[msgs.length - 1].id : 0}`;
+  const only = $('#onlyflags').checked, all = $('#allchat').checked || only;
+  const msgs = only ? chat.filter(m => m.flag) : all ? chat : chat.filter(m => m.t <= now).slice(-60);
+  const key = `${all}-${only}-${msgs.length}-${msgs.length ? msgs[msgs.length - 1].id : 0}`;
   if (key === lastKey) return;
   lastKey = key;
   const box = $('#rchat');
@@ -281,6 +290,7 @@ function renderChat(now) {
       m.first_msg ? el('span', { class: 'first', text: 'first' }) : null, who, document.createTextNode(': '),
       m.deleted ? deletedBody(m) : el('span', { class: 'body', text: m.text }),
       m.deleted && !revealable(m) ? el('span', { class: 'tag del', text: 'deleted by mods' }) : null,
+      m.flag ? el('span', { class: 'tag hottag flagtag', title: m.flag.why, text: FLAG[m.flag.category] || m.flag.category }) : null,
       HOT[m.hot] ? el('span', { class: 'tag hottag', text: HOT[m.hot] }) : null);
   }));
   if (!all) box.scrollTop = box.scrollHeight;
@@ -507,6 +517,7 @@ function tick() {
     else { player.play(); playing = true; $('#play').textContent = 'Pause'; }
   });
   $('#allchat').addEventListener('change', () => { lastKey = ''; });
+  $('#onlyflags').addEventListener('change', () => { lastKey = ''; });
   for (const b of document.querySelectorAll('#views button')) b.addEventListener('click', () => setView(b.dataset.view));
   for (const b of document.querySelectorAll('#rtabs button')) b.addEventListener('click', () => {
     for (const o of document.querySelectorAll('#rtabs button')) o.classList.toggle('on', o === b);

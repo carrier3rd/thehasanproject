@@ -50,13 +50,14 @@ DEFAULTS = {"model": "claude-opus-5-5", "screen_effort": "low", "judge_effort": 
             # `reel.py weekly` (deploy/laptop/user/reel-weekly.timer), never billed to the API. "api": the paid
             # Message Batches API, from the hourly `reel.py auto`; only when the config asks for it.
             "backend": "subscription", "claude_bin": "claude", "cli_workers": 2, "cli_timeout_s": 1200,
-            "cli_backfill_per_run": 1}      # earlier weeks filled in per weekly run, so usage is spread out
+            "cli_backfill_per_run": 1,      # earlier weeks filled in per weekly run, so usage is spread out
+            "chat_effort": "low", "chat_per_request": 400}   # chat check: messages per request
 CATEGORIES = ["antisemitism", "nazi_or_holocaust_comparison", "justifying_or_glorifying_violence",
               "dehumanization_or_bigotry", "targeting_individuals", "conspiracy", "anti_american",
               "misinformation", "other"]
 STANCES = ["own_view", "joke_or_bait", "reading_or_quoting", "condemning", "unclear"]
 WEEK_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-VERSION = 5          # bump when selection logic changes: auto rebuilds reels made by an older version (from cache)
+VERSION = 6          # bump when selection logic changes: auto rebuilds reels made by an older version (from cache)
 _NONWORD = re.compile(r"[^a-z0-9]+")
 
 
@@ -298,7 +299,8 @@ def in_flight(cfg) -> set[str]:
 
 def submit(cfg, st: dict, kind: str, reqs: list[tuple[str, str, str, dict | None]], client) -> str:
     """reqs: (cache key, system, user prompt, JSON schema or None)."""
-    effort = {"screen": st["screen_effort"], "judge": st["judge_effort"], "fact": st["fact_effort"]}[kind]
+    effort = {"screen": st["screen_effort"], "judge": st["judge_effort"], "fact": st["fact_effort"],
+              "chat": st["chat_effort"]}[kind]
     requests = []
     for i, (key, system, user, schema) in enumerate(reqs):
         params = {"model": st["model"], "max_tokens": 16000,
@@ -420,7 +422,8 @@ def cli_env() -> dict:
 
 
 def cli_args(st: dict, kind: str, system: str, schema: dict | None) -> list[str]:
-    effort = {"screen": st["screen_effort"], "judge": st["judge_effort"], "fact": st["fact_effort"]}[kind]
+    effort = {"screen": st["screen_effort"], "judge": st["judge_effort"], "fact": st["fact_effort"],
+              "chat": st["chat_effort"]}[kind]
     args = [st["claude_bin"], "-p", "--model", st["model"], "--effort", effort,
             "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--strict-mcp-config",
             "--disable-slash-commands", "--setting-sources", "", "--system-prompt", system]
@@ -775,6 +778,81 @@ def last_json(text: str):
     return found
 
 
+# ---------------------------------------------------------------- pass 4: chat check
+CHAT_CATEGORIES = ["slur", "antisemitism", "nazi_or_holocaust_comparison", "racism_or_bigotry", "dehumanizing",
+                   "violent_threat_or_glorification", "harassment_or_doxxing", "sexual_harassment"]
+CHAT_RUBRIC = """You review Twitch chat messages from HasanAbi's (Hasan Piker's) stream, shown next to a clip on a research
+site, and flag the hateful or abusive ones so readers can find them. Each line is `id<TAB>message`; a line starting
+with [deleted by mods] was removed by the channel's moderators.
+
+Flag a message only if it clearly is one of:
+- slur: a slur against a group (racial, ethnic, religious, homophobic, transphobic, ableist), including obvious misspellings
+- antisemitism: hostility to Jews as Jews, antisemitic tropes or conspiracy (Jewish control, blood libel, "the Jews" did
+  X), Holocaust denial or mockery, calling Jews generally Nazis. Criticism of Israel or Zionism as a political ideology is
+  NOT antisemitism by itself
+- nazi_or_holocaust_comparison: likening Israel, Zionists or Israelis to Nazis, or Gaza to the Holocaust (death camps,
+  "the new Nazis", "Zionism is Nazism"). The site reports these as comparisons, without calling them antisemitic; use
+  antisemitism instead when the message targets Jews as Jews
+- racism_or_bigotry: hostility to people for their race, ethnicity, religion (incl. Islamophobia), nationality, gender,
+  sexuality or disability
+- dehumanizing: describing a group of people as animals, vermin, disease, subhuman, or deserving to die
+- violent_threat_or_glorification: threats, calls for violence or killing, celebrating deaths or attacks on civilians
+- harassment_or_doxxing: abuse aimed at a specific person (a chatter, a guest, a public figure) beyond insult, or
+  personal information about someone
+- sexual_harassment: sexual comments aimed at a specific person
+
+Do NOT flag: ordinary insults, swearing, emotes, spam, jokes without a target group, strong political opinions, or
+messages quoting something only to criticise it. When unsure, don't flag. Use only ids from the list.
+For each flag give the category and a few words on why (no more than 12 words)."""
+CHAT_SCHEMA = {
+    "type": "object", "additionalProperties": False, "required": ["flags"],
+    "properties": {"flags": {"type": "array", "items": {
+        "type": "object", "additionalProperties": False, "required": ["id", "category", "why"],
+        "properties": {"id": {"type": "integer"}, "category": {"type": "string", "enum": CHAT_CATEGORIES},
+                       "why": {"type": "string"}}}}}}
+
+
+def clip_chat(con, vid: str, start: float, end: float) -> list[dict]:
+    """The chat the weekly page shows next to a clip (10 s before to 60 s after), with message ids. Mod-deleted
+    messages are included when their text was published."""
+    return [dict(r) for r in con.execute(
+        "SELECT id, t, text, deleted FROM chat WHERE video_id=? AND t BETWEEN ? AND ? AND kind='msg' ORDER BY t, id",
+        (vid, max(start - 10, 0), end + 60)) if (r["text"] or "").strip() and r["text"].strip() != "[deleted by mods]"]
+
+
+def chat_requests(cfg, st, con, clips) -> tuple[list, dict, bool]:
+    """-> (requests still needed, {clip id: [cached answers with their message ids]}, whether some are in flight)."""
+    need, have, flying, waiting = [], {}, in_flight(cfg), False
+    n = max(50, int(st["chat_per_request"]))
+    for c in clips:
+        msgs = clip_chat(con, c["video_id"], c["start"], c["end"])
+        have[c["id"]] = []
+        for i in range(0, len(msgs), n):
+            part = msgs[i:i + n]
+            text = "\n".join(f"{m['id']}\t{'[deleted by mods] ' if m['deleted'] else ''}"
+                             f"{' '.join(m['text'].split())[:400]}" for m in part)
+            key = h("chat", 1, st["model"], c["video_id"], c["start"], text)
+            got = cache_get(cfg, "chat", key)
+            if usable(got):
+                have[c["id"]].append(({m["id"] for m in part}, got))
+            elif key in flying:
+                waiting = True
+            else:
+                need.append((key, CHAT_RUBRIC, f"Stream: {c['stream_title']} ({c['date']}). Clip: {c['title']}.\n\n"
+                                                f"CHAT ({len(part)} messages):\n{text}", CHAT_SCHEMA))
+    return need, have, waiting
+
+
+def chat_flags(answers: list) -> list[dict]:
+    out = {}
+    for ids, got in answers:
+        r = got.get("result") if got.get("status") == "succeeded" else None
+        for f in (r or {}).get("flags", []) if isinstance(r, dict) else []:
+            if isinstance(f, dict) and f.get("id") in ids and f.get("category") in CHAT_CATEGORIES:
+                out[f["id"]] = {"id": f["id"], "category": f["category"], "why": str(f.get("why", ""))[:120]}
+    return sorted(out.values(), key=lambda x: x["id"])
+
+
 def diagnostics(st, screened, judged, checked) -> dict:
     """Counts of what each pass produced and why things were dropped (no private data: Hasan's public words only)."""
     from collections import Counter
@@ -916,6 +994,23 @@ def build(cfg, week: str, client=None, yes: bool = False, wait: bool = False, bu
     clips = [c for c in (clip_from(st, *x, con=con) for x in judged) if c]
     clips.sort(key=lambda c: (-c["severity"], {"high": 0, "medium": 1, "low": 2}[c["confidence"]], c["date"], c["start"]))
     clips = clips[: st["max_clips"]]
+    while True:                              # pass 4: flag hateful or abusive chat next to each chosen clip
+        if client is not None:
+            collect(cfg, client, wait=False)
+        cneed, flagged, cwait = chat_requests(cfg, st, con, clips)
+        stop = send([("chat", cneed, estimate(st, cneed, 600))])
+        if stop:
+            return stop
+        if cneed and st["backend"] != "api":
+            continue
+        if cneed or cwait:
+            if not wait:
+                return "waiting"
+            collect(cfg, client, wait=True)
+            continue
+        break
+    for c in clips:
+        c["chat_flags"] = chat_flags(flagged.get(c["id"], []))
     facts = [f for f in (fact_from(*x) for x in checked) if f]
     order = {"false": 0, "misleading": 1, "unsupported": 2, "mostly_accurate": 3, "accurate": 4}
     facts.sort(key=lambda f: (order[f["verdict"]], f["date"], f["t"]))
@@ -931,7 +1026,8 @@ def build(cfg, week: str, client=None, yes: bool = False, wait: bool = False, bu
                      "mainstream criticism excluded), choosing each segment's length. The same first pass listed the "
                      "factual claims he stated as fact; the most consequential were checked with web search as of the "
                      "day he said them. Verdicts assess accuracy only: nobody can tell from a transcript whether he "
-                     "believed a claim."}
+                     "believed a claim. Chat next to each clip was read by Claude, which flagged slurs, "
+                     "hate, threats and harassment for highlighting."}
     d = reels_dir(cfg)
     d.mkdir(parents=True, exist_ok=True)
     tmp = d / f"{week}.json.tmp"

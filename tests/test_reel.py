@@ -31,7 +31,12 @@ class FakeBatches:
             if r["custom_id"].startswith("f"):
                 yield self.fact(r)
                 continue
-            if r["custom_id"].startswith("s"):
+            if r["custom_id"].startswith("c"):        # chat check: flags the message about rent, by its id
+                flags = [{"id": int(line.split("\t")[0]), "category": "harassment_or_doxxing", "why": "test"}
+                         for line in user.splitlines() if "\t" in line and "too damn high" in line]
+                flags.append({"id": 999999999, "category": "slur", "why": "an id that is not in the list"})
+                body = {"flags": flags}
+            elif r["custom_id"].startswith("s"):
                 moments = []
                 if "rent control" in user:
                     moments.append({"start": 6.5, "end": 12, "stance": "own_view", "category": "other",
@@ -123,12 +128,17 @@ def test_build_estimates_then_screens_judges_and_writes(reel_project):
     assert len(fact_reqs) == 3        # invented quote dropped, near-duplicate merged
     assert len(judge_reqs) == 1                                                  # invented-quote moment dropped
     assert "rent is too damn high" in judge_reqs[0]["params"]["messages"][0]["content"]   # chat went to Claude
+    assert reel.build(cfg, WEEK, client=client, yes=True) == "waiting"          # clip chosen; chat-check batch
+    assert len(client.messages.batches.created) == 4
+    assert all(r["custom_id"].startswith("c") for r in client.messages.batches.created[3])
     assert reel.build(cfg, WEEK, client=client, yes=True) == "written"
     out = json.loads((root / "reels" / f"{WEEK}.json").read_text())
     assert out["week_end"] == "2026-11-07" and [s["video_id"] for s in out["streams"]] == ["v1001"]
     [c] = out["clips"]
     assert c["video_id"] == "v1001" and c["severity"] == 7 and c["embed_type"] == "twitch"
     assert c["chat_examples"] == ["rent is too damn high https://example.com/x"]  # invented chat line dropped
+    [flag] = c["chat_flags"]                       # the flagged message, by id; the invented id is dropped
+    assert flag["category"] == "harassment_or_doxxing" and isinstance(flag["id"], int)
     assert c["start"] >= 0 and c["end"] - c["start"] <= 900                       # long segment kept, capped at 15 min
     assert c["end"] - c["start"] > 150 and c["segment_reason"] == "the whole opening"
     [f] = out["fact_checks"]                       # not_checkable and the unsourced 'false' are not published
@@ -138,7 +148,7 @@ def test_build_estimates_then_screens_judges_and_writes(reel_project):
     assert any("rent control" in l["text"] for l in c["lines"])
     # nothing changed: rebuilding uses the cache, no new batches
     assert reel.build(cfg, WEEK, client=client, yes=True) == "written"
-    assert len(client.messages.batches.created) == 3
+    assert len(client.messages.batches.created) == 4
 
 
 def test_build_wait_runs_through_and_refusals_are_skipped(reel_project):
@@ -167,8 +177,8 @@ def test_auto_waits_for_sunday_then_refreshes_only_on_change(reel_project):
     assert reel.auto(cfg, client=client, now=early_sunday) == "up_to_date"
     assert client.messages.batches.created == []
     sunday = dt.datetime(2026, 11, 8, 11)
-    results = [reel.auto(cfg, client=client, now=sunday) for _ in range(4)]
-    assert results == ["2026-11-01: waiting", "2026-11-01: waiting", "2026-11-01: written", "up_to_date"]
+    results = [reel.auto(cfg, client=client, now=sunday) for _ in range(5)]
+    assert results == ["2026-11-01: waiting"] * 3 + ["2026-11-01: written", "up_to_date"]   # screen, judge+fact, chat
     assert (root / "reels" / f"{WEEK}.json").exists()
 
 
@@ -180,8 +190,8 @@ def test_auto_backfills_earlier_weeks_within_limits(reel_project):
     assert reel.backfill_weeks({**st, "max_backfill_weeks": 1}, "2026-11-01") == ["2026-10-25"]
     cfg["reel"] = {**(cfg.get("reel") or {}), "backfill_from": "2026-10-11"}
     client, sunday = FakeClient(), dt.datetime(2026, 11, 8, 11)
-    results = [reel.auto(cfg, client=client, now=sunday) for _ in range(8)]
-    assert results[2] == "2026-11-01: written"                                   # the latest week first
+    results = [reel.auto(cfg, client=client, now=sunday) for _ in range(10)]
+    assert results[3] == "2026-11-01: written"                                   # the latest week first
     assert "2026-10-18: written" in results and results[-1] == "up_to_date"     # then the week with ytABCDEFGH1
     assert not (root / "reels" / "2026-10-25.json").exists()                    # no streams: nothing built
 
@@ -302,7 +312,8 @@ class FakeClaude:
             return NS(returncode=1, stdout=json.dumps(ev) + "\n", stderr="")
         tools = args[args.index("--tools") + 1]
         schema = json.loads(args[args.index("--json-schema") + 1]) if "--json-schema" in args else None
-        kind = "f" if tools == "WebSearch" else "s" if "moments" in (schema or {}).get("properties", {}) else "j"
+        props = (schema or {}).get("properties", {})
+        kind = "f" if tools == "WebSearch" else "s" if "moments" in props else "c" if "flags" in props else "j"
         req = {"custom_id": f"{kind}0-x", "params": {"messages": [{"role": "user", "content": input}],
                                                     "tools": [{"type": "web_search_20260209"}], "output_config": {}}}
         res = next(iter(self.batches.results_for([req])))
@@ -339,8 +350,8 @@ def sub_project(reel_project, monkeypatch):
 
 def test_schemas_have_no_integer_limits():
     # structured outputs refuse "minimum"/"maximum" on integers; every request of Nov 22, 2026 errored on them
-    assert "minimum" not in json.dumps([reel.SCREEN_SCHEMA, reel.JUDGE_SCHEMA])
-    assert "maximum" not in json.dumps([reel.SCREEN_SCHEMA, reel.JUDGE_SCHEMA])
+    assert "minimum" not in json.dumps([reel.SCREEN_SCHEMA, reel.JUDGE_SCHEMA, reel.CHAT_SCHEMA])
+    assert "maximum" not in json.dumps([reel.SCREEN_SCHEMA, reel.JUDGE_SCHEMA, reel.CHAT_SCHEMA])
     v = reel.tidy({"status": "succeeded", "result": {"moments": [{"severity": 14}], "claims": [{"importance": 0}]}})
     assert v["result"]["moments"][0]["severity"] == 10 and v["result"]["claims"][0]["importance"] == 1
 
@@ -354,6 +365,7 @@ def test_subscription_builds_through_claude_p_without_the_api(sub_project, monke
     assert reel.build(cfg, WEEK, yes=True) == "written"
     out = json.loads((root / "reels" / f"{WEEK}.json").read_text())
     assert [c["title"] for c in out["clips"]] == ["Rent control segment"]
+    assert len(out["clips"][0]["chat_flags"]) == 1                # chat check ran through claude -p too
     assert [f["verdict"] for f in out["fact_checks"]] == ["misleading"]
     assert [s["url"] for s in out["fact_checks"][0]["sources"]] == ["https://example.org/real"]   # only searched URLs
     for args, env in fake.calls:
