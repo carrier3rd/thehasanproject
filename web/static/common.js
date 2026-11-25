@@ -1,4 +1,8 @@
 // Shared helpers. All DB/user text goes into the DOM through textContent, never innerHTML.
+// The Twitch player refuses to load on a plain-http page, so a public http visit moves to https
+// (the Cloudflare and Tailscale addresses both serve https; local addresses are left alone).
+if (location.protocol === 'http:' && !/^(localhost|127\.|10\.|192\.168\.|\[?::1)/.test(location.hostname))
+  location.replace('https://' + location.host + location.pathname + location.search + location.hash);
 const $ = (sel, root = document) => root.querySelector(sel);
 
 function el(tag, attrs = {}, ...children) {
