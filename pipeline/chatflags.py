@@ -12,7 +12,7 @@ it), keyed by the public chat message id. The site always joins them back to pub
 anything not published never show.
 
 Trophies (the weekly page): per Sunday-Saturday week, chatters ranked by flagged messages the mods did NOT delete,
-counting only flags Claude was sure of; at least `trophy_min` of them to place. The broadcaster and bots are left out.
+counting only flags Claude was sure of; at least `trophy_min` (5) of them to place. The broadcaster and bots are left out.
 Nazi/Holocaust comparisons are highlighted but don't count toward trophies (the site reports them as comparisons).
 """
 from __future__ import annotations
@@ -31,7 +31,7 @@ import reel  # noqa: E402
 
 log = get_logger("chatflags")
 VERSION = 1
-DEFAULTS = {"per_request": 300, "max_requests_per_run": 60, "trophy_min": 3, "trophy_top": 3,
+DEFAULTS = {"per_request": 300, "max_requests_per_run": 60, "trophy_min": 5, "trophy_top": 3,
             "exclude_authors": ["hasanabi", "fossabot", "nightbot", "streamelements", "moobot", "sery_bot",
                                 "streamlabs", "wizebot", "pokemoncommunitygame", "soundalerts"]}
 ANTISEMITISM = {"antisemitism"}

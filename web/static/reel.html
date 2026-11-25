@@ -436,10 +436,10 @@ async function renderTrophies() {
   const podium = (title, sub, people) => el('section', { class: 'podium' },
     el('h2', { class: 'fh', text: title }), el('p', { class: 'note', style: 'padding:0 0 8px', text: sub }),
     people.length ? el('div', { class: 'medals' }, ...people.map((p, i) => trophyCard(p, MEDALS[i])))
-      : el('div', { class: 'note', text: `Nobody this week had ${t.min || 3} or more such messages that the mods left up.` }));
+      : el('div', { class: 'note', text: `Nobody this week had ${t.min || 5} or more such messages that the mods left up.` }));
   box.replaceChildren(
     el('p', { class: 'note', style: 'padding:0 0 10px' },
-      document.createTextNode(`Ranked by chat messages Claude (AI) flagged and the channel's mods left up, ${t.min || 3} or more to place. ` +
+      document.createTextNode(`Ranked by chat messages Claude (AI) flagged and the channel's mods left up, ${t.min || 5} or more to place. ` +
         'Only flags Claude was sure of count; Nazi/Holocaust comparisons are not counted. AI labels can be wrong: read the messages. '),
       contact ? el('a', { href: `mailto:${contact}?subject=${encodeURIComponent('Trophy error, week of ' + week)}`, text: 'Report a mistake' }) : null,
       t.checked_through ? document.createTextNode(` · Chat checked through ${fmtDate(t.checked_through)}.`) : null),
