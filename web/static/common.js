@@ -91,6 +91,28 @@ function chatScroll(box, onResume) {
   return s;
 }
 
+// Tab bars (.tabs with buttons): tablist/tab roles, aria-selected kept in step with the 'on' class, Left/Right/Home/End
+// move between tabs (APG tabs pattern). Pages keep their own click handlers; this only adds semantics and keys.
+function accessibleTabs(nav, label) {
+  if (!nav || nav.dataset.a11y) return;
+  nav.dataset.a11y = '1';
+  nav.setAttribute('role', 'tablist');
+  if (label) nav.setAttribute('aria-label', label);
+  const tabs = () => [...nav.querySelectorAll('button')];
+  const sync = () => tabs().forEach(b => { const on = b.classList.contains('on');
+    b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', on ? 'true' : 'false'); b.tabIndex = on ? 0 : -1; });
+  sync();
+  new MutationObserver(sync).observe(nav, { subtree: true, attributes: true, attributeFilter: ['class'] });
+  nav.addEventListener('keydown', e => {
+    const t = tabs(), i = t.indexOf(document.activeElement);
+    if (i < 0) return;
+    const j = { ArrowRight: (i + 1) % t.length, ArrowLeft: (i - 1 + t.length) % t.length, Home: 0, End: t.length - 1 }[e.key];
+    if (j === undefined) return;
+    e.preventDefault(); e.stopPropagation();
+    t[j].focus(); t[j].click();
+  });
+}
+
 async function api(path, params = {}) {
   const qs = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) if (v !== '' && v !== null && v !== undefined) qs.set(k, v);
@@ -111,14 +133,17 @@ async function loadConfig() {
 
 async function chrome(active) {
   const cfg = await loadConfig();
-  const link = (href, text) => el('a', { href, text, style: active === href ? 'font-weight:600' : null });
+  const link = (href, text) => el('a', { href, text, style: active === href ? 'font-weight:600' : null,
+    'aria-current': active === href ? 'page' : null });
   // every page but the search page itself gets a search box in the header; it opens the search page
   const box = active === 'index.html' ? null : el('form', { class: 'hsearch', action: 'index.html', role: 'search' },
     el('input', { type: 'search', name: 'q', placeholder: 'Search stream and chat…', 'aria-label': 'Search' }),
     el('input', { type: 'hidden', name: 'tab', value: 'transcripts' }));
-  document.body.prepend(el('header', {},
-    el('a', { href: '/', class: 'brand', text: 'VOD archive' }),
-    link('index.html', 'Search'), link('videos.html', 'Videos'), link('reel.html', 'Weekly'), link('factchecks.html', 'Fact-checks'), link('about.html', 'About'), box,
+  const main = document.querySelector('main');
+  if (main && !main.id) main.id = 'main';
+  document.body.prepend(el('a', { class: 'skip', href: '#main', text: 'Skip to content' }), el('header', { role: 'banner' },
+    el('a', { href: '/', class: 'brand', text: 'VOD archive', 'aria-label': 'VOD archive home' }),
+    link('reel.html', 'Weekly'), link('factchecks.html', 'Fact-checks'), link('videos.html', 'Videos'), link('index.html', 'Search'), link('about.html', 'About'), box,
     cfg.mode === 'admin' ? link('flags.html', 'Reports') : null,
     cfg.mode === 'admin' ? el('span', { class: 'badge', text: 'ADMIN · private' }) : null));
   document.body.append(el('footer', { text: 'Transcripts and speaker labels are machine-generated and may contain errors. ' +

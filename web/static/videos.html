@@ -1,7 +1,8 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Videos · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112408"></head>
+<title>Videos · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112409"></head>
 <body><main>
+  <h1 class="sr-only">All streams</h1>
   <form id="form" class="row">
     <label>From <input type="date" id="from"></label><label>To <input type="date" id="to"></label>
     <button>Filter</button><span id="total" class="note" style="padding:0"></span>
@@ -9,7 +10,7 @@
   <table><thead><tr><th>Date</th><th>Title</th><th>Length</th></tr></thead><tbody id="rows"></tbody></table>
   <div class="row"><button id="prev">← Newer</button><span id="pageno" class="note" style="padding:0"></span><button id="next">Older →</button></div>
 </main>
-<script src="common.js?v=2026112408"></script>
+<script src="common.js?v=2026112409"></script>
 <script>
 let page = 1;
 async function load() {

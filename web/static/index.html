@@ -1,7 +1,8 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Search · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112408"></head>
+<title>Search · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112409"></head>
 <body><main>
+  <h1 class="sr-only">Search streams and chat</h1>
   <form id="form">
     <div class="row"><input type="search" id="q" placeholder="Search what was said on stream and in chat…" autofocus><button>Search</button></div>
     <div class="tabs" id="tabs">
@@ -10,7 +11,7 @@
       <button type="button" data-tab="semantic">By meaning</button>
     </div>
     <div class="row" id="filters">
-      <select id="speaker" data-for="transcripts"><option value="">Any speaker</option></select>
+      <select id="speaker" data-for="transcripts" aria-label="Speaker"><option value="">Any speaker</option></select>
       <input type="text" id="author" data-for="chat" placeholder="Chat author" style="max-width:200px">
       <input type="text" id="user_id" data-for="chat" placeholder="user_id" style="max-width:140px" hidden>
       <label data-for="chat"><input type="checkbox" id="first_msg"> first-time chatters</label>
@@ -31,7 +32,7 @@
   <div id="results"></div>
   <div class="row" id="pager" hidden><button id="prev">← Previous</button><span id="pageno" class="note"></span><button id="next">Next →</button></div>
 </main>
-<script src="common.js?v=2026112408"></script>
+<script src="common.js?v=2026112409"></script>
 <script>
 const LIMIT = 50;
 const state = { tab: 'transcripts', offset: 0, rows: [], timeline: null };

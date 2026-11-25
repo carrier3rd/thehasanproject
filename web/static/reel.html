@@ -1,7 +1,8 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Weekly reel · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112408"></head>
+<title>Weekly reel · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112409"></head>
 <body><main class="reel">
+  <h1 class="sr-only">Weekly reel</h1>
   <p class="intro">Each week, Claude reads every line of every stream and picks the moments worth a look, with the chat at the time and fact-checks of his claims.</p>
   <div class="reelbar">
     <select id="week" aria-label="Week"></select>
@@ -9,7 +10,7 @@
     <span id="count" class="num"></span>
     <button id="next" aria-label="Next clip">→</button>
   </div>
-  <nav class="tabs" id="views">
+  <nav class="tabs" id="views" aria-label="Weekly sections">
     <button type="button" data-view="clips" class="on">Clips</button>
     <button type="button" data-view="facts">Fact-checks</button>
     <button type="button" data-view="trends">Trends</button>
@@ -37,9 +38,9 @@
       </div>
     </div>
     <button type="button" id="cardopen" class="cardopen" aria-controls="card"></button>
-    <article id="card"></article>
+    <div id="card" role="dialog" aria-modal="true" aria-label="Write-up"></div>
     <div class="rcol side">
-      <nav class="tabs" id="rtabs">
+      <nav class="tabs" id="rtabs" aria-label="Chat or transcript">
         <button type="button" data-pane="chat" class="on">Chat at the time</button>
         <button type="button" data-pane="lines">Transcript</button>
       </nav>
@@ -47,15 +48,15 @@
         <div class="allchat"><label><input type="checkbox" id="allchat"> whole clip</label>
           <label id="flagonly" hidden><input type="checkbox" id="onlyflags"> flagged only</label>
           <span id="hotcount"></span></div>
-        <div id="rchat"></div>
+        <div id="rchat" role="log" aria-live="off" aria-label="Chat at the time" tabindex="0"></div>
       </div>
-      <div id="lines" hidden></div>
+      <div id="lines" hidden tabindex="0" aria-label="Transcript of the clip"></div>
     </div>
   </div>
   <p class="note small">Picked and written by Claude (AI) from machine-made transcripts, counting only Hasan's own words.
     Watch the moment before relying on it.</p>
 </main>
-<script src="common.js?v=2026112408"></script>
+<script src="common.js?v=2026112409"></script>
 <script>
 let lastNow = 0;
 let cfg, reel = null, idx = 0, clip = null, player = null, chat = [], playing = false, sim = null, mounting = 0;
@@ -209,7 +210,8 @@ function sheet(open, fromHistory) {
   if (!open && was && !fromHistory && history.state && history.state.sheet) return history.back();   // popstate closes
   $('#card').classList.toggle('open', open);
   document.body.classList.toggle('sheet', open);
-  if (open) $('#card').scrollTop = 0;
+  if (open) { $('#card').scrollTop = 0; $('#card .cardclose').focus(); }
+  else if (was) $('#cardopen').focus();                        // focus goes back to what opened it
 }
 const STANCE = { own_view: 'His own view', joke_or_bait: 'Joke or bait', unclear: 'Stance unclear' };
 const CAT = c => c.replace(/_/g, ' ');
@@ -599,6 +601,8 @@ function tick() {
   addEventListener('popstate', () => sheet(false, true));
   $('#onlyflags').addEventListener('change', () => { lastKey = ''; });
   for (const b of document.querySelectorAll('#views button')) b.addEventListener('click', () => setView(b.dataset.view));
+  accessibleTabs($('#views'), 'Weekly sections');
+  accessibleTabs($('#rtabs'), 'Chat or transcript');
   for (const b of document.querySelectorAll('#rtabs button')) b.addEventListener('click', () => {
     for (const o of document.querySelectorAll('#rtabs button')) o.classList.toggle('on', o === b);
     $('#chatbox').hidden = b.dataset.pane !== 'chat';
@@ -606,6 +610,7 @@ function tick() {
   });
   await loadWeek($('#week').value);
   if (['facts', 'trends', 'trophies'].includes(qs.get('view'))) setView(qs.get('view'));
+  setInterval(() => { for (const f of document.querySelectorAll('#player iframe:not([title])')) f.title = 'Video player'; }, 2000);
   setInterval(tick, 400);
 })();
 </script></body></html>

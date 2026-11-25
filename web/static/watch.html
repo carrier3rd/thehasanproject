@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Watch · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112408"></head>
+<title>Watch · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112409"></head>
 <body><main class="watch" data-pane="transcript">
   <nav id="panes" class="tabs" aria-label="Show">
     <button type="button" data-pane="transcript" class="on">Transcript</button>
@@ -20,15 +20,15 @@
       <button id="copy">Copy link</button>
       <a id="source" target="_blank" rel="noopener noreferrer">Original</a>
     </div>
-    <div id="transcript"></div>
+    <div id="transcript" tabindex="0" aria-label="Transcript"></div>
   </div>
   <div class="col">
     <canvas id="strip" title="Chat messages per minute. Click to seek."></canvas>
     <div id="terms"></div>
-    <div id="chat"><div class="note" style="padding:10px">No chat for this moment.</div></div>
+    <div id="chat" role="log" aria-live="off" aria-label="Chat" tabindex="0"><div class="note" style="padding:10px">No chat for this moment.</div></div>
   </div>
 </main>
-<script src="common.js?v=2026112408"></script>
+<script src="common.js?v=2026112409"></script>
 <script>
 const params = new URLSearchParams(location.search);
 const VID = params.get('v'), T0 = Math.max(+params.get('t') || 0, 0);
@@ -263,9 +263,11 @@ function tick() {
     const box = e.target.getBoundingClientRect();
     seek((e.clientX - box.left) / box.width * (video.duration || 0));
   });
+  accessibleTabs($('#panes'), 'Show');
   try { await initPlayer(); }
   catch (e) { useClock('The video player could not load (an ad or script blocker can cause this). Use the slider to move through the transcript and chat.'); }
   tick();
+  setInterval(() => { for (const f of document.querySelectorAll('#player iframe:not([title])')) f.title = 'Video player'; }, 2000);
   setInterval(tick, 500);
 })();
 </script></body></html>
