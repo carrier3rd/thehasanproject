@@ -138,7 +138,11 @@ For the part of the stream you are given, list each story or subject he spent re
 - people: the named people central to it (at most 5).
 - positions: up to 4 things HE asserted as his own view on it (not what a video, article, tweet, guest or chat said,
   and not sarcasm or a bit). position = one neutral, self-contained sentence of what he claimed or argued. quote = his
-  exact words, copied from ONE line labelled Hasan. Only include positions he plainly holds.
+  exact words, copied from ONE line labelled Hasan. Only include positions he plainly holds. Not positions:
+  * his analysis of what someone else did or decided (explaining or praising a politician's decision is commentary on
+    that decision, not his own policy view, unless he states it as his own);
+  * running his channel: moderating chat, banning someone, telling chat not to post something, following Twitch rules
+    or the law on stream. That is public-facing conduct, not a view.
 - quotables: up to 2 lines of his that would stand on their own for a reader (clear, memorable, about the story; not
   a slur, not a private person's details). quote copied exactly from one line labelled Hasan.
 
@@ -589,6 +593,12 @@ Count a pair only when
 - a fair viewer would agree they cannot both be his position at once.
 Not a receipt: a change that follows new facts or events (say what changed), nuance or a caveat added, different
 subjects that only sound alike, conditional statements ("if X then Y"), tone changes, or holding two compatible views.
+Also not a receipt:
+- public-facing conduct set against a view. A streamer moderating his chat or keeping to platform rules (banning calls
+  for violence, refusing to endorse something on stream) does not contradict what he thinks; he can hold a private
+  view he cannot say on stream. Only compare things he SAID as his view with other things he said as his view.
+- his analysis of someone else's decisions (a politician, a government) set against his own position. Describing,
+  explaining or praising what another person did is commentary on them, not a stance of his own.
 
 kind: reversal (he moved from one position to the other), contradiction (they clash without a clear direction), or
 double_standard (the same act judged oppositely depending on who did it).
@@ -607,7 +617,9 @@ streams: two moments, on different days, where his stated positions may conflict
 each quote. A person will approve or reject it after you, but your check comes first: when in doubt, reject.
 
 Confirm only if, read in context, both are his own sincere view (not reading something out, quoting, steelmanning, a
-joke or a bit), both answer the same question, and they genuinely conflict. Reject if the context shows he was
+joke or a bit), both answer the same question, and they genuinely conflict. Reject if either side is really him
+running his channel (moderating chat, banning someone, keeping to Twitch rules or the law on stream) or his analysis
+of what someone else decided; neither is a position of his own. Reject if the context shows he was
 quoting, joking or answering a different question, or if the later view follows new facts he cites (then say so).
 Machine transcripts mishear: reject if a key line looks garbled.
 
@@ -652,7 +664,7 @@ def receipt_requests(st: dict, state: dict, entries: list[dict]) -> list[tuple]:
         s = state["stories"][sid]
         lines = "\n".join(f"{i} | {p['date']} | {p['position']} | \"{p['quote']}\"" for i, p in enumerate(ps))
         user = f"Story: {s['title']} ({s['summary']})\n\nHis stated positions (n | date | position | his words):\n{lines}"
-        out.append((reel.h("receipts", VERSION, st["model"], user), RECEIPT_RUBRIC, user, RECEIPT_SCHEMA,
+        out.append((reel.h("receipts", VERSION, st["model"], RECEIPT_RUBRIC, user), RECEIPT_RUBRIC, user, RECEIPT_SCHEMA,
                     {"story": sid, "positions": ps}))
     return out
 
@@ -668,7 +680,7 @@ def rverify_request(st: dict, con, story: dict, pa: dict, pb: dict, pair: dict) 
     b_ctx = context_text(con, pb["video_id"], pb["t"], st["receipt_context_s"])
     user = (f"Story: {story['title']}\nQuestion: {pair['question']}\nWhy it was suggested: {pair['why']}\n\n"
             f"FIRST, {pa['date']}: \"{pa['quote']}\"\n{a_ctx}\n\nSECOND, {pb['date']}: \"{pb['quote']}\"\n{b_ctx}")
-    return (reel.h("rverify", VERSION, st["model"], user), RVERIFY_RUBRIC, user, RVERIFY_SCHEMA)
+    return (reel.h("rverify", VERSION, st["model"], RVERIFY_RUBRIC, user), RVERIFY_RUBRIC, user, RVERIFY_SCHEMA)
 
 
 def queue_path(cfg) -> Path:
@@ -741,7 +753,8 @@ CHATVS_RUBRIC = """You review moments from HasanAbi's (Hasan Piker's) Twitch str
 the transcript leading up to the moment and a sample of the chat during it (usernames removed).
 
 Decide what happened.
-- pushback: a real share of chat disagreed with, doubted or mocked what HE said.
+- pushback: a real share of chat disagreed with, doubted or mocked what HE said. Chat agreeing with him (including
+  backing him when he bans or scolds a chatter) is not pushback.
 - split: chat was clearly divided about what he said.
 - mass_deletion: moderators deleted many messages because of a clash with what HE said or did (chat turning on
   him, or on his take); say what chat was reacting to (use the counts given).
@@ -951,8 +964,9 @@ def build_stories(cfg, st: dict, con, entries: list[dict], reddit: dict | None) 
                     rday[d] += k
         reddit_n = sum(by_sub.values())
         hasan_min = round(sum(mins.values()), 1)
-        blob = " \n ".join([s["title"], s["summary"], *s["keywords"], *(e["label"] for e in es),
-                            *(x["title"] for x in (rs or {}).get("top", []))])
+        # the story itself only: a name in some Reddit title that matched its keywords is not enough
+        # (a r/dsa post that mentions Dolly Parton does not make her death a DSA story)
+        blob = " \n ".join([s["title"], s["summary"], *s["keywords"], *(e["label"] for e in es)])
         who: dict[str, list[str]] = {}
         if orx is not None:
             for m in orx.finditer(blob):
