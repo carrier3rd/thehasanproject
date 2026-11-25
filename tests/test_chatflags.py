@@ -97,6 +97,9 @@ def test_run_flags_reviews_and_ranks_the_week(flagged):
     assert con.execute("SELECT deleted FROM flags WHERE id=900004").fetchone()[0] == 1
     assert con.execute("SELECT count(*), sum(confirmed) FROM verified").fetchone() == (11, 9)
     assert chatflags.run(cfg) == "done" and len(fake.calls) == 2   # nothing new: no more calls
+    held = chatflags.single_run(cfg)                               # a run in progress: a second one steps aside
+    assert chatflags.run(cfg) == "busy"
+    held.close()
     args = (chatflags.db_path(cfg), reel.public_db(cfg), WEEK, chatflags.settings(cfg))
     t = chatflags.trophies(*args)
     assert [(p["author"], p["count"]) for p in t["antisemitism"]] == [("troll1", 4), ("partnerguy", 3)]

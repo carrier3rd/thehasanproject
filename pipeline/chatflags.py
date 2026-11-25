@@ -173,11 +173,30 @@ def save(con: sqlite3.Connection, part: list[dict], got: dict) -> int:
     return len(flags)
 
 
+def single_run(cfg: dict):
+    """A lock held for the life of the process, so the nightly timer and a hand-started run never overlap (they
+    would send the same chunks twice). -> the open lock file, or None when another run holds it."""
+    f = open(db_path(cfg).parent / "run.lock", "w")
+    try:
+        import fcntl
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except ImportError:              # not POSIX (tests on Windows): no lock
+        return f
+    except OSError:
+        f.close()
+        return None
+    return f
+
+
 def run(cfg: dict, max_requests: int | None = None, retry_failed: bool = False) -> str:
     """Scan new streams, then send up to max_requests chunks to Claude. -> 'done', 'more' or 'limit'.
     retry_failed: put refused/failed messages back in the queue, in chunks of 50 (a new request, not the cache)."""
     st = {**reel.settings(cfg), **settings(cfg)}
     con = open_db(cfg)
+    lock = single_run(cfg)
+    if lock is None:
+        log.info("another chatflags run is in progress; nothing to do")
+        return "busy"
     pub = reel.public_db(cfg)
     added = scan(con, pub)
     n = max(50, int(st["per_request"]))
