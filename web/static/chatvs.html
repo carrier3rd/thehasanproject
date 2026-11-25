@@ -2,7 +2,7 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Chat vs Hasan · VOD archive</title>
 <meta name="description" content="Moments when Hasan's own Twitch chat pushed back on him, split, or got cleared out by moderators.">
-<link rel="stylesheet" href="style.css?v=2026112501"></head>
+<link rel="stylesheet" href="style.css?v=2026112502"></head>
 <body><main class="feat">
   <h1>Chat vs Hasan</h1>
   <p class="lede">The moments his own chat pushed back, split down the middle, or got swept by the mods, each with what he
@@ -18,8 +18,8 @@
       never used as an example.</p>
   </details>
 </main>
-<script src="common.js?v=2026112501"></script>
-<script src="feat.js?v=2026112501"></script>
+<script src="common.js?v=2026112502"></script>
+<script src="feat.js?v=2026112502"></script>
 <script>
 const KIND = { pushback: 'Pushback', split: 'Chat split', mass_deletion: 'Mod sweep' };
 let all = [], kind = '';
@@ -43,9 +43,9 @@ function card(m) {
       el('span', { class: 'when', text: niceDay(m.date) })),
     el('h2', { text: m.title }),
     el('div', { class: 'pair' },
-      el('div', { class: 'side' }, el('div', { class: 'when' }, el('b', { text: 'Hasan' })), el('p', { text: m.hasan_said }),
+      el('div', { class: 'pside' }, el('div', { class: 'when' }, el('b', { text: 'Hasan' })), el('p', { text: m.hasan_said }),
         m.quote ? el('blockquote', { text: `“${m.quote}”` }) : null),
-      el('div', { class: 'side' }, el('div', { class: 'when' }, el('b', { text: 'Chat' })), el('p', { text: m.chat_said }),
+      el('div', { class: 'pside' }, el('div', { class: 'when' }, el('b', { text: 'Chat' })), el('p', { text: m.chat_said }),
         m.examples.length ? el('ul', { class: 'bubbles', 'aria-label': 'Chat messages' }, ...m.examples.map(e => el('li', { text: e }))) : null)),
     m.kind !== 'mass_deletion' ? meter(m.stats) : el('p', { class: 'note small', text: `${m.stats.deleted} messages deleted by mods in one minute.` }),
     el('a', { class: 'watch', href: watchAt(m.video_id, m.start), text: `▶ Watch with chat at ${fmtTime(m.start)}` }));

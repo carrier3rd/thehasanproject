@@ -338,9 +338,9 @@ a.fcard:hover { text-decoration:none; border-color:var(--accent); }
 .fbadge.blindspot { color:var(--reddit); } .fbadge.stream_focus { color:var(--accent); }
 .stats { display:flex; flex-wrap:wrap; gap:4px 18px; font-size:14px; margin:4px 0 8px; }
 .stats b { font-size:17px; font-variant-numeric:tabular-nums; }
-.fcard blockquote, .said blockquote, .side blockquote, #line { margin:8px 0 0; padding:6px 12px; border-left:3px solid var(--accent); background:var(--band); font-style:italic; }
+.fcard blockquote, .said blockquote, .pside blockquote, #line { margin:8px 0 0; padding:6px 12px; border-left:3px solid var(--accent); background:var(--band); font-style:italic; }
 .hbars { display:grid; gap:4px; margin:6px 0; }
-.hbar { display:grid; grid-template-columns:minmax(110px, 34%) 1fr auto; gap:8px; align-items:center; font-size:13px; }
+.hbar { display:grid; grid-template-columns:minmax(150px, 36%) 1fr auto; gap:8px; align-items:center; font-size:13px; }
 .hbar .hl { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ink); }
 .hbar a.hl { color:var(--accent); }
 .hbar .ht { height:10px; background:var(--band); border-radius:5px; overflow:hidden; }
@@ -367,8 +367,8 @@ a.fcard:hover { text-decoration:none; border-color:var(--accent); }
 .segs li, .rposts li { padding:4px 0; }
 .week { margin:6px 0 18px; } .week h2 { font-size:16px; margin:0 0 4px; }
 .pair { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:8px 0; }
-.pair .side { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
-.pair .side p { margin:4px 0 0; }
+.pair .pside { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+.pair .pside p { margin:4px 0 0; }
 .pair .when { font-size:13px; color:var(--muted); } .pair .when b { color:var(--ink); }
 .ctx { font-size:14px; color:var(--muted); margin:6px 0; }
 .empty { padding:24px; text-align:center; border:1px dashed var(--line); border-radius:10px; }
@@ -391,6 +391,7 @@ a.fcard:hover { text-decoration:none; border-color:var(--accent); }
 .choice.right { border-color:var(--ok); box-shadow:inset 4px 0 0 var(--ok); }
 .choice.wrong { border-color:var(--no); box-shadow:inset 4px 0 0 var(--no); }
 .choice:disabled { opacity:1; cursor:default; }
-.verdict { font-weight:700; margin:0 0 4px; } .verdict.ok { color:var(--ok); } .verdict.no { color:var(--no); }
+.qverdict { font-weight:700; margin:0 0 4px; } .qverdict.ok { color:var(--ok); } .qverdict.no { color:var(--no); }
+@media (max-width: 860px) { a.watch, .said a, .segs a, .rposts a { display:inline-flex; align-items:center; min-height:44px; } }
 #result { min-height:3em; }
 #result a { text-decoration:underline; }

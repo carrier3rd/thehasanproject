@@ -1,20 +1,20 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Review receipts · VOD archive admin</title><link rel="stylesheet" href="style.css?v=2026112501"></head>
+<title>Review receipts · VOD archive admin</title><link rel="stylesheet" href="style.css?v=2026112502"></head>
 <body><main class="feat">
   <h1>Review receipts</h1>
   <p class="lede">Pairs the checks found. Nothing here is public until you approve it. Watch both clips before deciding.</p>
   <div class="filters"><div id="show" class="chips"></div></div>
   <div id="list" class="cards"><p class="note">Loading…</p></div>
 </main>
-<script src="common.js?v=2026112501"></script>
-<script src="feat.js?v=2026112501"></script>
+<script src="common.js?v=2026112502"></script>
+<script src="feat.js?v=2026112502"></script>
 <script>
 let all = [], show = 'pending';
 const LABEL = { pending: 'Waiting', approved: 'Approved (public)', rejected: 'Rejected by you', rejected_by_check: 'Rejected by the AI check' };
 
 function side(label, s, said) {
-  return el('div', { class: 'side' }, el('div', { class: 'when' }, el('b', { text: label }), ` · ${s.date}`),
+  return el('div', { class: 'pside' }, el('div', { class: 'when' }, el('b', { text: label }), ` · ${s.date}`),
     el('p', { text: said || s.position }), el('blockquote', { text: `“${s.quote}”` }),
     el('a', { class: 'watch', href: watchAt(s.video_id, s.t), target: '_blank', text: `▶ Watch at ${fmtTime(s.t)}` }));
 }

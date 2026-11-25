@@ -2,7 +2,7 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Spotlight · VOD archive</title>
 <meta name="description" content="What Hasan talked about on stream, set against what Reddit communities were discussing at the same time.">
-<link rel="stylesheet" href="style.css?v=2026112501"></head>
+<link rel="stylesheet" href="style.css?v=2026112502"></head>
 <body><main class="feat">
   <div id="listview">
     <h1>Spotlight</h1>
@@ -40,8 +40,8 @@
       communities are only a reading aid; every subreddit is listed by name on the story page. Times are estimates.</p>
   </details>
 </main>
-<script src="common.js?v=2026112501"></script>
-<script src="feat.js?v=2026112501"></script>
+<script src="common.js?v=2026112502"></script>
+<script src="feat.js?v=2026112502"></script>
 <script>
 let data = null;
 const st = { badge: '', kind: '', q: '' };
@@ -124,7 +124,7 @@ async function showDetail(sid) {
   for (const p of d.reddit_top) (byGroup[p.group] = byGroup[p.group] || []).push(p);
   const share = el('button', { type: 'button', class: 'linkish', text: 'Share this story' });
   share.addEventListener('click', () => copyLink(location.href, share));
-  box.replaceChildren(
+  box.replaceChildren(...[
     el('a', { href: 'spotlight.html', class: 'back', text: '← All stories' }),
     el('div', { class: 'fmeta' }, el('span', { class: 'kind', text: KIND_LABEL[d.kind] || d.kind }), badgeEl(d.badge)),
     el('h1', { text: d.title }), el('p', { class: 'lede', text: d.summary }),
@@ -147,7 +147,7 @@ async function showDetail(sid) {
         el('ul', { class: 'rposts' }, ...byGroup[g].slice(0, 4).map(p => el('li', {},
           el('a', { href: p.url, rel: 'noopener', target: '_blank', text: p.title }),
           el('span', { class: 'note small', text: ` r/${p.sub} · ${p.score.toLocaleString()} points · ${p.comments.toLocaleString()} comments · ${shortDay(p.date)}` }))))))) : null,
-    el('p', { class: 'note small', text: `Matched on Reddit by: ${d.keywords.join(', ')}.` }));
+    el('p', { class: 'note small', text: `Matched on Reddit by: ${d.keywords.join(', ')}.` })].filter(x => x != null));   // replaceChildren would print null
   box.querySelector('h1').setAttribute('tabindex', '-1');
   box.querySelector('h1').focus();
 }

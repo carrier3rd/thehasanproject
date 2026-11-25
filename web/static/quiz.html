@@ -2,10 +2,10 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Who said it? · VOD archive</title>
 <meta name="description" content="A quick quiz: was it Hasan, his chat, or a Reddit post? Every answer links to the real source.">
-<link rel="stylesheet" href="style.css?v=2026112501"></head>
+<link rel="stylesheet" href="style.css?v=2026112502"></head>
 <body><main class="feat quiz">
+  <h1>Who said it?</h1>
   <section id="start">
-    <h1>Who said it?</h1>
     <p class="lede">Ten rounds. Each line is real: something Hasan said on stream, something his chat typed, or the title of a
       Reddit post. Some rounds ask which story he spent more time on. Every answer links to the source.</p>
     <button type="button" id="go" class="big">Start</button>
@@ -28,8 +28,8 @@
       and <a href="chatvs.html">Chat vs Hasan</a>.</p>
   </section>
 </main>
-<script src="common.js?v=2026112501"></script>
-<script src="feat.js?v=2026112501"></script>
+<script src="common.js?v=2026112502"></script>
+<script src="feat.js?v=2026112502"></script>
 <script>
 const WHO = { hasan: 'Hasan', chat: 'His chat', reddit: 'A Reddit post' };
 let pool = null, rounds = [], i = 0, score = 0;
@@ -58,8 +58,8 @@ function answer(btn, ok, reveal) {
   btn.classList.add(ok ? 'right' : 'wrong');
   if (ok) score++;
   $('#score').textContent = `Score ${score}`;
-  $('#result').replaceChildren(el('p', { class: 'verdict ' + (ok ? 'ok' : 'no') },
-    el('span', { 'aria-hidden': 'true', text: ok ? '✓ ' : '✗ ' }), ok ? 'Right. ' : 'Not quite. '), ...reveal);
+  $('#result').replaceChildren(el('p', { class: 'qverdict ' + (ok ? 'ok' : 'no') },
+    el('span', { 'aria-hidden': 'true', text: ok ? '✓ ' : '✗ ' }), ok ? 'Right. ' : 'Not quite. '), ...reveal.filter(x => x != null));
   $('#next').hidden = false;
   $('#next').textContent = i + 1 < rounds.length ? 'Next' : 'See my score';
   $('#next').focus();
@@ -72,7 +72,7 @@ function show() {
   $('#result').replaceChildren(); $('#next').hidden = true; $('#line').hidden = true;
   let buttons = [];
   if (r.type === 'who') {
-    $('#prompt').textContent = 'Who said it?';
+    $('#prompt').textContent = 'Hasan, his chat, or a Reddit post?';
     $('#line').hidden = false; $('#line').textContent = `“${r.text}”`;
     const src = r.answer === 'reddit' ? `${r.source} post title` : r.answer === 'chat' ? 'a message in his chat' : 'Hasan on stream';
     const reveal = [el('span', { text: `It was ${src}, ${niceDay(r.date)}. ` }),

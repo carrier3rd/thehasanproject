@@ -2,7 +2,7 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Receipts · VOD archive</title>
 <meta name="description" content="Moments on different days where Hasan's own stated positions on the same question conflict, with both clips.">
-<link rel="stylesheet" href="style.css?v=2026112501"></head>
+<link rel="stylesheet" href="style.css?v=2026112502"></head>
 <body><main class="feat">
   <h1>Receipts</h1>
   <p class="lede">Two moments, on different days, where Hasan's own stated positions on the same question don't line up. Both
@@ -21,15 +21,15 @@
       Use the contact on the <a href="about.html">About</a> page.</p>
   </details>
 </main>
-<script src="common.js?v=2026112501"></script>
-<script src="feat.js?v=2026112501"></script>
+<script src="common.js?v=2026112502"></script>
+<script src="feat.js?v=2026112502"></script>
 <script>
 const KIND = { reversal: 'Changed position', contradiction: 'Contradiction', double_standard: 'Double standard' };
 const qs = new URLSearchParams(location.search);
 let all = [], topic = '';
 
 function side(label, s, said) {
-  return el('div', { class: 'side' },
+  return el('div', { class: 'pside' },
     el('div', { class: 'when' }, el('b', { text: label }), ` · ${niceDay(s.date)}`),
     el('p', { text: said }),
     el('blockquote', { text: `“${s.quote}”` }),
