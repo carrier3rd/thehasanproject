@@ -1,0 +1,13 @@
+[Unit]
+Description=Chat check: Claude flags hateful or abusive chat across the archive (claude -p, the owner's subscription)
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/thehasanproject
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+# at most chatflags.max_requests_per_run chunks per night, so subscription usage is spread out; resumes next night
+ExecStart=%h/thehasanproject/.venv/bin/python pipeline/chatflags.py run
+StandardOutput=append:%h/thehasanproject/logs/chatflags.log
+StandardError=append:%h/thehasanproject/logs/chatflags.log
+TimeoutStartSec=10h
+Nice=10
