@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Watch · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112404"></head>
+<title>Watch · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112405"></head>
 <body><main class="watch" data-pane="transcript">
   <nav id="panes" class="tabs" aria-label="Show">
     <button type="button" data-pane="transcript" class="on">Transcript</button>
@@ -28,7 +28,7 @@
     <div id="chat"><div class="note" style="padding:10px">No chat for this moment.</div></div>
   </div>
 </main>
-<script src="common.js?v=2026112404"></script>
+<script src="common.js?v=2026112405"></script>
 <script>
 const params = new URLSearchParams(location.search);
 const VID = params.get('v'), T0 = Math.max(+params.get('t') || 0, 0);
@@ -157,10 +157,11 @@ function renderChat(t) {
       onclick: () => { location.href = 'index.html?tab=chat&author=' + encodeURIComponent(m.author || ''); } });
     const time = el('span', { class: 't', text: fmtTime(m.t) });
     if (m.kind === 'mod_action') return el('div', { class: 'msg mod' }, time, who, document.createTextNode(' ' + m.text));
-    return el('div', { class: 'msg' + (m.deleted ? ' deleted' : '') }, time,
+    return el('div', { class: 'msg' + (m.deleted ? ' deleted' : '') + (m.flag ? ' hot flag' : '') }, time,
       m.first_msg ? el('span', { class: 'first', title: 'First message in this channel', text: 'first' }) : null,
       who, document.createTextNode(': '), m.deleted ? deletedBody(m) : el('span', { class: 'body', text: m.text }),
-      m.deleted && !revealable(m) ? el('span', { class: 'tag del', text: 'deleted by mods' }) : null);
+      m.deleted && !revealable(m) ? el('span', { class: 'tag del', text: 'deleted by mods' }) : null,
+      m.flag ? el('span', { class: 'tag hottag flagtag', title: m.flag.why, text: FLAG_LABEL[m.flag.category] || m.flag.category }) : null);
   }));
   box.scrollTop = box.scrollHeight;
 }

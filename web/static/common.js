@@ -62,6 +62,11 @@ function twitchGone(embedType, uploadDate) {
   return (Date.now() - Date.UTC(+d.slice(0, 4), +d.slice(4, 6) - 1, +d.slice(6, 8))) / 864e5 > 61;
 }
 
+// labels for Claude's chat flags (pipeline/chatflags.py, reel.CHAT_CATEGORIES)
+const FLAG_LABEL = { slur: 'slur', antisemitism: 'antisemitism', nazi_or_holocaust_comparison: 'Nazi comparison',
+  racism_or_bigotry: 'racism / bigotry', dehumanizing: 'dehumanizing', violent_threat_or_glorification: 'violence',
+  harassment_or_doxxing: 'harassment', sexual_harassment: 'sexual harassment' };
+
 async function api(path, params = {}) {
   const qs = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) if (v !== '' && v !== null && v !== undefined) qs.set(k, v);

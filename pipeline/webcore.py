@@ -17,10 +17,11 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 
 from common import ROOT, Anchors, P, cfg_file
 from search import Index, fts_execute, hybrid, window_results
+import chatflags
 import feedback
 
 PAGE = 50
-RATE_LIMITED = ("/api/search", "/api/semantic", "/api/chat/search")
+RATE_LIMITED = ("/api/search", "/api/semantic", "/api/chat/search", "/api/chat/author.csv")
 
 
 def _date(s: str | None) -> str | None:
@@ -290,9 +291,9 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
         try:
             get_video(con, vid)
             if not admin:
-                return {"messages": rows(con.execute(
+                return {"messages": with_flags(rows(con.execute(
                     "SELECT id, t, author, badges, first_msg, subscriber, text, deleted, kind FROM chat "
-                    "WHERE video_id=? AND t >= ? AND t < ? ORDER BY t, id", (vid, start, end)))}
+                    "WHERE video_id=? AND t >= ? AND t < ? ORDER BY t, id", (vid, start, end))))}
             out = []
             for lo, hi, off in Anchors.load(con, vid).chat_ranges(start, end):
                 for r in con.execute("SELECT id, t, user_id, author, badges, first_msg, returning_chatter, subscriber, text, "
@@ -301,7 +302,7 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
                     d = dict(r)
                     d["t"] = round(d["t"] - off, 3)
                     out.append(d)
-            return {"messages": out}
+            return {"messages": with_flags(out)}
         finally:
             con.close()
 
@@ -344,6 +345,54 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
             con.close()
 
     reels = P(cfg, "reels") if "reels" in cfg.get("paths", {}) else None
+    flags_db = chatflags.db_path(cfg)
+
+    def with_flags(msgs: list[dict]) -> list[dict]:
+        """Claude's archive-wide chat check (chatflags.py): a 'flag' on each message it flagged."""
+        got = chatflags.flags_for(flags_db, [m["id"] for m in msgs if m.get("kind") == "msg"])
+        for m in msgs:
+            if m["id"] in got:
+                m["flag"] = got[m["id"]]
+        return msgs
+
+    @app.get("/api/trophies/{week}")
+    def week_trophies(week: str):
+        """The week's most antisemitic / most hateful chatters by flagged messages mods left up (chatflags.trophies)."""
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", week):
+            raise HTTPException(404, "not found")
+        con = db()
+        try:
+            return chatflags.trophies(flags_db, con, week, chatflags.settings(cfg))
+        finally:
+            con.close()
+
+    @app.get("/api/chat/author.csv")
+    def author_csv(author: str = Query(..., min_length=1, max_length=40)):
+        """Every published message by one chatter, as CSV (with Claude's flag, if any, and a watch link)."""
+        import csv
+        import io
+        con = db()
+        try:
+            got = rows(con.execute(
+                "SELECT c.id, c.video_id, c.t, c.author, c.text, c.deleted, c.kind, v.title, v.upload_date FROM chat c "
+                "JOIN videos v ON v.id = c.video_id WHERE lower(c.author) = lower(?) AND c.kind = 'msg' "
+                "ORDER BY v.upload_date, c.t LIMIT 100000", (author,)))
+        finally:
+            con.close()
+        if not got:
+            raise HTTPException(404, "no messages from that chatter")
+        flags = chatflags.flags_for(flags_db, [r["id"] for r in got])
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(["date", "stream", "time", "author", "message", "deleted_by_mods", "flag", "flag_reason", "link"])
+        for r in got:
+            d, t, f = r["upload_date"] or "", int(r["t"] or 0), flags.get(r["id"]) or {}
+            w.writerow([f"{d[:4]}-{d[4:6]}-{d[6:]}", r["title"], f"{t // 3600:02d}:{t // 60 % 60:02d}:{t % 60:02d}",
+                        r["author"], r["text"], "yes" if r["deleted"] else "", f.get("category", ""), f.get("why", ""),
+                        f"/watch.html?v={r['video_id']}&t={max(t - 5, 0)}"])
+        safe = re.sub(r"[^A-Za-z0-9_]", "_", author)[:40]
+        return HTMLResponse(buf.getvalue(), media_type="text/csv",
+                            headers={"Content-Disposition": f"attachment; filename=chat-{safe}.csv"})
 
     @app.get("/api/reels")
     def reel_list():

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Weekly reel · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112404"></head>
+<title>Weekly reel · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112405"></head>
 <body><main class="reel">
   <p class="intro">Each week, Claude reads every line of every stream and picks the moments worth a look, with the chat at the time and fact-checks of his claims.</p>
   <div class="reelbar">
@@ -13,10 +13,12 @@
     <button type="button" data-view="clips" class="on">Clips</button>
     <button type="button" data-view="facts">Fact-checks</button>
     <button type="button" data-view="trends">Trends</button>
+    <button type="button" data-view="trophies">🏆 Trophies</button>
   </nav>
   <div id="empty" class="note" hidden></div>
   <div id="facts" hidden></div>
   <div id="trends" hidden></div>
+  <div id="trophies" hidden></div>
   <div id="tip" class="tip" role="tooltip" hidden></div>
   <div id="stage" hidden>
     <!-- the video (and on a computer the chat column) stay on screen while the write-up scrolls;
@@ -51,7 +53,7 @@
   <p class="note small">Picked and written by Claude (AI) from machine-made transcripts, counting only Hasan's own words.
     Watch the moment before relying on it.</p>
 </main>
-<script src="common.js?v=2026112404"></script>
+<script src="common.js?v=2026112405"></script>
 <script>
 let cfg, reel = null, idx = 0, clip = null, player = null, chat = [], playing = false, sim = null;
 const qs = new URLSearchParams(location.search);
@@ -87,8 +89,8 @@ async function mountPlayer(c) {
   // no embed (VOD deleted) or the embed failed: a clock over the clip
   box.hidden = true; $('#slider').hidden = false;
   $('#slider .note').textContent = twitchGone(c.embed_type, c.date)
-    ? 'Twitch deletes past broadcasts about 60 days after the stream, so this video is gone. The clock below plays the clip's transcript and chat.'
-    : 'The original video is no longer available. The clock below plays the clip's transcript and chat.';
+    ? "Twitch deletes past broadcasts about 60 days after the stream, so this video is gone. The clock below plays the clip's transcript and chat."
+    : "The original video is no longer available. The clock below plays the clip's transcript and chat.";
   const range = $('#range'); range.min = Math.floor(c.start); range.max = Math.ceil(c.end);
   let pos = c.start, last = 0; range.value = pos;
   range.oninput = () => { pos = +range.value; };
@@ -259,7 +261,7 @@ function markHot(c) {
   for (const m of chat) {
     if (m.kind === 'mod_action') continue;
     const t = normMsg(m.text);
-    m.hot = null; m.flag = flags.get(m.id) || null;
+    m.hot = null; m.flag = flags.get(m.id) || m.flag || null;
     if (m.flag) { m.hot = 'flag'; nf++; }
     else if (t && picked.some(p => same(t, p))) m.hot = 'picked';
     else if (t && bursts.some(([b]) => same(t, b))) m.hot = 'burst';
@@ -269,8 +271,7 @@ function markHot(c) {
   $('#flagonly').hidden = !nf;
   if (!nf) $('#onlyflags').checked = false;
 }
-const FLAG = { slur: 'slur', antisemitism: 'antisemitism', nazi_or_holocaust_comparison: 'Nazi comparison', racism_or_bigotry: 'racism / bigotry', dehumanizing: 'dehumanizing',
-  violent_threat_or_glorification: 'violence', harassment_or_doxxing: 'harassment', sexual_harassment: 'sexual harassment' };
+const FLAG = FLAG_LABEL;
 const HOT = { picked: 'notable', burst: 'copy-paste wave' };
 let lastKey = '';
 function renderChat(now) {
@@ -290,7 +291,7 @@ function renderChat(now) {
       m.first_msg ? el('span', { class: 'first', text: 'first' }) : null, who, document.createTextNode(': '),
       m.deleted ? deletedBody(m) : el('span', { class: 'body', text: m.text }),
       m.deleted && !revealable(m) ? el('span', { class: 'tag del', text: 'deleted by mods' }) : null,
-      m.flag ? el('span', { class: 'tag hottag flagtag', title: m.flag.why, text: FLAG[m.flag.category] || m.flag.category }) : null,
+      m.flag ? el('span', { class: 'tag hottag flagtag', title: m.flag.why, text: FLAG_LABEL[m.flag.category] || m.flag.category }) : null,
       HOT[m.hot] ? el('span', { class: 'tag hottag', text: HOT[m.hot] }) : null);
   }));
   if (!all) box.scrollTop = box.scrollHeight;
@@ -421,12 +422,57 @@ async function renderTrends() {
           text: k === 'week' ? `${w.week} – ${w.week_end}` : (w[k] == null ? '–' : String(w[k])) })))))))));
 }
 
+// ---------- trophies: the week's most antisemitic / most hateful chatters ----------
+const MEDALS = ['🥇', '🥈', '🥉'];
+async function renderTrophies() {
+  const box = $('#trophies');
+  const week = $('#week').value;
+  box.replaceChildren(el('div', { class: 'note', text: 'Loading…' }));
+  let t;
+  try { t = await api('/api/trophies/' + encodeURIComponent(week)); }
+  catch (e) { return box.replaceChildren(el('div', { class: 'note', text: 'Trophies are not available.' })); }
+  if (week !== $('#week').value) return;
+  const contact = cfg.contact_email;
+  const podium = (title, sub, people) => el('section', { class: 'podium' },
+    el('h2', { class: 'fh', text: title }), el('p', { class: 'note', style: 'padding:0 0 8px', text: sub }),
+    people.length ? el('div', { class: 'medals' }, ...people.map((p, i) => trophyCard(p, MEDALS[i])))
+      : el('div', { class: 'note', text: `Nobody this week had ${t.min || 3} or more such messages that the mods left up.` }));
+  box.replaceChildren(
+    el('p', { class: 'note', style: 'padding:0 0 10px' },
+      document.createTextNode(`Ranked by chat messages Claude (AI) flagged and the channel's mods left up, ${t.min || 3} or more to place. ` +
+        'Only flags Claude was sure of count; Nazi/Holocaust comparisons are not counted. AI labels can be wrong: read the messages. '),
+      contact ? el('a', { href: `mailto:${contact}?subject=${encodeURIComponent('Trophy error, week of ' + week)}`, text: 'Report a mistake' }) : null,
+      t.checked_through ? document.createTextNode(` · Chat checked through ${fmtDate(t.checked_through)}.`) : null),
+    podium('Most antisemitic chatter', 'Antisemitism only: slurs for Jews, tropes, Holocaust denial or mockery, hostility to Jews as Jews.', t.antisemitism),
+    podium('Most hateful chatter', 'Any kind: slurs, antisemitism, racism and bigotry, dehumanizing language, threats, harassment.', t.hateful),
+    t.streamers.length ? el('section', { class: 'podium' }, el('h2', { class: 'fh', text: '🎙️ Streamers in chat' }),
+      el('p', { class: 'note', style: 'padding:0 0 8px', text: 'Chatters with a Twitch partner badge who had any flagged message the mods left up.' }),
+      el('div', { class: 'medals' }, ...t.streamers.map(p => trophyCard(p, '🎙️')))) : null);
+}
+function trophyCard(p, medal) {
+  const cats = Object.entries(p.categories).map(([k, n]) => el('span', { class: 'tag hottag flagtag', text: `${FLAG_LABEL[k] || k} ${n}` }));
+  const list = el('ul', { class: 'tmsgs' }, ...p.messages.map(m => el('li', {},
+    el('a', { href: watchUrl(m.video_id, Math.max(m.t - 5, 0)), class: 'cwhen', text: `${fmtDate(m.date)} ${fmtTime(m.t)}` }),
+    document.createTextNode(' '), el('span', { text: m.text }), document.createTextNode(' '),
+    el('span', { class: 'tag hottag flagtag', title: m.why, text: FLAG_LABEL[m.category] || m.category }))));
+  return el('article', { class: 'trophy' },
+    el('div', { class: 'thead' }, el('span', { class: 'medal', text: medal }),
+      el('b', { class: 'tname', text: p.author }), p.partner ? el('span', { class: 'tag streamer', text: '🎙️ streamer' }) : null,
+      el('span', { class: 'tcount', text: `${p.count} message${p.count === 1 ? '' : 's'}` })),
+    el('div', { class: 'cmeta' }, ...cats),
+    el('details', {}, el('summary', { text: `Show the flagged messages${p.count > p.messages.length ? ` (first ${p.messages.length})` : ''}` }), list),
+    el('div', { class: 'row', style: 'gap:10px;margin-top:6px' },
+      el('a', { href: `index.html?tab=chat&author=${encodeURIComponent(p.author)}`, text: 'All their messages' }),
+      el('a', { href: `/api/chat/author.csv?author=${encodeURIComponent(p.author)}`, download: '', text: 'Export CSV' })));
+}
+
 let view = 'clips';
 function setView(v) {
   view = v;
   for (const b of document.querySelectorAll('#views button')) b.classList.toggle('on', b.dataset.view === v);
   $('#facts').hidden = v !== 'facts';
   $('#trends').hidden = v !== 'trends';
+  $('#trophies').hidden = v !== 'trophies';
   const hasClips = reel && reel.clips.length;
   $('#stage').hidden = v !== 'clips' || !hasClips;
   $('#empty').hidden = v !== 'clips' || hasClips;
@@ -434,6 +480,7 @@ function setView(v) {
   if (v !== 'clips' && player && playing) { player.pause(); playing = false; }
   if (v === 'facts') renderFacts();
   if (v === 'trends') renderTrends();
+  if (v === 'trophies') renderTrophies();
 }
 
 // ---------- flipping ----------
@@ -454,6 +501,7 @@ async function loadWeek(week) {
   try { reel = await api('/api/reels/' + encodeURIComponent(week)); }
   catch (e) { reel = null; }
   if (view === 'facts') renderFacts();
+  if (view === 'trophies') renderTrophies();
   if (!reel || !reel.clips.length) {
     $('#stage').hidden = true; $('#empty').hidden = view !== 'clips';
     $('#empty').textContent = reel ? `Nothing from this week met the bar (${reel.candidates_judged} moments were judged).` : 'This week’s reel is not available.';
@@ -525,7 +573,7 @@ function tick() {
     $('#lines').hidden = b.dataset.pane !== 'lines';
   });
   await loadWeek($('#week').value);
-  if (['facts', 'trends'].includes(qs.get('view'))) setView(qs.get('view'));
+  if (['facts', 'trends', 'trophies'].includes(qs.get('view'))) setView(qs.get('view'));
   setInterval(tick, 400);
 })();
 </script></body></html>

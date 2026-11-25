@@ -6,6 +6,7 @@ logs/
 qa/
 reels/
 feedback/
+chatflags/
 *.db
 archive/
 site.env

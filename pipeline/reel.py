@@ -781,8 +781,8 @@ def last_json(text: str):
 # ---------------------------------------------------------------- pass 4: chat check
 CHAT_CATEGORIES = ["slur", "antisemitism", "nazi_or_holocaust_comparison", "racism_or_bigotry", "dehumanizing",
                    "violent_threat_or_glorification", "harassment_or_doxxing", "sexual_harassment"]
-CHAT_RUBRIC = """You review Twitch chat messages from HasanAbi's (Hasan Piker's) stream, shown next to a clip on a research
-site, and flag the hateful or abusive ones so readers can find them. Each line is `id<TAB>message`; a line starting
+CHAT_RUBRIC = """You review Twitch chat messages from HasanAbi's (Hasan Piker's) stream for a research site, and flag the
+hateful or abusive ones so readers can find them. Each line is `id<TAB>message`; a line starting
 with [deleted by mods] was removed by the channel's moderators.
 
 Flag a message only if it clearly is one of:
@@ -803,13 +803,14 @@ Flag a message only if it clearly is one of:
 
 Do NOT flag: ordinary insults, swearing, emotes, spam, jokes without a target group, strong political opinions, or
 messages quoting something only to criticise it. When unsure, don't flag. Use only ids from the list.
-For each flag give the category and a few words on why (no more than 12 words)."""
+For each flag give the category, a few words on why (no more than 12 words), and sure: true when the message is
+unambiguous on its own, false when it depends on context you can't see (sarcasm, quoting someone, unclear target)."""
 CHAT_SCHEMA = {
     "type": "object", "additionalProperties": False, "required": ["flags"],
     "properties": {"flags": {"type": "array", "items": {
-        "type": "object", "additionalProperties": False, "required": ["id", "category", "why"],
+        "type": "object", "additionalProperties": False, "required": ["id", "category", "why", "sure"],
         "properties": {"id": {"type": "integer"}, "category": {"type": "string", "enum": CHAT_CATEGORIES},
-                       "why": {"type": "string"}}}}}}
+                       "why": {"type": "string"}, "sure": {"type": "boolean"}}}}}}
 
 
 def clip_chat(con, vid: str, start: float, end: float) -> list[dict]:
@@ -849,7 +850,8 @@ def chat_flags(answers: list) -> list[dict]:
         r = got.get("result") if got.get("status") == "succeeded" else None
         for f in (r or {}).get("flags", []) if isinstance(r, dict) else []:
             if isinstance(f, dict) and f.get("id") in ids and f.get("category") in CHAT_CATEGORIES:
-                out[f["id"]] = {"id": f["id"], "category": f["category"], "why": str(f.get("why", ""))[:120]}
+                out[f["id"]] = {"id": f["id"], "category": f["category"], "why": str(f.get("why", ""))[:120],
+                                "sure": f.get("sure") is not False}
     return sorted(out.values(), key=lambda x: x["id"])
 
 
