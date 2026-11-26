@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>thehasanproject</title>
+<meta name="description" content="What Hasan said this week, what he got wrong, and what he skipped, with a link to the exact moment.">
+<meta property="og:title" content="thehasanproject: this week on Hasan's stream">
+<meta property="og:description" content="What Hasan said this week, what he got wrong, and what he skipped, with a link to the exact moment in every case.">
+<meta property="og:site_name" content="thehasanproject"><meta property="og:type" content="website"><meta name="twitter:card" content="summary">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Public+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: a single verdict-first card feed, with the week's numbers and the daily question in a side rail on wide screens and on top on phones. */
+:root {
+  --bg: #f3f4f7;
+  --surface: #ffffff;
+  --ink: #15171c;
+  --ink-2: #4a5060;
+  --ink-3: #6b7180;
+  --line: #dfe2e9;
+  --accent: #e2521c;
+  --false: #c8242f;
+  --misleading: #a96300;
+  --blind: #4a46c9;
+  --chat: #0b7a74;
+  --record: #15171c;
+  --receipt: #2f7d32;
+  --bar: #c9cdd8;
+  --bar-hi: #e2521c;
+  --quote-bg: #f6f7fa;
+  --note-bg: #fff6d9;
+  --note-ink: #5a4500;
+  --display: "Bricolage Grotesque", "Arial Narrow", system-ui, sans-serif;
+  --body: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f1115; --surface: #181b21; --ink: #eceef3; --ink-2: #b4b9c6; --ink-3: #8c93a3; --line: #2a2f39;
+  --accent: #ff7a45; --false: #ff6b6b; --misleading: #f0a43a; --blind: #9d9bff; --chat: #3cc7bd; --record: #eceef3; --receipt: #6cc070;
+  --bar: #343a46; --bar-hi: #ff7a45; --quote-bg: #1f232b; --note-bg: #2d2610; --note-ink: #f3d98a; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0f1115; --surface: #181b21; --ink: #eceef3; --ink-2: #b4b9c6; --ink-3: #8c93a3; --line: #2a2f39;
+  --accent: #ff7a45; --false: #ff6b6b; --misleading: #f0a43a; --blind: #9d9bff; --chat: #3cc7bd; --record: #eceef3; --receipt: #6cc070;
+  --bar: #343a46; --bar-hi: #ff7a45; --quote-bg: #1f232b; --note-bg: #2d2610; --note-ink: #f3d98a; color-scheme: dark }
+
+* { box-sizing: border-box }
+[hidden] { display: none !important }
+img { max-width: 100% }
+:root { padding: 0 } body { margin: 0; background: var(--bg); color: var(--ink); font: 400 16px/1.55 var(--body); }
+a { color: inherit }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px }
+
+
+header.site { border-bottom: 1px solid var(--line); background: var(--surface);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+header.site .in { max-width: 1120px; margin: 0 auto; display: flex; gap: 16px 28px; align-items: center; flex-wrap: wrap; padding-block: 14px }
+.brand { font: 800 19px/1 var(--display); letter-spacing: -.01em; text-decoration: none }
+.brand { display: inline-flex; align-items: baseline; gap: 6px; font: 500 17px/1 var(--mono); letter-spacing: -.02em }
+.brand .prompt { font: 500 17px/1 var(--mono); color: var(--accent); letter-spacing: -.04em }
+.brand .prompt i { font-style: normal; animation: blink 1.1s steps(1) infinite }
+@keyframes blink { 50% { opacity: 0 } }
+@media (prefers-reduced-motion: reduce) { .brand .prompt i { animation: none } }
+nav.main { display: flex; gap: 4px; flex-wrap: wrap }
+nav.main a { text-decoration: none; font-weight: 600; font-size: 14px; color: var(--ink-2); padding: 6px 10px; border-radius: 6px }
+nav.main a[aria-current] { color: var(--ink); background: var(--bg) }
+nav.main a.tool { font-weight: 500; color: var(--ink-3) }
+
+.wrap { max-width: 1120px; margin: 0 auto; padding-block: 28px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+.hero { display: grid; gap: 6px; margin-bottom: 22px }
+.eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-3) }
+h1 { font: 800 clamp(30px, 5.4vw, 52px)/1.02 var(--display); letter-spacing: -.025em; margin: 0; text-wrap: balance; max-width: 22ch }
+h1 em { font-style: normal; color: var(--accent) }
+.hero p { margin: 6px 0 0; color: var(--ink-2); max-width: 62ch }
+
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--line);
+  border: 1px solid var(--line); border-radius: 12px; overflow: hidden; margin-bottom: 28px }
+.stat { background: var(--surface); padding: 14px 16px; min-width: 0 }
+.stat .k { font-size: 12px; font-weight: 600; color: var(--ink-3); text-transform: uppercase; letter-spacing: .06em }
+.stat .v { font: 800 28px/1.1 var(--display); letter-spacing: -.02em; margin-top: 4px; font-variant-numeric: tabular-nums }
+.stat .s { font-size: 13px; color: var(--ink-2); margin-top: 2px }
+.stat .v .bad { color: var(--false) }
+
+.grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 28px; align-items: start }
+.rail { display: grid; gap: 20px; position: sticky; top: calc(env(safe-area-inset-top, 0px) + 16px) }
+
+.chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px }
+.chip { font: 600 13px/1 var(--body); border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
+  padding: 9px 12px; border-radius: 999px; cursor: pointer; min-height: 36px }
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink) }
+.chip .n { opacity: .6; margin-left: 4px; font-variant-numeric: tabular-nums }
+
+.feed { display: grid; gap: 16px }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; display: grid; gap: 10px; scroll-margin-top: 20px }
+.card:target { box-shadow: 0 0 0 2px var(--accent) }
+.top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap }
+.stamp { --c: var(--record); font: 800 12px/1 var(--display); letter-spacing: .12em; text-transform: uppercase; color: var(--c);
+  border: 2px solid var(--c); padding: 5px 8px 4px; border-radius: 4px; transform: rotate(-2deg); display: inline-block; }
+.stamp.false { --c: var(--false) } .stamp.misleading { --c: var(--misleading) } .stamp.blind { --c: var(--blind) }
+.stamp.chat { --c: var(--chat) } .stamp.receipt { --c: var(--receipt) }
+.when { font-size: 13px; color: var(--ink-3) }
+.card h2 { font: 700 21px/1.2 var(--display); letter-spacing: -.01em; margin: 0; text-wrap: balance }
+blockquote { margin: 0; background: var(--quote-bg); border-radius: 8px; padding: 12px 14px; font-size: 16.5px; line-height: 1.5 }
+blockquote .who { display: block; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 4px }
+.fix { display: grid; gap: 2px }
+.fix b { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3) }
+.card p { margin: 0; color: var(--ink-2); max-width: 66ch }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px }
+.two > div { min-width: 0 }
+.bubbles { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px }
+.bubbles li { background: var(--quote-bg); border-radius: 10px 10px 10px 2px; padding: 7px 10px; font-size: 14.5px; width: fit-content; max-width: 100% }
+.vs { display: grid; grid-template-columns: auto 1fr auto; gap: 6px 12px; align-items: center; font-size: 14px }
+.vs .track { height: 10px; border-radius: 0 4px 4px 0; background: var(--bar); min-width: 3px }
+.vs .track.hi { background: var(--bar-hi) }
+.vs .num { font-variant-numeric: tabular-nums; font-weight: 700; text-align: right }
+.foot { display: flex; gap: 8px 16px; align-items: center; flex-wrap: wrap; padding-top: 4px; border-top: 1px solid var(--line); margin-top: 2px; padding-top: 12px }
+.watch { font: 600 14px/1 var(--body); text-decoration: none; background: var(--ink); color: var(--bg); padding: 10px 12px; border-radius: 8px; display: inline-flex; gap: 6px; align-items: center; min-height: 40px }
+.watch .t { font-family: var(--mono); font-size: 13px }
+.linkish { font: 600 14px/1 var(--body); background: none; border: 0; color: var(--ink-2); cursor: pointer; padding: 10px 4px; text-decoration: underline; text-underline-offset: 3px; min-height: 40px }
+details.more summary { cursor: pointer; font-weight: 600; font-size: 14px; color: var(--ink-2); padding: 8px 0 }
+details.more .body { display: grid; gap: 8px; font-size: 14.5px; color: var(--ink-2) }
+details.more ul { margin: 0; padding-left: 18px }
+
+.placeholder { border-style: dashed; background: transparent }
+.placeholder h2 { color: var(--ink-2) }
+
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px; display: grid; gap: 12px }
+.panel h3 { font: 700 17px/1.2 var(--display); margin: 0 }
+.qbtns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px }
+.qbtns button { font-size: 14px !important; line-height: 1.25 !important; text-align: left }
+.qbtns button { font: 700 15px/1 var(--body); padding: 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer; min-height: 44px }
+.qbtns button:hover { border-color: var(--ink-3) }
+.qbtns button[disabled] { cursor: default }
+.qbtns button.right { border-color: var(--receipt); color: var(--receipt) }
+.qbtns button.wrong { border-color: var(--false); color: var(--false) }
+.reveal { display: grid; gap: 8px; font-size: 14.5px; color: var(--ink-2) }
+.reveal strong { color: var(--ink) }
+.grid-share { font-family: var(--mono); font-size: 13px; background: var(--quote-bg); border-radius: 8px; padding: 10px; white-space: pre-wrap }
+
+.hours { display: grid; gap: 9px }
+.hrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; font-size: 14px }
+.hrow .lbl { min-width: 0; overflow-wrap: anywhere }
+.hrow .val { font-variant-numeric: tabular-nums; font-weight: 700 }
+.hrow .bar { grid-column: 1 / -1; height: 8px; border-radius: 0 4px 4px 0; background: var(--bar) }
+.hrow .bar.hi { background: var(--bar-hi) }
+.hrow .sub { grid-column: 1 / -1; font-size: 12.5px; color: var(--ink-3) }
+.small { font-size: 13px; color: var(--ink-3); margin: 0 }
+
+.topics { display: flex; flex-wrap: wrap; gap: 8px }
+.topics a { font-size: 14px; font-weight: 600; text-decoration: none; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg) }
+
+.note { display: none; background: var(--note-bg); color: var(--note-ink); border-radius: 8px; padding: 9px 12px; font-size: 13.5px; line-height: 1.45 }
+body.notes .note { display: block }
+.note b { font-weight: 700 }
+
+.og { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; max-width: 440px }
+.og .img { aspect-ratio: 1200 / 630; max-width: 100%; background: var(--ink); color: var(--bg); padding: 18px; display: grid; align-content: space-between }
+.og .img .s { font: 800 13px/1 var(--display); letter-spacing: .12em; color: #ff8a8a; border: 2px solid #ff8a8a; padding: 4px 7px; width: fit-content; transform: rotate(-2deg) }
+.og .img q { font: 700 clamp(15px, 3.6vw, 21px)/1.2 var(--display) }
+.og .img .m { font-size: 12px; opacity: .75 }
+.og .cap { padding: 10px 12px; font-size: 13px; background: var(--surface) }
+.og .cap b { display: block; font-size: 14px }
+
+@media (max-width: 980px) {
+  .grid { grid-template-columns: minmax(0, 1fr) }
+  .rail { position: static; order: -1 }
+}
+@media (max-width: 640px) {
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)) }
+  .two { grid-template-columns: minmax(0, 1fr) }
+  .card { padding: 16px }
+  .card h2 { font-size: 19px }
+}
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important } }
+</style>
+
+</head><body>
+<header class="site"><div class="in">
+  <a class="brand" href="#top" aria-label="thehasanproject">thehasanproject<span class="prompt" aria-hidden="true">&gt;<i>_</i></span></a>
+  <nav class="main" aria-label="Main">
+    <a href="#top" aria-current="page">This week</a>
+    <a href="spotlight.html">Topics</a>
+    <a href="factchecks.html">Fact-checks</a>
+    <a class="tool" href="index.html">Search</a>
+    <a class="tool" href="videos.html">All streams</a>
+    <a class="tool" href="about.html">About</a>
+  </nav>
+</div></header>
+
+<main class="wrap" id="top">
+  <section class="hero">
+    <div class="eyebrow">Week of Sun Nov 15 – Sat Nov 21 · 7 streams</div>
+    <h1>This week on Hasan's stream</h1>
+    <p>What he said, what he got wrong, and what he skipped, with a link to the exact moment in every case.</p>
+  </section>
+
+  <section class="stats" aria-label="This week in numbers">
+    <div class="stat"><div class="k">On stream</div><div class="v">64.8 h</div><div class="s">7 streams</div></div>
+    <div class="stat"><div class="k">Top topic</div><div class="v">GTA VI</div><div class="s">21.7 h · a third of the week</div></div>
+    <div class="stat"><div class="k">Streamer drama</div><div class="v">5.9 h</div><div class="s">the H3 / Ethan Klein split</div></div>
+    <div class="stat"><div class="k">Claims checked</div><div class="v">39 · <span class="bad">14</span></div><div class="s">7 false, 7 misleading</div></div>
+  </section>
+
+  <div class="grid">
+    <div>
+      <div class="chips" role="group" aria-label="Show" id="chips"></div>
+      <div class="feed" id="feed"></div>
+    </div>
+
+    <aside class="rail">
+      <section class="panel" aria-labelledby="q-h">
+        <div class="eyebrow">Question of the week</div>
+        <h3 id="q-h">After GTA VI, what did Hasan spend the most time on this week?</h3>
+        <p class="small">He streamed 64.8 hours across 7 streams.</p>
+        <div class="qbtns" id="q-opts"></div>
+        <div class="reveal" id="q-reveal" hidden>
+          <p><strong>The H3 split.</strong> Ethan Klein's affair took about 5.9 hours, more than the next four news topics combined (replacing Schumer and Jeffries 2.3 h, Mamdani 1.6 h, the Iran war 1.2 h).</p>
+          <div class="grid-share" id="q-grid"></div>
+          <button type="button" class="linkish" id="q-copy" style="justify-self:start;padding-left:0">Copy result</button>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="h-h">
+        <h3 id="h-h">Where the hours went</h3>
+        <div class="hours" id="hours"></div>
+        <p class="small">Hours are estimates from the transcripts.</p>
+      </section>
+    </aside>
+  </div>
+
+  <section id="topics" style="margin-top:36px" class="panel">
+    <h3>Search the week's topics</h3>
+    <p class="small">Every stream is transcribed. Each topic opens a search of everything he said about it.</p>
+    <div class="topics">
+      <a href="index.html?q=GTA">GTA VI</a><a href="index.html?q=%22Ethan%20Klein%22">H3 / Ethan Klein</a><a href="index.html?q=Jeffries">Schumer &amp; Jeffries</a>
+      <a href="index.html?q=Mamdani">Mamdani</a><a href="index.html?q=Iran">US–Iran war</a><a href="index.html?q=%22Jensen%20Huang%22">Jensen Huang</a><a href="index.html?q=Bulwark">The Bulwark</a>
+    </div>
+  </section>
+
+</main>
+
+<script>
+const BASE = 'watch.html';
+const ts = s => { s = Math.floor(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+  return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(x).padStart(2, '0'); };
+
+const KINDS = {
+  false: ['False', 'false', 'Fact-checks'], misleading: ['Misleading', 'misleading', 'Fact-checks'],
+  record: ['On the record', '', 'On the record'], blind: ['Blindspot', 'blind', 'Blindspots'],
+  chat: ['Chat', 'chat', 'Chat'], receipt: ['Receipt', 'receipt', 'Receipts'],
+};
+
+const CARDS = [
+  { id: 'ossoff', kind: 'false', date: 'Sun Nov 15', vid: 'v2929865418', t: 10445,
+    h: 'Calls Jon Ossoff "one of the most conservative" members of the Senate',
+    quote: 'John Ossoff is not progressive. His legislative agenda, his legislative track record is very conservative, one of the most conservative in Congress, one of the most conservative in the Senate.',
+    fix: 'Ossoff broke with most Senate Democrats on 0.8% of votes in 2023–24, below the 2.2% Democratic average, and scores 100% with the AFL-CIO. With about 53 Republican senators, he can\'t be one of the most conservative.',
+    more: 'His broader point, that Ossoff uses populist language without a progressive agenda, is opinion and wasn\'t rated.',
+    src: [['ProPublica: Ossoff votes against party (118th Congress)', 'https://projects.propublica.org/represent/members/O000174/votes-against-party/118']] },
+  { id: 'zionism', kind: 'record', date: 'Sun Nov 15', vid: 'v2929865418', t: 2913,
+    h: 'Says Zionism is "not dissimilar to the Nazis… but specifically Nazis"',
+    quote: 'It\'s not dissimilar to the Nazis or any other kind of fascist formation, but specifically Nazis. Right?',
+    ctx: 'He was explaining why liberal Zionists objected to his Ezra Klein interview. Just before this he called Zionism "vulgar ethno-nationalism" and "ethno-religious supremacism".',
+  },
+  { id: 'blindspot-layout', kind: 'blind', placeholder: true,
+    h: 'Blindspots are coming back',
+    ctx: 'Big stories on r/news, r/politics, r/worldnews and r/LivestreamFail that he never gave a segment, checked against the full transcripts.',
+  },
+  { id: 'zero-israelis', kind: 'false', date: 'Tue Nov 17', vid: 'v2931601927', t: 15444,
+    h: 'Says zero Israelis died in the Iran war',
+    quote: 'How many Israelis died? Zero.',
+    fix: 'Iranian missile strikes killed Israelis from the first days of the war: 9 in one strike on a Beit Shemesh shelter on March 1, and about 23–26 in total.',
+    more: 'His follow-up, that more US soldiers died than Israelis, is roughly a tie (about 23 US service members), not clearly true.',
+    src: [['JTA: 9 Israelis die in direct Iranian missile strike', 'https://www.jta.org/2026/03/01/israel/3-us-soldiers-killed-in-middle-east-9-israelis-die-in-direct-iranian-missile-strike-on-their-shelter']] },
+  { id: 'tim-miller', kind: 'chat', date: 'Sat Oct 3', vid: 'v2890952919', t: 8662, older: true,
+    h: 'Hasan vouches for the Bulwark\'s Tim Miller. Chat isn\'t buying it.',
+    hasan: 'Despite his past work with Jeb Bush and many others, I don\'t think Tim Miller sincerely wants to keep the Democratic Party ideologically captured in the hands of neocons as much as he just wants them to defeat Republicans.',
+    chatSaid: ['Far too trusting', 'He’s a never trumper republican he’s in it for the long haul', 'COPIUM I think Tim is smarter then most and is a neo con'],
+    ctx: 'Most of chat said he was being too charitable. A smaller group agreed Miller seems sincere.',
+  },
+  { id: 'false-flag', kind: 'record', date: 'Tue Nov 17', vid: 'v2931601927', t: 12255,
+    h: 'Says he\'d assume Israel was behind a future attack on the US until proven otherwise',
+    quote: 'It\'s going to take a lot of, it\'s going to take a lot of hard evidence for me to believe that it was not Israel that did it.',
+    ctx: 'He was reacting to CNN\'s report on a possible Iranian dirty-bomb plot, which he called a Mossad PSYOP aimed at Trump.' },
+  { id: 'aipac', kind: 'misleading', date: 'Sun Nov 15', vid: 'v2929865418', t: 4006,
+    h: 'Calls Hakeem Jeffries the "number one" AIPAC recipient',
+    quote: 'Number one APAC recipient.',
+    fix: 'Jeffries is one of AIPAC\'s largest recipients (about 4th in 2023–24), but no data puts him first. Rosen, Gottheimer and Torres got more in that cycle.',
+    src: [['Sludge: AIPAC gives millions to House allies', 'https://readsludge.com/2025/07/25/aipac-gives-millions-in-pac-donations-to-house-allies-senators-in-2026-races/']] },
+  { id: 'extradition', kind: 'false', date: 'Sun Nov 15', vid: 'v2929865418', t: 8922,
+    h: 'Says the US and Israel have no extradition treaty',
+    quote: 'Non-extradition treaty from America. It\'s a problem in Israel, ironically enough.',
+    fix: 'They do: a convention signed in 1962, updated in 2005, and used to extradite accused abusers to the US. Bringing suspects back has still been hard, which is the real problem he was pointing at.',
+    src: [['Senate Executive Report 109-16', 'https://www.govinfo.gov/content/pkg/CRPT-109erpt16/html/CRPT-109erpt16.htm']] },
+  { id: 'receipts-empty', kind: 'receipt', placeholder: true,
+    h: 'Receipts are coming',
+    ctx: 'Then-vs-now pairs where he changed a position he stated as his own. Each one is checked by hand before it goes up.' },
+];
+
+const HOURS = [
+  ['GTA VI', 1299.5, '21.7 h', '127', true],
+  ['Ethan Klein affair / H3', 352.5, '5.9 h', '4,233'],
+  ['Replacing Schumer & Jeffries', 135, '2.3 h', '884'],
+  ['Mamdani as mayor', 93.5, '1.6 h', '145'],
+  ['GTA charity fundraiser', 90.5, '1.5 h', '0'],
+  ['US–Iran war', 70, '1.2 h', '555'],
+];
+
+const $ = s => document.querySelector(s);
+const el = (tag, attrs = {}, ...kids) => { const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) { if (k === 'text') n.textContent = v; else if (k === 'html') n.innerHTML = v; else n.setAttribute(k, v); }
+  n.append(...kids.filter(k => k != null && k !== false)); return n; };
+
+function copy(text, btn, label) {
+  const done = () => { const o = btn.textContent; btn.textContent = label || 'Copied'; setTimeout(() => btn.textContent = o, 1500); };
+  try { navigator.clipboard.writeText(text).then(done, () => done()); } catch (e) { done(); }
+}
+
+function card(c) {
+  const [label, cls] = KINDS[c.kind];
+  const n = el('article', { class: 'card' + (c.placeholder ? ' placeholder' : ''), id: c.id, 'data-kind': c.kind });
+  n.append(el('div', { class: 'top' }, el('span', { class: 'stamp ' + cls, text: label }),
+    c.date ? el('span', { class: 'when', text: c.date + (c.older ? ' · from an earlier stream' : '') }) : null));
+  n.append(el('h2', { text: c.h }));
+  if (c.quote) n.append(el('blockquote', {}, el('span', { class: 'who', text: 'Hasan said' }), '“' + c.quote + '”'));
+  if (c.hasan) n.append(el('div', { class: 'two' },
+    el('div', {}, el('blockquote', {}, el('span', { class: 'who', text: 'Hasan' }), '“' + c.hasan + '”')),
+    el('div', {}, el('span', { class: 'eyebrow', text: 'Chat' }), el('ul', { class: 'bubbles', 'aria-label': 'Chat messages' }, ...c.chatSaid.map(t => el('li', { text: t }))))));
+  if (c.fix) n.append(el('div', { class: 'fix' }, el('b', { text: 'What\'s true' }), el('p', { text: c.fix })));
+  if (c.vs) { const max = Math.max(...c.vs.map(v => v[1]));
+    n.append(el('div', { class: 'vs', role: 'img', 'aria-label': c.vs.map(v => v[0] + ': ' + v[2]).join('; ') },
+      ...c.vs.flatMap(v => [el('span', { text: v[0] }), el('span', { class: 'track' + (v[3] ? ' hi' : ''), style: 'width:' + Math.max(2, 100 * v[1] / max) + '%' }), el('span', { class: 'num', text: v[2] })])));
+    n.append(el('p', { class: 'small', text: c.vsNote }));
+  }
+  if (c.ctx) n.append(el('p', { text: c.ctx }));
+  if (c.more || c.src) n.append(el('details', { class: 'more' }, el('summary', { text: 'Full check and sources' }),
+    el('div', { class: 'body' }, c.more ? el('p', { text: c.more }) : null,
+      c.src ? el('ul', {}, ...c.src.map(([t, u]) => el('li', {}, el('a', { href: u, target: '_blank', rel: 'noopener', text: t })))) : null)));
+  if (!c.placeholder) {
+    const share = el('button', { type: 'button', class: 'linkish', text: 'Copy link' });
+    share.addEventListener('click', () => copy(location.href.split('#')[0] + '#' + c.id, share));
+    n.append(el('div', { class: 'foot' },
+      c.vid ? el('a', { class: 'watch', href: `${BASE}?v=${c.vid}&t=${c.t}`, target: '_blank', rel: 'noopener' }, '▶ Watch at ', el('span', { class: 't', text: ts(c.t) })) : null,
+      share));
+  }
+  if (c.note) n.append(el('div', { class: 'note', html: c.note }));
+  return n;
+}
+
+let filter = '';
+const GROUPS = [['', 'All'], ['Fact-checks', 'Fact-checks'], ['On the record', 'On the record'], ['Blindspots', 'Blindspots'], ['Chat', 'Chat'], ['Receipts', 'Receipts']];
+function drawChips() {
+  const box = $('#chips'); box.replaceChildren();
+  for (const [g, label] of GROUPS) {
+    const n = g ? CARDS.filter(c => KINDS[c.kind][2] === g && !c.placeholder).length : CARDS.filter(c => !c.placeholder).length;
+    const b = el('button', { type: 'button', class: 'chip', 'aria-pressed': String(filter === g) }, label, el('span', { class: 'n', text: String(n) }));
+    b.addEventListener('click', () => { filter = g; drawChips(); drawFeed(); });
+    box.append(b);
+  }
+}
+function drawFeed() {
+  $('#feed').replaceChildren(...CARDS.filter(c => !filter || KINDS[c.kind][2] === filter).map(card));
+}
+
+function drawHours() {
+  const max = Math.max(...HOURS.map(h => h[1]));
+  $('#hours').replaceChildren(...HOURS.map(([l, m, v, r, hi]) => el('div', { class: 'hrow' },
+    el('span', { class: 'lbl', text: l }), el('span', { class: 'val', text: v }),
+    el('span', { class: 'bar' + (hi ? ' hi' : ''), style: 'width:' + Math.max(1.5, 100 * m / max) + '%' }))));
+}
+
+const OPTS = [['h3', 'The H3 / Ethan Klein split'], ['dems', 'Replacing Schumer & Jeffries'], ['iran', 'The US–Iran war'], ['zohran', 'Mamdani as mayor']];
+const RIGHT = 'h3';
+const btns = {};
+for (const [k, label] of OPTS) { const b = el('button', { type: 'button', text: label }); b.addEventListener('click', () => answer(k)); btns[k] = b; $('#q-opts').append(b); }
+function answer(k) {
+  if (!btns[k]) return;
+  Object.values(btns).forEach(b => b.disabled = true);
+  btns[k].classList.add(k === RIGHT ? 'right' : 'wrong');
+  btns[RIGHT].classList.add('right');
+  $('#q-grid').textContent = `thehasanproject>_ week of Nov 15\nWhere did the hours go? ${k === RIGHT ? '🟩' : '🟥'}`;
+  $('#q-reveal').hidden = false;
+  try { localStorage.setItem('mock-q2-2026-11-21', k); } catch (e) {}
+}
+$('#q-copy').addEventListener('click', e => copy($('#q-grid').textContent, e.currentTarget));
+
+drawChips(); drawFeed(); drawHours();
+try { const a = localStorage.getItem('mock-q2-2026-11-21'); if (a) answer(a); } catch (e) {}
+if (location.hash) { const t = document.getElementById(location.hash.slice(1)); if (t) t.scrollIntoView(); }
+</script>
+
+</body></html>
