@@ -46,6 +46,10 @@ DEFAULTS = {
     "cli_workers": 2, "part_min_lines": 30,
     "tags_effort": "low", "tags_batch": 60, "tags_max_requests": 10,
     "orbit": [], "orbit_min_reddit": 20, "orbit_story_min_reddit": 8, "outsiders": [],
+    # plain blindspots are measured against general-audience subreddits only (owner, 2026-11-25): partisan and fan subs
+    # (r/Destiny, r/neoliberal, r/ukraine ...) would make "big story" mean "big in one camp"
+    "broad_subs": ["news", "politics", "worldnews", "LivestreamFail"], "blindspot_min_broad": 100,
+    "blindspot_min_broad_subs": 2,
 }
 KINDS = ["news_politics", "israel_palestine", "war_and_foreign_policy", "streamers_and_internet", "culture_and_entertainment",
          "games", "sports", "science_tech_health", "personal_or_stream", "other"]
@@ -491,6 +495,53 @@ def matches(rx, by_kw, text: str) -> set[str]:
     if not text or rx is None:
         return set()
     return {sid for m in rx.finditer(text) for sid in by_kw.get(m.group(0).lower(), ())}
+
+
+# ---------------------------------------------------------------- did it come up on stream at all (spelling-tolerant)
+VOWELS = frozenset("aeiouy")
+
+
+def skeleton(text: str) -> str:
+    """Words as their consonants with doubled letters collapsed, between bars. Speech-to-text spells names many ways:
+    'Ben-Gvir', 'Bengavir' and 'Ben-Givir' all become |bn|gvr| or |bngvr|, 'Alex Pretti' and 'alex pretty' |lx|prt|."""
+    words = []
+    for w in re.findall(r"[a-z]+", text.lower()):
+        s = re.sub(r"(.)\1+", r"\1", "".join(c for c in w if c not in VOWELS))
+        if s:
+            words.append(s)
+    return "|" + "|".join(words) + "|"
+
+
+def fuzzy_pattern(keyword: str) -> str | None:
+    """A pattern over skeleton() text that ignores word splits, or None when the keyword is too short to match
+    loosely (under 5 consonants, e.g. 'Gaza', 'Trump': those are matched exactly instead)."""
+    k = skeleton(keyword).replace("|", "")
+    if len(k) < 5:
+        return None
+    return r"\|" + r"\|?".join(re.escape(c) for c in k) + r"\|"
+
+
+def aired_mentions(con, stories: dict, sids: set[str]) -> dict[str, list[tuple]]:
+    """Every transcript line, by anyone (Hasan, a guest, a video he played, the auto-captions of the older streams),
+    that mentions one of these stories' keywords, spelled exactly or loosely. A blindspot needs this to be near zero:
+    'he never talked about it' must survive misspelled names and streams without speaker labels."""
+    exact_rx, exact_by = keyword_matcher({sid: {"keywords": [k for k in stories[sid]["keywords"] if fuzzy_pattern(k) is None]}
+                                          for sid in sids})
+    fuzzy = [(re.compile(p), sid) for sid in sids for p in {fuzzy_pattern(k) for k in stories[sid]["keywords"]} if p]
+    any_fuzzy = re.compile("|".join(f"(?:{r.pattern})" for r, _ in fuzzy)) if fuzzy else None
+    out: dict[str, list[tuple]] = defaultdict(list)
+    if not sids:
+        return out
+    for r in con.execute("SELECT t.video_id, t.start, t.text, t.speaker, v.upload_date FROM turns t "
+                         "JOIN videos v ON v.id = t.video_id ORDER BY v.upload_date, t.start"):
+        hit = matches(exact_rx, exact_by, r[2])
+        if any_fuzzy is not None and r[2]:
+            sk = skeleton(r[2])
+            if any_fuzzy.search(sk):
+                hit |= {sid for rx, sid in fuzzy if rx.search(sk)}
+        for sid in hit:
+            out[sid].append((day(r[4]), r[0], r[1], r[3], r[2][:200]))
+    return out
 
 
 def scan_reddit(cfg, st: dict, stories: dict) -> dict:
@@ -994,7 +1045,10 @@ def build_stories(cfg, st: dict, con, entries: list[dict], reddit: dict | None) 
     for sub, days in totals.items():
         for d in days:
             covered[d].add(sub)
+    broad = {b.lower() for b in st["broad_subs"]}
+    covered_broad = {d for d, subs in covered.items() if {x.lower() for x in subs} & broad}
     summaries, details = [], {}
+    verify: dict[str, list[str]] = {}      # badged stories still to check against every transcript line
     for sid, s in state["stories"].items():
         es = by_story.get(sid, [])
         mins: Counter = Counter()
@@ -1048,15 +1102,24 @@ def build_stories(cfg, st: dict, con, entries: list[dict], reddit: dict | None) 
         # under 3 minutes and at most 2 passing mentions on the days compared, and never a story he covered at length
         # some other time (the Reddit data has gaps; a story he spent hours on is not a blindspot)
         quiet = hasan_on_both < 3 and said_on_both <= 2 and hasan_min < 10 and len(mentions) <= 6
+        # the general-audience yardstick: only the broad subreddits, on days they have data and he streamed
+        both_broad = [d for d in days_all if d in covered_broad and d in live]
+        broad_by_sub = {sub: sum(n for d, n in days.items() if d in both_broad)
+                        for sub, days in ((rs or {}).get("days") or {}).items() if sub.lower() in broad}
+        broad_on_both = sum(broad_by_sub.values())
+        broad_subs_hit = sum(1 for n in broad_by_sub.values() if n >= 5)
         badge = None
         if who.get("orbit") and quiet and both and reddit_on_both >= st["orbit_min_reddit"]:
             badge = "close_to_home"
         elif who.get("proximity") and quiet and both and reddit_on_both >= st["orbit_min_reddit"]:
             badge = "proximity_gap"
-        elif reddit_on_both >= 200 and quiet and len(both) >= 3 and s["kind"] in POLITICAL:
+        elif (broad_on_both >= st["blindspot_min_broad"] and broad_subs_hit >= st["blindspot_min_broad_subs"]
+              and quiet and len(both_broad) >= 3 and s["kind"] in POLITICAL):
             badge = "blindspot"           # only political and world stories: a celebrity death he skipped tells nobody anything
         elif hasan_on_both >= 60 and reddit_on_both < 30 and len(both) >= 2:
             badge = "stream_focus"
+        if badge in ("close_to_home", "proximity_gap", "blindspot"):
+            verify[sid] = both_broad if badge == "blindspot" else both
         tags = state.get("tags", {}).get(sid)
         quotes = sorted((dict(q, video_id=e["video_id"], date=e["date"]) for e in es for q in e["quotables"]),
                         key=lambda q: q["date"], reverse=True)
@@ -1077,7 +1140,7 @@ def build_stories(cfg, st: dict, con, entries: list[dict], reddit: dict | None) 
                           "quote": quotes[0] if quotes else None, "who": who, "said": len(mentions),
                           "community": community, "tags": tags,
                           "on_both": {"days": len(both), "hasan_minutes": round(hasan_on_both, 1), "said": said_on_both,
-                                      "reddit": reddit_on_both}})
+                                      "reddit": reddit_on_both, "broad": broad_on_both, "broad_by_sub": broad_by_sub}})
         details[sid] = {"id": sid, "title": s["title"], "kind": s["kind"], "summary": s["summary"],
                         "keywords": s["keywords"], "hasan_days": {d: round(m, 1) for d, m in sorted(mins.items())},
                         "reddit_days": dict(sorted(rday.items())), "by_sub": dict(sorted(by_sub.items(), key=lambda x: -x[1])),
@@ -1090,6 +1153,18 @@ def build_stories(cfg, st: dict, con, entries: list[dict], reddit: dict | None) 
                                            key=lambda x: (x["date"], x["t"])),
                         "quotes": quotes[:12], "positions": positions[-30:], "reddit_top": tops,
                         "all_positions": positions}
+    # Last check before a "he ignored it" badge goes up: search every transcript line, by any speaker and with loose
+    # spelling. More than 2 hits on the compared days, or more than 6 overall, means it did come up: no badge.
+    aired = aired_mentions(con, state["stories"], set(verify))
+    by_id = {x["id"]: x for x in summaries}
+    for sid, days in verify.items():
+        hits = aired.get(sid, [])
+        on = sum(1 for h in hits if h[0] in set(days))
+        details[sid]["aired"] = {"total": len(hits), "on_compared_days": on,
+                                 "examples": [{"date": h[0], "video_id": h[1], "t": h[2], "speaker": h[3], "text": h[4]}
+                                              for h in hits[:8]]}
+        if on > 2 or len(hits) > 6:
+            by_id[sid]["badge"] = details[sid]["badge"] = None
     summaries.sort(key=lambda s: (s["last"], s["hasan_minutes"] + s["reddit_mentions"] / 20), reverse=True)
     return summaries, details
 

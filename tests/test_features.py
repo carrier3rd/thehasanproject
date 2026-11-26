@@ -224,3 +224,13 @@ def test_site_serves_features_and_admin_review(feat):
         assert client.get("/" + page).status_code == 200
     assert client.get("/review.html").status_code == 404                     # the review page is admin only
     assert admin.get("/review.html").status_code == 200
+
+
+def test_fuzzy_names_survive_speech_to_text_spellings():
+    import re
+    import features
+    for kw, heard in [("Ben-Gvir", "you all know Itamar Bengavir"), ("Ben-Gvir", "Itamar Ben-Givir, Bezalel Smotrich"),
+                      ("Alex Pretti", "killing two of our neighbors alex pretty renee good")]:
+        assert re.search(features.fuzzy_pattern(kw), features.skeleton(heard)), (kw, heard)
+    assert features.fuzzy_pattern("Gaza") is None                 # too short to match loosely: exact only
+    assert not re.search(features.fuzzy_pattern("Alex Pretti"), features.skeleton("that was pretty good"))
