@@ -17,7 +17,6 @@ somewhere other than this laptop.**
 from __future__ import annotations
 
 import argparse
-import fcntl
 import json
 import os
 import secrets
@@ -71,24 +70,44 @@ def restic_env(bst: dict) -> dict:
     return env
 
 
-def rclone_program() -> str | None:
-    for c in (shutil.which("rclone"), os.path.expanduser("~/.local/bin/rclone")):
+def try_lock(f) -> bool:
+    """Non-blocking exclusive lock on an open file, on Linux and Windows. False when another process holds it."""
+    try:
+        import fcntl
+    except ImportError:                       # Windows
+        import msvcrt
+        try:
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+            return True
+        except OSError:
+            return False
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except OSError:
+        return False
+
+
+def rclone_program(bst: dict | None = None) -> str | None:
+    for c in ((bst or {}).get("rclone_bin"), shutil.which("rclone"), os.path.expanduser("~/.local/bin/rclone")):
         if c and os.path.exists(c):
             return c
     return None
 
 
 def restic(bst: dict, repo: str, *args, capture=True, check=True) -> subprocess.CompletedProcess:
-    exe = shutil.which("restic")
-    if not exe:
-        raise RuntimeError("restic is not installed (sudo apt install restic)")
+    exe = bst.get("restic_bin") or shutil.which("restic")   # restic_bin: e.g. winget's restic_0.20.0_windows_amd64.exe
+    if not exe or not shutil.which(exe):
+        raise RuntimeError("restic is not installed (sudo apt install restic; on Windows winget install restic.restic "
+                           "and set backup.restic_bin)")
     cmd = [exe, "-r", repo]
     if repo.startswith("rclone:"):
-        prog = rclone_program()
+        prog = rclone_program(bst)
         if not prog:
             raise RuntimeError("rclone not found (needed for rclone: repositories)")
         cmd += ["-o", f"rclone.program={prog}"]
-    r = subprocess.run(cmd + list(args), env=restic_env(bst), capture_output=capture, text=True)
+    r = subprocess.run(cmd + list(args), env=restic_env(bst), capture_output=capture, text=True, encoding="utf-8",
+                       errors="replace")
     if check and r.returncode != 0:
         raise RuntimeError(f"restic {args[0]} failed: {(r.stderr or r.stdout or '').strip()[-400:]}")
     return r
@@ -118,7 +137,8 @@ def paths_to_back_up(cfg, bst: dict, staging: Path) -> list[str]:
     root = Path(cfg["_root"])
     archive = P(cfg, "archive_db").parent
     cand = [staging, P(cfg, "transcripts"), P(cfg, "chat"), P(cfg, "muted"), P(cfg, "voices"), P(cfg, "voiceprints"),
-            P(cfg, "qa"), archive / "reel", archive / "rhetoric", root / "reels", P(cfg, "logs"), root / "older"]
+            P(cfg, "qa"), archive / "reel", archive / "rhetoric", root / "reels", P(cfg, "logs"), root / "older",
+            archive / "features", root / "features", root / "chatflags", root / "feedback"]   # features: approved receipts
     if bst["include_audio"]:
         cand.append(P(cfg, "audio"))
     return [str(p) for p in cand if p.exists()]
@@ -171,9 +191,7 @@ def run(cfg, force: bool = False, now: float | None = None) -> str:
     staging = P(cfg, "archive_db").parent / "archive-snapshot"     # fixed path: same place in every snapshot
     # one run at a time: two runs share the staging path, and the second deleted the first one's snapshot
     lock = open(P(cfg, "archive_db").parent / "backup.lock", "w")
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
+    if not try_lock(lock):
         log.info("another backup run is going; skipping")
         lock.close()
         return "busy"

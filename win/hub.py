@@ -6,6 +6,7 @@ backup steps while `logs/hub-elsewhere` exists there; this script does those ste
   python win/hub.py run [--force]   pull new files and live chat from the laptop, rebuild, publish, push public.db
   python win/hub.py sync            only pull from the laptop
   python win/hub.py push            only push the current public.db (and index/) to the laptop
+  python win/hub.py features        run the features job (Spotlight, Chat vs Hasan, Receipts, quiz) and push features/
 
 Everything flows one way: the laptop's files are the source, this copy is rebuilt from them, and only public.db and
 index/ go back. Each file pulled is checked against the laptop's sha256 (the laptop's RAM can flip bits in transit).
@@ -241,6 +242,37 @@ def push() -> None:
     say("pushed index/ and restarted the site so it loads the new search index")
 
 
+def push_features() -> None:
+    """Send features/ (what the site serves at /api/features/...) to the laptop, every file sha256-checked, then swap
+    the folder in whole so the site never sees half of a run."""
+    src = ROOT / "features"
+    files = sorted(p for p in src.rglob("*") if p.is_file() and not p.name.endswith((".tmp", ".lock")))
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tar:
+        for p in files:
+            tar.add(p, arcname=p.relative_to(src).as_posix())
+    r = ssh(f"cd {REMOTE} && rm -rf features.new && mkdir features.new && tar -xf - -C features.new",
+            stdin=buf.getvalue(), timeout=1800)
+    if r.returncode != 0:
+        raise RuntimeError(f"features upload failed: {r.stderr.decode(errors='replace')[:300]}")
+    sums = "".join(f"{sha(p)}  {p.relative_to(src).as_posix()}\n" for p in files).encode()
+    r = ssh(f"cd {REMOTE}/features.new && sha256sum -c --quiet - && cd .. && rm -rf features.old "
+            f"&& mv features features.old && mv features.new features && rm -rf features.old && echo swapped",
+            stdin=sums, timeout=600)
+    if b"swapped" not in r.stdout:
+        ssh(f"rm -rf {REMOTE}/features.new")
+        raise RuntimeError("features/ arrived damaged on the laptop; the site keeps the previous files")
+    say(f"pushed features/ ({len(files)} files, sha256 checked)")
+
+
+def features() -> int:
+    """The nightly features job (Spotlight, Chat vs Hasan, Receipts, quiz), run here instead of on the laptop."""
+    sync_live()
+    ok = step("pipeline/features.py", "run")
+    push_features()        # even after a partial run: what finished is already in features/
+    return 0 if ok else 1
+
+
 def run(force: bool) -> int:
     st = load_state()
     sync_files(st)
@@ -265,7 +297,7 @@ def run(force: bool) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["run", "sync", "push"])
+    ap.add_argument("cmd", choices=["run", "sync", "push", "features"])
     ap.add_argument("--force", action="store_true", help="rebuild and publish even if no files changed")
     a = ap.parse_args()
     say(f"=== hub {a.cmd} start")
@@ -279,8 +311,11 @@ def main() -> int:
         elif a.cmd == "push":
             push()
             rc = 0
+        elif a.cmd == "features":
+            rc = features()
         else:
             rc = run(a.force)
+            step("pipeline/backup.py", "run")   # encrypted backup to Drive; it runs at most once a day (backup.every_hours)
     except Exception as e:
         say(f"!!! {e}")
         rc = 1

@@ -97,7 +97,18 @@ def load_config(path: str | os.PathLike | None = None) -> dict:
     with open(path) as f:
         cfg = yaml.safe_load(f)
     cfg["_root"] = str(path.resolve().parent)
-    return merge_private(cfg)
+    return merge_local(merge_private(cfg))
+
+
+def merge_local(cfg: dict) -> dict:
+    """Overlay config.local.yaml next to config.yaml, if present (not in git): settings for this one machine, such as
+    a Reddit folder at a different path on the PC hub. Sections merge key by key, like the private overlay."""
+    p = Path(cfg["_root"]) / "config.local.yaml"
+    if not p.is_file():
+        return cfg
+    for key, value in (yaml.safe_load(p.read_text(encoding="utf-8")) or {}).items():
+        cfg[key] = {**cfg[key], **value} if isinstance(value, dict) and isinstance(cfg.get(key), dict) else value
+    return cfg
 
 
 def merge_private(cfg: dict) -> dict:

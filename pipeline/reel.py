@@ -28,6 +28,7 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import tempfile
 import re
 import sqlite3
 import sys
@@ -416,7 +417,8 @@ def cli_env() -> dict:
     env = {k: v for k, v in os.environ.items()
            if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_USE_BEDROCK",
                         "CLAUDE_CODE_USE_VERTEX", "ANTHROPIC_MODEL")}
-    env["PATH"] = str(Path.home() / ".local" / "bin") + ":" + env.get("PATH", "/usr/bin:/bin")
+    import os as _os
+    env["PATH"] = str(Path.home() / ".local" / "bin") + _os.pathsep + env.get("PATH", _os.defpath)
     return env
 
 
@@ -484,7 +486,8 @@ def run_cli(cfg, st: dict, kind: str, reqs: list[tuple[str, str, str, dict | Non
         key, system, user, schema = req
         try:
             p = subprocess.run(cli_args(st, kind, system, schema), input=user, capture_output=True, text=True,
-                               env=env, cwd="/tmp", timeout=st["cli_timeout_s"])
+                               env=env, cwd=tempfile.gettempdir(), timeout=st["cli_timeout_s"],
+                               encoding="utf-8")
         except subprocess.TimeoutExpired:
             return key, {"status": "errored"}
         if p.returncode != 0 and not p.stdout.strip():
