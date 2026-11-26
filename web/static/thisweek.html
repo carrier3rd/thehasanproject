@@ -1,9 +1,9 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>thehasanproject</title>
-<meta name="description" content="What Hasan said this week, what he got wrong, and what he skipped, with a link to the exact moment.">
-<meta property="og:title" content="thehasanproject: this week on Hasan's stream">
-<meta property="og:description" content="What Hasan said this week, what he got wrong, and what he skipped, with a link to the exact moment in every case.">
+<meta name="description" content="What Hasan said on his latest stream, what he got wrong, and what he skipped, with a link to the exact moment.">
+<meta property="og:title" content="thehasanproject: what Hasan said on stream">
+<meta property="og:description" content="What Hasan said on his latest stream, what he got wrong, and what he skipped, with a link to the exact moment in every case.">
 <meta property="og:site_name" content="thehasanproject"><meta property="og:type" content="website"><meta name="twitter:card" content="summary">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Public+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@500&display=swap">
@@ -146,7 +146,8 @@ details.more ul { margin: 0; padding-left: 18px }
 .small { font-size: 13px; color: var(--ink-3); margin: 0 }
 
 .latest { display: grid; gap: 14px; margin-bottom: 40px }
-.latest h2 { font: 800 clamp(22px, 3.4vw, 30px)/1.12 var(--display); letter-spacing: -.02em; margin: 0; text-wrap: balance; max-width: 34ch }
+.latest h1 { font-size: clamp(28px, 4.6vw, 44px); max-width: 26ch }
+.latest .lede { margin: 0; color: var(--ink-2); max-width: 62ch }
 .latest .stats { margin-bottom: 0 }
 .segs { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden }
 .segs li { background: var(--surface); display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 4px 14px; padding: 13px 16px; align-items: start }
@@ -156,7 +157,8 @@ details.more ul { margin: 0; padding-left: 18px }
 .segs .what b { font: 700 16.5px/1.25 var(--display) }
 .segs .what .cat { font-size: 11.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--ink-3); margin-left: 8px; white-space: nowrap }
 .segs .what p { margin: 3px 0 0; color: var(--ink-2); font-size: 14.5px; max-width: 72ch }
-.weekhead { margin: 0 0 12px; border-top: 1px solid var(--line); padding-top: 26px }
+.weekhead { margin: 0 0 16px; border-top: 1px solid var(--line); padding-top: 26px; display: grid; gap: 6px }
+.weektitle { font: 800 clamp(22px, 3.2vw, 30px)/1.12 var(--display); letter-spacing: -.02em; margin: 0 }
 @media (max-width: 640px) { .segs li { grid-template-columns: 72px minmax(0, 1fr); padding: 12px } }
 
 .topics { display: flex; flex-wrap: wrap; gap: 8px }
@@ -191,7 +193,7 @@ body.notes .note { display: block }
 <header class="site"><div class="in">
   <a class="brand" href="#top" aria-label="thehasanproject">thehasanproject<span class="prompt" aria-hidden="true">&gt;<i>_</i></span></a>
   <nav class="main" aria-label="Main">
-    <a href="#top" aria-current="page">This week</a>
+    <a href="#top" aria-current="page">Latest</a>
     <a href="spotlight.html">Topics</a>
     <a href="factchecks.html">Fact-checks</a>
     <a class="tool" href="index.html">Search</a>
@@ -201,15 +203,10 @@ body.notes .note { display: block }
 </div></header>
 
 <main class="wrap" id="top">
-  <section class="hero">
-    <div class="eyebrow">Updated Thu Nov 26</div>
-    <h1>This week on Hasan's stream</h1>
-    <p>What he said, what he got wrong, and what he skipped, with a link to the exact moment in every case.</p>
-  </section>
-
   <section class="latest" aria-labelledby="latest-h">
     <div class="eyebrow">Latest stream · Wed Nov 25 · 8.7 hours</div>
-    <h2 id="latest-h">The H3 fallout, a MAGA mom, an Army blast in Iowa, and three hours of GTA VI</h2>
+    <h1 id="latest-h">The H3 fallout, a MAGA mom, an Army blast in Iowa, and three hours of GTA VI</h1>
+    <p class="lede">What Hasan covered on his most recent stream, in order, with a link to each moment.</p>
     <div class="stats" aria-label="Nov 25 in numbers">
       <div class="stat"><div class="k">GTA VI</div><div class="v">3.2 h</div><div class="s">end of chapter 3, start of 4</div></div>
       <div class="stat"><div class="k">MAGA-parent talk</div><div class="v">1.7 h</div><div class="s">Necessary Conversation</div></div>
@@ -220,7 +217,10 @@ body.notes .note { display: block }
     <p class="small">Times are estimates from the transcript. Each button opens the stream at that moment.</p>
   </section>
 
-  <div class="eyebrow weekhead">Last week · Sun Nov 15 – Sat Nov 21 · 7 streams</div>
+  <div class="weekhead">
+    <div class="eyebrow">Last week · Sun Nov 15 – Sat Nov 21 · 7 streams</div>
+    <h2 class="weektitle">Last week's fact-checks and quotes</h2>
+  </div>
 
   <section class="stats" aria-label="Last week in numbers">
     <div class="stat"><div class="k">On stream</div><div class="v">64.8 h</div><div class="s">7 streams</div></div>
@@ -238,7 +238,7 @@ body.notes .note { display: block }
     <aside class="rail">
       <section class="panel" aria-labelledby="q-h">
         <div class="eyebrow">Question of the week</div>
-        <h3 id="q-h">After GTA VI, what did Hasan spend the most time on this week?</h3>
+        <h3 id="q-h">After GTA VI, what did Hasan spend the most time on last week?</h3>
         <p class="small">He streamed 64.8 hours across 7 streams.</p>
         <div class="qbtns" id="q-opts"></div>
         <div class="reveal" id="q-reveal" hidden>
@@ -257,7 +257,7 @@ body.notes .note { display: block }
   </div>
 
   <section id="topics" style="margin-top:36px" class="panel">
-    <h3>Search the week's topics</h3>
+    <h3>Search last week's topics</h3>
     <p class="small">Every stream is transcribed. Each topic opens a search of everything he said about it.</p>
     <div class="topics">
       <a href="index.html?q=GTA">GTA VI</a><a href="index.html?q=%22Ethan%20Klein%22">H3 / Ethan Klein</a><a href="index.html?q=Jeffries">Schumer &amp; Jeffries</a>

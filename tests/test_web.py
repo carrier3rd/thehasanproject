@@ -151,7 +151,7 @@ def test_static_files_and_traversal(apps):
     for page in ("/", "/index.html", "/videos.html", "/watch.html", "/about.html", "/common.js", "/style.css"):
         assert pub.get(page).status_code == 200, page
     assert pub.get("/style.css").headers["cache-control"] == "no-cache"   # deploys show at once behind Cloudflare
-    assert "This week on Hasan" in pub.get("/").text and "on the record" in pub.get("/home.html").text   # the feed, the old hub
+    assert "Latest stream" in pub.get("/").text and "on the record" in pub.get("/home.html").text   # the feed, the old hub
     assert "Weekly reel" in pub.get("/reel.html").text
     assert pub.get("/chat.html").status_code == 404 and adm.get("/chat.html").status_code == 200
     for path in ("/../app.py", "/%2e%2e/app.py", "/..%2f..%2farchive.db", "/static/../../config.yaml"):
