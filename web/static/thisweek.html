@@ -145,6 +145,20 @@ details.more ul { margin: 0; padding-left: 18px }
 .hrow .sub { grid-column: 1 / -1; font-size: 12.5px; color: var(--ink-3) }
 .small { font-size: 13px; color: var(--ink-3); margin: 0 }
 
+.latest { display: grid; gap: 14px; margin-bottom: 40px }
+.latest h2 { font: 800 clamp(22px, 3.4vw, 30px)/1.12 var(--display); letter-spacing: -.02em; margin: 0; text-wrap: balance; max-width: 34ch }
+.latest .stats { margin-bottom: 0 }
+.segs { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden }
+.segs li { background: var(--surface); display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 4px 14px; padding: 13px 16px; align-items: start }
+.segs a.t { font: 500 13px/1 var(--mono); text-decoration: none; background: var(--ink); color: var(--bg); border-radius: 6px; min-height: 34px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px }
+.segs .what { min-width: 0 }
+.segs .what b { font: 700 16.5px/1.25 var(--display) }
+.segs .what .cat { font-size: 11.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--ink-3); margin-left: 8px; white-space: nowrap }
+.segs .what p { margin: 3px 0 0; color: var(--ink-2); font-size: 14.5px; max-width: 72ch }
+.weekhead { margin: 0 0 12px; border-top: 1px solid var(--line); padding-top: 26px }
+@media (max-width: 640px) { .segs li { grid-template-columns: 72px minmax(0, 1fr); padding: 12px } }
+
 .topics { display: flex; flex-wrap: wrap; gap: 8px }
 .topics a { font-size: 14px; font-weight: 600; text-decoration: none; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg) }
 
@@ -188,12 +202,27 @@ body.notes .note { display: block }
 
 <main class="wrap" id="top">
   <section class="hero">
-    <div class="eyebrow">Week of Sun Nov 15 – Sat Nov 21 · 7 streams</div>
+    <div class="eyebrow">Updated Thu Nov 26</div>
     <h1>This week on Hasan's stream</h1>
     <p>What he said, what he got wrong, and what he skipped, with a link to the exact moment in every case.</p>
   </section>
 
-  <section class="stats" aria-label="This week in numbers">
+  <section class="latest" aria-labelledby="latest-h">
+    <div class="eyebrow">Latest stream · Wed Nov 25 · 8.7 hours</div>
+    <h2 id="latest-h">The H3 fallout, a MAGA mom, an Army blast in Iowa, and three hours of GTA VI</h2>
+    <div class="stats" aria-label="Nov 25 in numbers">
+      <div class="stat"><div class="k">GTA VI</div><div class="v">3.2 h</div><div class="s">end of chapter 3, start of 4</div></div>
+      <div class="stat"><div class="k">MAGA-parent talk</div><div class="v">1.7 h</div><div class="s">Necessary Conversation</div></div>
+      <div class="stat"><div class="k">H3 &amp; xQc drama</div><div class="v">1.4 h</div><div class="s">Ethan Klein, then xQc</div></div>
+      <div class="stat"><div class="k">Iowa blast</div><div class="v">0.5 h</div><div class="s">Army lead azide detonation</div></div>
+    </div>
+    <ol class="segs" id="segs" aria-label="What happened, in order"></ol>
+    <p class="small">Times are estimates from the transcript. Each button opens the stream at that moment.</p>
+  </section>
+
+  <div class="eyebrow weekhead">Last week · Sun Nov 15 – Sat Nov 21 · 7 streams</div>
+
+  <section class="stats" aria-label="Last week in numbers">
     <div class="stat"><div class="k">On stream</div><div class="v">64.8 h</div><div class="s">7 streams</div></div>
     <div class="stat"><div class="k">Top topic</div><div class="v">GTA VI</div><div class="s">21.7 h · a third of the week</div></div>
     <div class="stat"><div class="k">Streamer drama</div><div class="v">5.9 h</div><div class="s">the H3 / Ethan Klein split</div></div>
@@ -305,6 +334,18 @@ const HOURS = [
   ['US–Iran war', 70, '1.2 h', '555'],
 ];
 
+const LATEST = 'v2940591649';
+const SEGS = [
+  [1764, 'Pushing back on a critic', 'Politics', 'Reacts to a critic who calls him a liability who "creates rifts within the left", and calls the critic "a cookie-cutter liberal".'],
+  [4213, 'The H3 split, an hour in', 'Drama', 'Hila\'s side of the story, the crew\'s reactions and Ethan Klein\'s Instagram apology, which he says "is not a real apology".'],
+  [8258, 'xQc', 'Drama', 'Recounts their falling-out over gambling sponsorships and says xQc has become "a toxic force in this sphere".'],
+  [9376, 'The Army blast in Iowa', 'News', 'Nearly five tons of lead azide detonated at an Army ammunition plant in Iowa. He says it should have been dealt with long ago, and reads that the Army dropped a cleaner disposal option for the blast.'],
+  [12487, 'A wave of copycat posts', 'Drama', 'Shows near-identical posts saying he called Hakeem Jeffries compromised, and wonders whether it\'s a coordinated smear campaign.'],
+  [13073, 'Necessary Conversation: the MAGA mom', 'Politics', 'A long call with the podcast family and their MAGA mom: ICE, Medicare for All, vaccines, trans athletes, the 2028 race and Mamdani. He calls himself "a law and order socialist".'],
+  [19625, 'Back to GTA VI', 'Gaming', 'Side missions, then the end-of-chapter-3 bank heist at 6:10, and the start of chapter 4.'],
+  [31038, 'Sign-off', 'Other', 'Off to dinner with his family. Tomorrow is the "Jenksgiving" stream.'],
+];
+
 const $ = s => document.querySelector(s);
 const el = (tag, attrs = {}, ...kids) => { const n = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) { if (k === 'text') n.textContent = v; else if (k === 'html') n.innerHTML = v; else n.setAttribute(k, v); }
@@ -383,7 +424,13 @@ function answer(k) {
 }
 $('#q-copy').addEventListener('click', e => copy($('#q-grid').textContent, e.currentTarget));
 
-drawChips(); drawFeed(); drawHours();
+function drawSegs() {
+  $('#segs').replaceChildren(...SEGS.map(([t, h, cat, p]) => el('li', {},
+    el('a', { class: 't', href: `${BASE}?v=${LATEST}&t=${t}`, target: '_blank', rel: 'noopener', 'aria-label': `Watch ${h} at ${ts(t)}` }, '▶ ' + ts(t)),
+    el('div', { class: 'what' }, el('b', { text: h }), el('span', { class: 'cat', text: cat }), el('p', { text: p })))));
+}
+
+drawSegs(); drawChips(); drawFeed(); drawHours();
 try { const a = localStorage.getItem('mock-q2-2026-11-21'); if (a) answer(a); } catch (e) {}
 if (location.hash) { const t = document.getElementById(location.hash.slice(1)); if (t) t.scrollIntoView(); }
 </script>
