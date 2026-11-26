@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly pull of r/news, r/politics, r/worldnews and r/LivestreamFail posts (the blindspot yardstick)
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/thehasanproject
+ExecStart=%h/thehasanproject/.venv/bin/python pipeline/reddit_pull.py
+StandardOutput=append:%h/thehasanproject/logs/reddit-pull.log
+StandardError=append:%h/thehasanproject/logs/reddit-pull.log
+TimeoutStartSec=6h
+Nice=10

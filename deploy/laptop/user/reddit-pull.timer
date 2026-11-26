@@ -1,0 +1,9 @@
+[Unit]
+Description=Weekly general-news Reddit pull: Tuesday night, once the Tuesday-Monday week is done and indexed
+
+[Timer]
+OnCalendar=Tue *-*-* 23:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

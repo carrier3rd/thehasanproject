@@ -8,8 +8,10 @@ mkdir -p ~/.config/systemd/user
 # reel-weekly (2026-11-24): the weekly reel through the owner's Claude subscription (claude -p), not the paid API
 # chatflags (2026-11-25): nightly archive-wide chat check, same subscription, capped per night
 # features (2026-11-25): Spotlight, Receipts queue, Chat vs Hasan and the quiz, same subscription, capped per night
+# reddit-pull (2026-11-25): weekly r/news, r/politics, r/worldnews and r/LivestreamFail posts for blindspots
 cp "$here"/user/vod-hourly.service "$here"/user/vod-hourly.timer "$here"/user/reel-weekly.service "$here"/user/reel-weekly.timer    "$here"/user/chatflags.service "$here"/user/chatflags.timer \
-   "$here"/user/features.service "$here"/user/features.timer ~/.config/systemd/user/
+   "$here"/user/features.service "$here"/user/features.timer "$here"/user/reddit-pull.service "$here"/user/reddit-pull.timer \
+   ~/.config/systemd/user/
 systemctl --user daemon-reload
-systemctl --user enable --now vod-hourly.timer reel-weekly.timer chatflags.timer features.timer
-systemctl --user list-timers vod-hourly.timer reel-weekly.timer chatflags.timer features.timer --no-pager
+systemctl --user enable --now vod-hourly.timer reel-weekly.timer chatflags.timer features.timer reddit-pull.timer
+systemctl --user list-timers vod-hourly.timer reel-weekly.timer chatflags.timer features.timer reddit-pull.timer --no-pager
