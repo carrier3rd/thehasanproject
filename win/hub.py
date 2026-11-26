@@ -1,0 +1,279 @@
+"""PC data machine: build and publish on the Windows PC while the laptop only downloads, logs chat and serves the site.
+
+Added 2026-11-26 because the laptop's RAM corrupts archive.db. The laptop's nightly.sh skips its build, publish and
+backup steps while `logs/hub-elsewhere` exists there; this script does those steps here instead.
+
+  python win/hub.py run [--force]   pull new files and live chat from the laptop, rebuild, publish, push public.db
+  python win/hub.py sync            only pull from the laptop
+  python win/hub.py push            only push the current public.db (and index/) to the laptop
+
+Everything flows one way: the laptop's files are the source, this copy is rebuilt from them, and only public.db and
+index/ go back. Each file pulled is checked against the laptop's sha256 (the laptop's RAM can flip bits in transit).
+"""
+import argparse
+import hashlib
+import io
+import json
+import os
+import shutil
+import sqlite3
+import subprocess
+import sys
+import tarfile
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+REMOTE = "~/thehasanproject"
+SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", "laptop"]
+SYNC_DIRS = ["data/transcripts", "data/chat", "data/muted", "data/audio"]
+SKIP = (".opus", ".part", ".tmp", ".ytdl")
+PY = str(ROOT / ".venv" / "Scripts" / "python.exe")
+STATE = ROOT / "logs" / "hub-state.json"
+LOG = ROOT / "logs" / f"hub-{time.strftime('%Y-%m-%d')}.log"
+
+
+def say(msg: str) -> None:
+    line = f"{time.strftime('%H:%M:%S')} {msg}"
+    print(line, flush=True)
+    LOG.parent.mkdir(exist_ok=True)
+    with open(LOG, "a", encoding="utf-8") as f:
+        f.write(line + "\n")
+
+
+def ssh(cmd: str, stdin: bytes | None = None, timeout: int = 600) -> subprocess.CompletedProcess:
+    return subprocess.run(SSH + [cmd], input=stdin, capture_output=True, timeout=timeout)
+
+
+def load_state() -> dict:
+    try:
+        return json.loads(STATE.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def save_state(st: dict) -> None:
+    STATE.parent.mkdir(exist_ok=True)
+    STATE.write_text(json.dumps(st, indent=1))
+
+
+def sha(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+# ---------------------------------------------------------------- pull
+def remote_listing() -> dict[str, tuple[int, str]]:
+    r = ssh(f"cd {REMOTE} && find {' '.join(SYNC_DIRS)} -type f -printf '%s %T@ %p\\n'")
+    if r.returncode != 0:
+        raise RuntimeError(f"laptop listing failed: {r.stderr.decode(errors='replace')[:300]}")
+    out = {}
+    for line in r.stdout.decode().splitlines():
+        size, mtime, path = line.split(" ", 2)
+        if not path.endswith(SKIP):
+            out[path] = (int(size), mtime)
+    return out
+
+
+def fetch(paths: list[str]) -> list[str]:
+    """Copy these laptop files here, verified by sha256. Returns the paths that failed twice."""
+    bad = []
+    for attempt in (1, 2):
+        todo = paths if attempt == 1 else bad
+        if not todo:
+            break
+        listing = "\0".join(todo).encode()
+        r = ssh(f"cd {REMOTE} && tar -cf - --null -T -", stdin=listing, timeout=3600)
+        if r.returncode != 0:
+            raise RuntimeError(f"tar from laptop failed: {r.stderr.decode(errors='replace')[:300]}")
+        sums = ssh(f"cd {REMOTE} && xargs -0 sha256sum", stdin=listing, timeout=3600)
+        want = {p: h for h, p in (l.split("  ", 1) for l in sums.stdout.decode().splitlines())}
+        bad = []
+        with tarfile.open(fileobj=io.BytesIO(r.stdout)) as tar:
+            for m in tar.getmembers():
+                if not m.isfile() or m.name not in want:
+                    continue
+                dest = ROOT / m.name
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                part = dest.with_name(dest.name + ".hubpart")
+                with tar.extractfile(m) as src, open(part, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                if sha(part) == want[m.name]:
+                    os.replace(part, dest)
+                else:
+                    part.unlink()
+                    bad.append(m.name)
+    return bad
+
+
+def sync_files(st: dict) -> int:
+    remote = remote_listing()
+    seen = st.get("files", {})
+    changed = [p for p, (size, mtime) in remote.items()
+               if seen.get(p) != [size, mtime] or not (ROOT / p).exists()]
+    failed = []
+    for i in range(0, len(changed), 200):
+        failed += fetch(changed[i:i + 200])
+    for p in changed:
+        if p not in failed:
+            seen[p] = list(remote[p])
+    # a file removed on the laptop (moved to data/trash) is removed here too, so it is not published
+    gone = 0
+    for d in SYNC_DIRS:
+        for f in (ROOT / d).glob("*"):
+            rel = f.relative_to(ROOT).as_posix()
+            if f.is_file() and rel not in remote and not rel.endswith(SKIP + (".hubpart",)):
+                trash = ROOT / "data" / "trash" / "hub" / f.name
+                trash.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(f, trash)
+                seen.pop(rel, None)
+                gone += 1
+    st["files"] = seen
+    say(f"files: {len(changed) - len(failed)} pulled, {len(failed)} failed checksum twice, {gone} removed")
+    if failed:
+        say("  failed: " + " ".join(failed[:10]))
+    return len(changed) - len(failed) + gone
+
+
+LIVE_DUMP = r"""
+import json, sqlite3, sys
+after = int(sys.argv[1])
+c = sqlite3.connect("file:archive/archive.db?mode=ro", uri=True, timeout=60)
+cur = c.execute("SELECT rowid, * FROM live_msgs WHERE rowid > ? ORDER BY rowid", (after,))
+cols = [d[0] for d in cur.description]
+for row in cur:
+    print(json.dumps(dict(zip(cols, row))))
+print(json.dumps({"sessions": [list(r) for r in c.execute("SELECT rowid, channel, start_ms, end_ms FROM sessions")]}))
+"""
+
+
+def sync_live() -> int:
+    con = sqlite3.connect(ROOT / "archive" / "archive.db", timeout=60)
+    after = con.execute("SELECT COALESCE(MAX(rowid), 0) FROM live_msgs").fetchone()[0]
+    r = ssh(f"cd {REMOTE} && .venv/bin/python - {after}", stdin=LIVE_DUMP.encode(), timeout=1800)
+    if r.returncode != 0:
+        raise RuntimeError(f"live chat dump failed: {r.stderr.decode(errors='replace')[:300]}")
+    lines = r.stdout.decode().splitlines()
+    sessions = json.loads(lines.pop())["sessions"]
+    rows = [json.loads(l) for l in lines]
+    if rows:
+        cols = list(rows[0])
+        con.executemany(f"INSERT OR IGNORE INTO live_msgs({','.join(cols)}) VALUES({','.join('?' * len(cols))})",
+                        [[r[c] for c in cols] for r in rows])
+    for rowid, channel, start, end in sessions:
+        con.execute("INSERT OR REPLACE INTO sessions(rowid, channel, start_ms, end_ms) VALUES(?,?,?,?)",
+                    (rowid, channel, start, end))
+    con.commit()
+    con.close()
+    say(f"live chat: {len(rows)} new message(s), {len(sessions)} session(s)")
+    return len(rows)
+
+
+# ---------------------------------------------------------------- build + push
+def step(script: str, *args: str) -> bool:
+    say(f"--- {script} {' '.join(args)}")
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+    with open(LOG, "a", encoding="utf-8") as f:
+        r = subprocess.run([PY, script, *args], cwd=ROOT, stdout=f, stderr=subprocess.STDOUT, env=env)
+    if r.returncode != 0:
+        say(f"!!! {script} failed (exit {r.returncode})")
+    return r.returncode == 0
+
+
+def signature() -> str:
+    h = hashlib.sha256()
+    for d in ("data/transcripts", "data/audio", "data/muted"):
+        for f in sorted((ROOT / d).glob("*")):
+            if f.is_file():
+                h.update(f"{f.name} {f.stat().st_size}\n".encode())
+    return h.hexdigest()
+
+
+def push() -> None:
+    pub = ROOT / "public.db"
+    want = sha(pub)
+    r = subprocess.run(["scp", "-q", "-o", "BatchMode=yes", str(pub), f"laptop:{REMOTE}/public.upload.db"],
+                       capture_output=True, timeout=3600)
+    if r.returncode != 0:
+        raise RuntimeError(f"scp public.db failed: {r.stderr.decode(errors='replace')[:300]}")
+    r = ssh(f"cd {REMOTE} && test \"$(sha256sum public.upload.db | cut -c1-64)\" = {want} "
+            f"&& mv -f public.upload.db public.db && echo swapped")
+    if b"swapped" not in r.stdout:
+        ssh(f"rm -f {REMOTE}/public.upload.db")
+        raise RuntimeError("public.db arrived damaged on the laptop; the site keeps the old one")
+    say(f"pushed public.db ({pub.stat().st_size / 1e6:.0f} MB, sha256 checked)")
+
+    idx = ROOT / "index"
+    local = {f.name: sha(f) for f in idx.glob("*") if f.is_file()}
+    r = ssh(f"cd {REMOTE}/index && sha256sum *")
+    remote = {p: h for h, p in (l.split("  ", 1) for l in r.stdout.decode().splitlines())}
+    if local == remote:
+        return
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tar:
+        for name in local:
+            tar.add(idx / name, arcname=name)
+    r = ssh(f"cd {REMOTE} && rm -rf index.new && mkdir index.new && tar -xf - -C index.new",
+            stdin=buf.getvalue(), timeout=1800)
+    if r.returncode != 0:
+        raise RuntimeError(f"index upload failed: {r.stderr.decode(errors='replace')[:300]}")
+    sums = "".join(f"{h}  {n}\n" for n, h in local.items()).encode()
+    r = ssh(f"cd {REMOTE}/index.new && sha256sum -c --quiet - && cd .. && rm -rf index.old && mv index index.old "
+            f"&& mv index.new index && rm -rf index.old && pkill -f '[u]vicorn web.app:app'; echo done-$?",
+            stdin=sums, timeout=600)
+    if b"done-0" not in r.stdout:
+        raise RuntimeError(f"index push failed (the site keeps its old index): {r.stdout.decode(errors='replace')[-300:]}")
+    say("pushed index/ and restarted the site so it loads the new search index")
+
+
+def run(force: bool) -> int:
+    st = load_state()
+    sync_files(st)
+    save_state(st)
+    sync_live()
+    sig = signature()
+    if not force and st.get("published_sig") == sig:
+        say("nothing new since the last publish")
+        return 0
+    step("pipeline/align_chat.py")
+    step("pipeline/build_db.py")
+    if not step("pipeline/publish.py"):
+        say("!!! publish failed; public.db left unchanged here and on the laptop")
+        return 1
+    step("pipeline/embed.py")
+    push()
+    st["published_sig"] = sig
+    save_state(st)
+    return 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("cmd", choices=["run", "sync", "push"])
+    ap.add_argument("--force", action="store_true", help="rebuild and publish even if no files changed")
+    a = ap.parse_args()
+    say(f"=== hub {a.cmd} start")
+    try:
+        if a.cmd == "sync":
+            st = load_state()
+            sync_files(st)
+            save_state(st)
+            sync_live()
+            rc = 0
+        elif a.cmd == "push":
+            push()
+            rc = 0
+        else:
+            rc = run(a.force)
+    except Exception as e:
+        say(f"!!! {e}")
+        rc = 1
+    say(f"=== hub {a.cmd} end (exit {rc})")
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main())

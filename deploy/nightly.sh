@@ -26,6 +26,12 @@ if [ -n "${GPU_HOST:-}" ]; then
 else
   echo "--- transcribe: skipped (no GPU_HOST); waiting: $(python pipeline/pending.py | grep -vc '/muted/' || true) VOD(s)"
 fi
+# While logs/hub-elsewhere exists (2026-11-26: the laptop's RAM corrupts archive.db), another machine builds and
+# publishes (win/hub.py on the PC pulls these downloads and pushes public.db back), so this machine stops here.
+if [ -f logs/hub-elsewhere ]; then
+  echo "=== downloads done; build/publish/backup run elsewhere (logs/hub-elsewhere); end $(date -Is) ==="
+  exit 0
+fi
 # Hourly runs (QUICK=1, from the vod-hourly user timer, 2026-11-20): new streams are fetched every hour, but the
 # rebuild and publish below only run when a download or a transcript arrived since the last publish.
 sig=$(ls -l --time-style=+%s data/audio data/transcripts 2>/dev/null | md5sum | cut -c1-32)
