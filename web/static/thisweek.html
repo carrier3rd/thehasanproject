@@ -218,6 +218,13 @@ body.notes .note { display: block }
     <p class="small">Times are estimates from the transcript. Each button opens the stream at that moment.</p>
   </section>
 
+  <section class="latest" aria-labelledby="checks-h" style="margin-top:-12px">
+    <div class="eyebrow">Fact-checks · Wed Nov 25</div>
+    <h2 class="weektitle" id="checks-h">What he got wrong on Nov 25</h2>
+    <p class="lede">Five claims from the stream, each checked by hand against the sources linked under it.</p>
+    <div class="feed" id="checks-nov25"></div>
+  </section>
+
   <div class="weekhead">
     <div class="eyebrow">Last week · Sun Nov 15 – Sat Nov 21 · 7 streams</div>
     <h2 class="weektitle">Last week's fact-checks and quotes</h2>
@@ -333,6 +340,44 @@ const HOURS = [
   ['Mamdani as mayor', 93.5, '1.6 h', '145'],
   ['GTA charity fundraiser', 90.5, '1.5 h', '0'],
   ['US–Iran war', 70, '1.2 h', '555'],
+];
+
+// Checked by hand 2026-11-26 against the sources listed on each card.
+const CHECKS_NOV25 = [
+  { id: 'florida-half', kind: 'false', date: 'Wed Nov 25', vid: 'v2940591649', t: 18309,
+    h: 'Says half of Florida\'s population is New Yorkers and Californians',
+    quote: 'Florida takes in more people from other states, blue states specifically, per capita than even Texas does. Half of the Florida population is New Yorkers and Californians.',
+    fix: 'About 1.6 million Floridians, roughly 7%, were born in New York, and California-born residents are a smaller group still. Florida did gain more movers per head than Texas in 2021–23, but in the Census\'s latest estimates (mid-2024 to mid-2025) it gained 22,517 people from other states, against about 67,000 for Texas.',
+    src: [['Census Bureau: population growth slows (Vintage 2025)', 'https://census.gov/newsroom/press-releases/2026/population-growth-slows.html'],
+          ['WPTV: growing number of Floridians have roots in New York', 'https://www.wptv.com/news/local-news/census/growing-number-of-florida-residents-have-roots-in-new-york-latest-census-numbers-show']] },
+  { id: 'srg-terrorism', kind: 'false', date: 'Wed Nov 25', vid: 'v2940591649', t: 17882,
+    h: 'Says the NYPD unit Mamdani disbanded "did not deal with terrorism at all"',
+    quote: 'But basically, the SRG unit did not deal with terrorism at all.',
+    fix: 'The Strategic Response Group was set up in 2015 for both disorder control and counterterrorism, and its counterterrorism work, such as heavy-weapons posts at critical sites, is now moving to the NYPD\'s Intelligence and Counterterrorism Bureau.',
+    more: 'He is right that Mayor Mamdani disbanded the unit on Nov 16, as he promised, and critics such as the NYCLU say protest policing had become its main job.',
+    src: [['CP24: Mamdani disbands controversial NYPD unit (Nov 16, 2026)', 'https://www.cp24.com/news/world/2026/11/16/mamdani-disbands-controversial-nypd-unit/'],
+          ['Common Dreams (2015): NYPD announces the new unit', 'https://commondreams.org/news/2015/01/30/nypd-commissioner-invokes-blacklivesmatter-protests-justify-new-anti-terrorism-unit']] },
+  { id: 'guilfoyle-50m', kind: 'misleading', date: 'Wed Nov 25', vid: 'v2940591649', t: 18986,
+    h: 'Says Kimberly Guilfoyle took "like $50 million" to sell White House access',
+    quote: 'She got fired as well. She took like $50 million from some guy saying that she\'d be able to sell access to the White House.',
+    fix: 'She did step down as ambassador to Greece on Oct 13 after the White House asked her to. But the allegation is about $100,000, not $50 million: a Trump donor says she asked him to pay off her credit card in exchange for access to officials, and says he never paid. She denies it, and nothing has been proven.',
+    more: 'She was engaged to Donald Trump Jr., not married, so not his former daughter-in-law. She was married to Gavin Newsom from 2001 to 2006, as he said.',
+    src: [['GMA: White House asked Guilfoyle to resign', 'https://www.goodmorningamerica.com/news/story/white-house-asked-kimberly-guilfoyle-resign-white-house-137225644'],
+          ['KUTV: Guilfoyle announces resignation from ambassadorship', 'https://kutv.com/news/nation-world/kimberly-guilfoyle-announces-resignation-from-ambassadorship-greece-president-trump-secretary-of-state-marco-rubio']] },
+  { id: 'ncaa-49', kind: 'misleading', date: 'Wed Nov 25', vid: 'v2940591649', t: 16288,
+    h: 'Says Trump\'s ban covered "all 49" transgender athletes in the NCAA',
+    quote: 'Donald Trump banned trans athletes, all 49 of them, from participating in NCAA competitions.',
+    fix: 'The NCAA\'s president told senators in December 2024 that he knew of fewer than 10 transgender athletes among about 510,000. The ban is real: Trump signed an executive order on Feb 5, 2025, and the NCAA changed its policy the next day.',
+    more: 'His point, that very few athletes were affected, holds. The number he gave was too high.',
+    src: [['Athletic Business: fewer than 10 trans athletes competing in the NCAA', 'https://www.athleticbusiness.com/operations/governing-bodies/article/15710780/association-president-tells-senate-panel-there-are-fewer-than-10-trans-athletes-competing-in-ncaa'],
+          ['CBS Sports: NCAA adjusts policy after the executive order', 'https://www.cbssports.com/general/news/ncaa-adjusts-policy-on-transgender-athletes-after-president-trumps-executive-order']] },
+  { id: 'billionaire-1pct', kind: 'misleading', date: 'Wed Nov 25', vid: 'v2940591649', t: 18182,
+    h: 'Says earners like him pay "37% on average" and billionaires "less than 1%"',
+    quote: 'We\'re paying like 37% on average. Billionaires are paying less than 1% of their yearly income growth, their yearly net worth growth in the form of taxes.',
+    fix: '37% is the top tax bracket, not an average rate. ProPublica\'s analysis of IRS data found the 25 richest Americans paid federal income tax equal to 3.4% of their wealth growth in 2014–18. A few were under 1%, such as Warren Buffett (0.1%) and Jeff Bezos (0.98%).',
+    more: 'His broader point, that the very richest often pay a smaller share than salaried earners, is backed by that analysis and by a 2021 White House estimate of 8.2% for the 400 richest families.',
+    src: [['ProPublica: The Secret IRS Files', 'https://www.propublica.org/article/the-secret-irs-files-trove-of-never-before-seen-records-reveal-how-the-wealthiest-avoid-income-tax'],
+          ['ProPublica: how we calculated the true tax rates', 'https://www.propublica.org/article/how-we-calculated-the-true-tax-rates-of-the-wealthiest']] },
 ];
 
 const LATEST = 'v2940591649';
@@ -454,6 +499,7 @@ async function loadLatest() {
 }
 
 drawSegs(LATEST, SEGS); drawChips(); drawFeed(); drawHours(); loadLatest();
+$('#checks-nov25').replaceChildren(...CHECKS_NOV25.map(card));
 try { const a = localStorage.getItem('mock-q2-2026-11-21'); if (a) answer(a); } catch (e) {}
 if (location.hash) { const t = document.getElementById(location.hash.slice(1)); if (t) t.scrollIntoView(); }
 </script>
