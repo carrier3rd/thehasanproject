@@ -17,6 +17,7 @@ somewhere other than this laptop.**
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import secrets
@@ -103,7 +104,10 @@ def snapshot_db(cfg, dest: Path) -> Path:
     src = sqlite3.connect(f"file:{src_path}?mode=ro", uri=True, timeout=60)
     dst = sqlite3.connect(out)
     try:
-        src.backup(dst, pages=4096, sleep=0.05)   # in steps, so the logger is never blocked for long
+        # One step. A stepped backup restarts from page 1 whenever another connection writes, and the chat logger
+        # writes constantly, so on a 4 GB database it never finished (2026-11-25). In WAL mode a single read
+        # transaction does not block the logger's writes; the copy takes seconds.
+        src.backup(dst, pages=-1)
     finally:
         dst.close()
         src.close()
@@ -165,6 +169,14 @@ def run(cfg, force: bool = False, now: float | None = None) -> str:
     if not force and now - st.get("last_ok", 0) < bst["every_hours"] * 3600 * 0.95:
         return "not_due"
     staging = P(cfg, "archive_db").parent / "archive-snapshot"     # fixed path: same place in every snapshot
+    # one run at a time: two runs share the staging path, and the second deleted the first one's snapshot
+    lock = open(P(cfg, "archive_db").parent / "backup.lock", "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        log.info("another backup run is going; skipping")
+        lock.close()
+        return "busy"
     try:
         snap = snapshot_db(cfg, staging)
         con = sqlite3.connect(snap)
@@ -201,6 +213,7 @@ def run(cfg, force: bool = False, now: float | None = None) -> str:
                 log.error("%s: %s", repo, e)
     finally:
         shutil.rmtree(staging, ignore_errors=True)
+        lock.close()
     if any(v == "ok" for v in results.values()):
         st["last_ok"] = now
     st["last_run"], st["warning"] = now, None
