@@ -12,6 +12,7 @@ Everything flows one way: the laptop's files are the source, this copy is rebuil
 index/ go back. Each file pulled is checked against the laptop's sha256 (the laptop's RAM can flip bits in transit).
 """
 import argparse
+import contextlib
 import hashlib
 import io
 import json
@@ -265,23 +266,70 @@ def push_features() -> None:
     say(f"pushed features/ ({len(files)} files, sha256 checked)")
 
 
+# ---------------------------------------------------------------- transcription yields
+# The owner (2026-11-26): transcription is passive and low priority; every other job goes first. It shares this PC's
+# memory, so publish, features and backups pause it and start it again afterwards if it was running.
+RUNNER = Path.home() / "vod-archive"
+RUNNER_TASK = "VOD transcription run now"
+
+
+def transcription_running() -> bool:
+    """The runner holds a lock on logs/runner.lock (offset 0) while it works."""
+    lockf = RUNNER / "logs" / "runner.lock"
+    if not lockf.exists():
+        return False
+    import msvcrt
+    with open(lockf, "a") as f:
+        f.seek(0)
+        try:
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError:
+            return True
+        f.seek(0)
+        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+    return False
+
+
+@contextlib.contextmanager
+def transcription_paused(why: str):
+    was = transcription_running()
+    if was:
+        say(f"pausing transcription for {why}")
+        subprocess.run([str(RUNNER / ".venv" / "Scripts" / "python.exe"), "win/runner.py", "stop"], cwd=RUNNER,
+                       capture_output=True, timeout=60)
+        for _ in range(60):                 # it stops its GPU work within a few seconds; give it up to 3 minutes
+            if not transcription_running():
+                break
+            time.sleep(3)
+        else:
+            say("!!! transcription did not stop within 3 minutes; going ahead anyway")
+    try:
+        yield
+    finally:
+        if was:
+            r = subprocess.run(["schtasks", "/Run", "/TN", RUNNER_TASK], capture_output=True, text=True)
+            say("resumed transcription" if r.returncode == 0 else f"!!! could not restart transcription: {r.stderr.strip()}")
+
+
+def backup_due() -> bool:
+    sys.path.insert(0, str(ROOT / "pipeline"))
+    import backup
+    from common import load_config
+    cfg = load_config()
+    bst = backup.settings(cfg)
+    return bool(bst["repos"]) and time.time() - backup.read_status(cfg).get("last_ok", 0) >= bst["every_hours"] * 3600 * 0.95
+
+
 def features() -> int:
     """The nightly features job (Spotlight, Chat vs Hasan, Receipts, quiz), run here instead of on the laptop."""
     sync_live()
-    ok = step("pipeline/features.py", "run")
-    push_features()        # even after a partial run: what finished is already in features/
+    with transcription_paused("the features job"):
+        ok = step("pipeline/features.py", "run")
+        push_features()        # even after a partial run: what finished is already in features/
     return 0 if ok else 1
 
 
-def run(force: bool) -> int:
-    st = load_state()
-    sync_files(st)
-    save_state(st)
-    sync_live()
-    sig = signature()
-    if not force and st.get("published_sig") == sig:
-        say("nothing new since the last publish")
-        return 0
+def publish(st: dict, sig: str) -> int:
     step("pipeline/align_chat.py")
     step("pipeline/build_db.py")
     if not step("pipeline/publish.py"):
@@ -293,6 +341,27 @@ def run(force: bool) -> int:
     st["published_sig"] = sig
     save_state(st)
     return 0
+
+
+def run(force: bool) -> int:
+    st = load_state()
+    sync_files(st)
+    save_state(st)
+    sync_live()
+    sig = signature()
+    new = force or st.get("published_sig") != sig
+    due = backup_due()
+    if not new:
+        say("nothing new since the last publish")
+    if not new and not due:
+        return 0
+    rc = 0
+    with transcription_paused("publishing" if new else "the daily backup"):
+        if new:
+            rc = publish(st, sig)
+        if due:
+            step("pipeline/backup.py", "run")   # encrypted backup to Drive, at most once a day (backup.every_hours)
+    return rc
 
 
 def main() -> int:
@@ -315,7 +384,6 @@ def main() -> int:
             rc = features()
         else:
             rc = run(a.force)
-            step("pipeline/backup.py", "run")   # encrypted backup to Drive; it runs at most once a day (backup.every_hours)
     except Exception as e:
         say(f"!!! {e}")
         rc = 1
