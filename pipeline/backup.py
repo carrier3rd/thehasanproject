@@ -290,7 +290,7 @@ def main():
     if a.cmd == "run":
         result = run(cfg, force=a.force)
         print("backup:", result)
-        return 0 if result in ("ok", "not_due", "not_configured") else 1
+        return 0 if result in ("ok", "not_due", "not_configured", "busy") else 1   # busy: another run has it
     if a.cmd == "status":
         return status(cfg)
     return restore_test(cfg, a.repo)

@@ -590,7 +590,8 @@ def scan_reddit(cfg, st: dict, stories: dict) -> dict:
             c["stories"][sid] = {"days": dict(r["days"]), "top": top}
             c["kw"][sid] = sig[sid]
         save_json(ck, c)
-    merged = {"totals": defaultdict(Counter), "stories": defaultdict(lambda: {"days": defaultdict(Counter), "top": []})}
+    merged = {"totals": defaultdict(Counter),
+              "stories": defaultdict(lambda: {"days": defaultdict(Counter), "post_days": defaultdict(Counter), "top": []})}
     for p, m in files:
         stat = p.stat()
         c = load_json(cache_dir / (reel.h(str(p), stat.st_size, int(stat.st_mtime), m["days"]) + ".json"), None)
@@ -604,6 +605,8 @@ def scan_reddit(cfg, st: dict, stories: dict) -> dict:
                 continue
             for d, n in r["days"].items():
                 merged["stories"][sid]["days"][sub][d] += n
+                if m["kind"] == "posts":      # the blindspot yardstick counts posts only (calibrated on posts)
+                    merged["stories"][sid]["post_days"][sub][d] += n
             merged["stories"][sid]["top"] += [{**x, "sub": sub} for x in r["top"]]
     return merged
 
@@ -1104,8 +1107,11 @@ def build_stories(cfg, st: dict, con, entries: list[dict], reddit: dict | None) 
         quiet = hasan_on_both < 3 and said_on_both <= 2 and hasan_min < 10 and len(mentions) <= 6
         # the general-audience yardstick: only the broad subreddits, on days they have data and he streamed
         both_broad = [d for d in days_all if d in covered_broad and d in live]
+        # posts only: the thresholds were set on post counts; broad-sub comments (pulled since 2026-11-26) would
+        # multiply them and badge stories that only got comment-section chatter
+        broad_days = (rs or {}).get("post_days") if (rs or {}).get("post_days") is not None else (rs or {}).get("days")
         broad_by_sub = {sub: sum(n for d, n in days.items() if d in both_broad)
-                        for sub, days in ((rs or {}).get("days") or {}).items() if sub.lower() in broad}
+                        for sub, days in (broad_days or {}).items() if sub.lower() in broad}
         broad_on_both = sum(broad_by_sub.values())
         broad_subs_hit = sum(1 for n in broad_by_sub.values() if n >= 5)
         badge = None

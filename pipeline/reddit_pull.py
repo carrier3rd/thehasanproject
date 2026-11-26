@@ -3,8 +3,9 @@
   python pipeline/reddit_pull.py            pull every finished 7-day week since features.broad_since (Tuesday to Monday, like the panel) that is missing
   python pipeline/reddit_pull.py --dry-run  list what would be pulled
 
-Posts only (titles are what the keyword scan reads). Uses the owner's socialscope puller (Arctic Shift) from
-features.socialscope_dir and writes r_<sub>_posts_<Tue>_to_<Mon>.zip into <features.reddit_dir>/broad/, where
+Posts and comments (features.broad_kinds; comments since 2026-11-26, the blindspot rule still counts posts only).
+Uses the owner's socialscope puller (Arctic Shift) from features.socialscope_dir and writes
+r_<sub>_<kind>_<Tue>_to_<Mon>.zip into <features.reddit_dir>/broad/, where
 features.py already looks. A week is skipped when a file with the same name exists anywhere under reddit_dir, so a
 week the weekly panel already pulled (r/LivestreamFail) is never counted twice. Rerunning resumes a stopped pull.
 """
@@ -17,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import common  # noqa: E402
 
 DEFAULTS = {"broad_subs": ["news", "politics", "worldnews", "LivestreamFail"], "broad_since": "2026-11-03",
-            "socialscope_dir": "~/socialscope"}
+            "socialscope_dir": "~/socialscope", "broad_kinds": ["posts", "comments"]}
 
 
 def settings(cfg) -> dict:
@@ -48,7 +49,7 @@ def current_week(since: str, today: date) -> date:
     return d
 
 
-def drop_partials(out: Path, start: date, keep: str, subs: list[str]) -> list[Path]:
+def drop_partials(out: Path, start: date, keep: str, subs: list[str], kinds=("posts",)) -> list[Path]:
     """Remove earlier partial pulls of this week (same first day, earlier last day) for these subs, so the scan never
     counts the same posts twice once a longer pull of the week exists."""
     gone = []
@@ -56,24 +57,31 @@ def drop_partials(out: Path, start: date, keep: str, subs: list[str]) -> list[Pa
         if folder.name == keep or not folder.is_dir() or folder.name.split("_to_")[1] > keep.split("_to_")[1]:
             continue
         for sub in subs:
-            z = folder / f"r_{sub}_posts_{folder.name}.zip"
-            if z.exists():
-                z.unlink()
-                gone.append(z)
+            for kind in kinds:
+                z = folder / f"r_{sub}_{kind}_{folder.name}.zip"
+                if z.exists():
+                    z.unlink()
+                    gone.append(z)
         if not any(folder.iterdir()):
             folder.rmdir()
     return gone
 
 
 def missing(st: dict, today: date) -> list[tuple[date, list[str]]]:
+    """(week, subs) with at least one kind not pulled yet; the puller skips the kinds it already has."""
     root = Path(st["reddit_dir"]).expanduser()
-    have = {p.name for p in root.rglob("r_*_posts_*.zip")}
+    have = {p.name for p in root.rglob("r_*.zip")}
     todo = []
     for mon in weeks(st["broad_since"], today):
-        subs = [s for s in st["broad_subs"] if f"r_{s}_posts_{label(mon)}.zip" not in have]
+        subs = [s for s in st["broad_subs"]
+                if any(f"r_{s}_{k}_{label(mon)}.zip" not in have for k in st["broad_kinds"])]
         if subs:
             todo.append((mon, subs))
     return todo
+
+
+def complete(out: Path, lab: str, subs: list[str], kinds) -> list[str]:
+    return [s for s in subs if all((out / lab / f"r_{s}_{k}_{lab}.zip").exists() for k in kinds)]
 
 
 def main() -> None:
@@ -104,10 +112,14 @@ def main() -> None:
     from socialscope import arctic
     out = Path(st["reddit_dir"]).expanduser() / "broad"
     for mon, subs in todo:
-        arctic.pull_subreddits(subs, mon.isoformat(), (mon + timedelta(days=7)).isoformat(), kinds=("posts",),
-                               out_dir=str(out))
-        done = [s for s in subs if (out / label(mon) / f"r_{s}_posts_{label(mon)}.zip").exists()]
-        for z in drop_partials(out, mon, label(mon), done):
+        kinds = tuple(st["broad_kinds"])
+        try:
+            arctic.pull_subreddits(subs, mon.isoformat(), (mon + timedelta(days=7)).isoformat(), kinds=kinds,
+                                   out_dir=str(out))
+        except Exception as e:     # Arctic Shift too busy: keep what finished, the next run resumes the rest
+            print(f"week {label(mon)} stopped: {e}")
+        done = complete(out, label(mon), subs, kinds)
+        for z in drop_partials(out, mon, label(mon), done, kinds):
             print(f"removed partial pull {z.name} (the full week replaces it)")
     left = missing(st, date.today())
     if left:   # Arctic Shift said "too busy" for some; the next run resumes them
@@ -127,9 +139,13 @@ def this_week(st: dict, subs: list[str], dry_run: bool) -> None:
     sys.path.insert(0, str(Path(st["socialscope_dir"]).expanduser()))
     from socialscope import arctic
     out = Path(st["reddit_dir"]).expanduser() / "broad"
-    arctic.pull_subreddits(subs, start.isoformat(), end.isoformat(), kinds=("posts",), out_dir=str(out))
-    done = [s for s in subs if (out / keep / f"r_{s}_posts_{keep}.zip").exists()]
-    for z in drop_partials(out, start, keep, done):
+    kinds = tuple(st["broad_kinds"])
+    try:
+        arctic.pull_subreddits(subs, start.isoformat(), end.isoformat(), kinds=kinds, out_dir=str(out))
+    except Exception as e:
+        print(f"stopped: {e}")
+    done = complete(out, keep, subs, kinds)
+    for z in drop_partials(out, start, keep, done, kinds):
         print(f"removed older partial pull {z.name}")
     missing_subs = sorted(set(subs) - set(done))
     if missing_subs:

@@ -16,10 +16,16 @@ def test_missing_skips_weeks_already_pulled_anywhere(tmp_path):
     panel = tmp_path / "nov10" / "2026-11-10_to_2026-11-16"
     panel.mkdir(parents=True)
     (panel / "r_LivestreamFail_posts_2026-11-10_to_2026-11-16.zip").write_bytes(b"")
+    (panel / "r_LivestreamFail_comments_2026-11-10_to_2026-11-16.zip").write_bytes(b"")
+    broad = tmp_path / "broad" / "2026-11-10_to_2026-11-16"
+    broad.mkdir(parents=True)
+    (broad / "r_news_posts_2026-11-10_to_2026-11-16.zip").write_bytes(b"")     # posts done, comments not yet
     st = {**reddit_pull.DEFAULTS, "reddit_dir": str(tmp_path), "broad_since": "2026-11-10"}
     todo = dict(reddit_pull.missing(st, date(2026, 11, 25)))
     assert todo[date(2026, 11, 10)] == ["news", "politics", "worldnews"]
     assert todo[date(2026, 11, 17)] == ["news", "politics", "worldnews", "LivestreamFail"]
+    posts_only = {**st, "broad_kinds": ["posts"]}
+    assert dict(reddit_pull.missing(posts_only, date(2026, 11, 25)))[date(2026, 11, 10)] == ["politics", "worldnews"]
 
 
 def test_this_week_starts_on_the_panel_tuesday():
