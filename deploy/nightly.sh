@@ -48,6 +48,7 @@ step pipeline/build_db.py
 echo "--- publish"
 if python pipeline/publish.py; then
   step pipeline/embed.py
+  step pipeline/latest.py        # the home page's latest-stream section (claude -p on the subscription)
   echo "$sig" > logs/published.sig
   step pipeline/reel.py auto     # weekly reel: no-op with the subscription backend (reel-weekly.timer builds it)
   step pipeline/backup.py run    # encrypted backup, at most once a day (backup.every_hours)

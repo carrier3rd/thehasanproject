@@ -149,6 +149,7 @@ details.more ul { margin: 0; padding-left: 18px }
 .latest h1 { font-size: clamp(28px, 4.6vw, 44px); max-width: 26ch }
 .latest .lede { margin: 0; color: var(--ink-2); max-width: 62ch }
 .latest .stats { margin-bottom: 0 }
+@media (min-width: 641px) { .latest .stats[data-n="3"] { grid-template-columns: repeat(3, minmax(0, 1fr)) } .latest .stats[data-n="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
 .segs { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden }
 .segs li { background: var(--surface); display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 4px 14px; padding: 13px 16px; align-items: start }
 .segs a.t { font: 500 13px/1 var(--mono); text-decoration: none; background: var(--ink); color: var(--bg); border-radius: 6px; min-height: 34px;
@@ -204,10 +205,10 @@ body.notes .note { display: block }
 
 <main class="wrap" id="top">
   <section class="latest" aria-labelledby="latest-h">
-    <div class="eyebrow">Latest stream · Wed Nov 25 · 8.7 hours</div>
+    <div class="eyebrow" id="latest-when">Latest stream · Wed Nov 25 · 8.7 hours</div>
     <h1 id="latest-h">The H3 fallout, a MAGA mom, an Army blast in Iowa, and three hours of GTA VI</h1>
     <p class="lede">What Hasan covered on his most recent stream, in order, with a link to each moment.</p>
-    <div class="stats" aria-label="Nov 25 in numbers">
+    <div class="stats" id="latest-stats" aria-label="The latest stream in numbers">
       <div class="stat"><div class="k">GTA VI</div><div class="v">3.2 h</div><div class="s">end of chapter 3, start of 4</div></div>
       <div class="stat"><div class="k">MAGA-parent talk</div><div class="v">1.7 h</div><div class="s">Necessary Conversation</div></div>
       <div class="stat"><div class="k">H3 &amp; xQc drama</div><div class="v">1.4 h</div><div class="s">Ethan Klein, then xQc</div></div>
@@ -424,13 +425,35 @@ function answer(k) {
 }
 $('#q-copy').addEventListener('click', e => copy($('#q-grid').textContent, e.currentTarget));
 
-function drawSegs() {
-  $('#segs').replaceChildren(...SEGS.map(([t, h, cat, p]) => el('li', {},
-    el('a', { class: 't', href: `${BASE}?v=${LATEST}&t=${t}`, target: '_blank', rel: 'noopener', 'aria-label': `Watch ${h} at ${ts(t)}` }, '▶ ' + ts(t)),
-    el('div', { class: 'what' }, el('b', { text: h }), el('span', { class: 'cat', text: cat }), el('p', { text: p })))));
+function drawSegs(vid, segs) {
+  $('#segs').replaceChildren(...segs.map(([t, h, cat, p]) => el('li', {},
+    el('a', { class: 't', href: `${BASE}?v=${encodeURIComponent(vid)}&t=${t}`, target: '_blank', rel: 'noopener', 'aria-label': `Watch ${h} at ${ts(t)}` }, '▶ ' + ts(t)),
+    el('div', { class: 'what' }, el('b', { text: h }), el('span', { class: 'cat', text: cat }), p ? el('p', { text: p }) : null))));
 }
 
-drawSegs(); drawChips(); drawFeed(); drawHours();
+// The section above is a static fallback (Nov 25). latest.py writes the newest stream's section after every publish;
+// when it loads, it replaces the fallback.
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function dayLabel(d) {   // "20261125" -> "Wed Nov 25"
+  const m = /^(\d{4})(\d{2})(\d{2})$/.exec(d || ''); if (!m) return '';
+  const x = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  return `${DAYS[x.getUTCDay()]} ${MONTHS[x.getUTCMonth()]} ${x.getUTCDate()}`;
+}
+async function loadLatest() {
+  let L;
+  try { const r = await fetch('/api/features/latest', { cache: 'no-cache' }); if (!r.ok) return; L = await r.json(); } catch (e) { return; }
+  if (!L || !L.video_id || !Array.isArray(L.segments) || L.segments.length < 3 || !L.headline) return;
+  const hours = (L.duration || 0) / 3600;
+  $('#latest-when').textContent = ['Latest stream', dayLabel(L.upload_date), hours ? hours.toFixed(1) + ' hours' : ''].filter(Boolean).join(' · ');
+  $('#latest-h').textContent = L.headline;
+  const topics = (L.topics || []).slice(0, 4);
+  if (topics.length) $('#latest-stats').replaceChildren(...topics.map(t => el('div', { class: 'stat' },
+    el('div', { class: 'k', text: t.name }), el('div', { class: 'v', text: (+t.hours).toFixed(1) + ' h' }), el('div', { class: 's', text: t.note || '' }))));
+  $('#latest-stats').hidden = !topics.length; $('#latest-stats').dataset.n = String(topics.length);
+  drawSegs(L.video_id, L.segments.map(s => [s.t, s.title, s.category, s.summary]));
+}
+
+drawSegs(LATEST, SEGS); drawChips(); drawFeed(); drawHours(); loadLatest();
 try { const a = localStorage.getItem('mock-q2-2026-11-21'); if (a) answer(a); } catch (e) {}
 if (location.hash) { const t = document.getElementById(location.hash.slice(1)); if (t) t.scrollIntoView(); }
 </script>

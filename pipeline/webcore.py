@@ -365,8 +365,9 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
 
     @app.get("/api/features/{name}")
     def feature(name: str):
-        """Spotlight (stories), Chat vs Hasan, approved Receipts and the quiz pool, as built by features.py."""
-        if name not in ("stories", "chatvs", "receipts", "quiz", "timelines"):
+        """Spotlight (stories), Chat vs Hasan, approved Receipts and the quiz pool, as built by features.py, and the
+        home page's latest-stream section, built by latest.py."""
+        if name not in ("stories", "chatvs", "receipts", "quiz", "timelines", "latest"):
             raise HTTPException(404, "not found")
         return feature_file(feat_dir / f"{name}.json" if feat_dir else Path("-"))
 

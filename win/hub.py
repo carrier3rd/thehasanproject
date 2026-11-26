@@ -206,6 +206,18 @@ def push() -> None:
         raise RuntimeError("public.db arrived damaged on the laptop; the site keeps the old one")
     say(f"pushed public.db ({pub.stat().st_size / 1e6:.0f} MB, sha256 checked)")
 
+    latest = ROOT / "features" / "latest.json"
+    if latest.exists():
+        want = sha(latest)
+        r = subprocess.run(["scp", "-q", "-o", "BatchMode=yes", str(latest), f"laptop:{REMOTE}/features/latest.json.tmp"],
+                           capture_output=True, timeout=600)
+        r2 = ssh(f"cd {REMOTE}/features && test \"$(sha256sum latest.json.tmp | cut -c1-64)\" = {want} "
+                 f"&& mv -f latest.json.tmp latest.json && echo swapped") if r.returncode == 0 else None
+        if r2 is None or b"swapped" not in r2.stdout:
+            say("!!! features/latest.json did not arrive intact; the home page keeps the previous one")
+        else:
+            say("pushed features/latest.json (the home page's latest-stream section)")
+
     idx = ROOT / "index"
     local = {f.name: sha(f) for f in idx.glob("*") if f.is_file()}
     r = ssh(f"cd {REMOTE}/index && sha256sum *")
@@ -244,6 +256,7 @@ def run(force: bool) -> int:
         say("!!! publish failed; public.db left unchanged here and on the laptop")
         return 1
     step("pipeline/embed.py")
+    step("pipeline/latest.py")   # the home page's latest-stream section (claude -p, subscription); failure is not fatal
     push()
     st["published_sig"] = sig
     save_state(st)
