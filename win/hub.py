@@ -146,8 +146,11 @@ after = int(sys.argv[1])
 c = sqlite3.connect("file:archive/archive.db?mode=ro", uri=True, timeout=60)
 cur = c.execute("SELECT rowid, * FROM live_msgs WHERE rowid > ? ORDER BY rowid", (after,))
 cols = [d[0] for d in cur.description]
+# A value stored as a blob (seen Nov 26: one user_id as b'953264032', likely the laptop's bad RAM) is sent as text,
+# so one odd row can't stop the hourly sync.
+text = lambda v: v.decode("utf-8", "replace") if isinstance(v, bytes) else str(v)
 for row in cur:
-    print(json.dumps(dict(zip(cols, row))))
+    print(json.dumps(dict(zip(cols, row)), default=text))
 print(json.dumps({"sessions": [list(r) for r in c.execute("SELECT rowid, channel, start_ms, end_ms FROM sessions")]}))
 """
 
