@@ -266,9 +266,15 @@ def push_features() -> None:
     say(f"pushed features/ ({len(files)} files, sha256 checked)")
 
 
-# ---------------------------------------------------------------- transcription yields
-# The owner (2026-11-26): transcription is passive and low priority; every other job goes first. It shares this PC's
-# memory, so publish, features and backups pause it and start it again afterwards if it was running.
+# ---------------------------------------------------------------- priority levels (owner, 2026-11-26)
+# 1  the owner using the PC (gaming); the site and live chat logger (laptop); publishing a new stream (hourly hub)
+# 2  daily upkeep: the backup, the features job
+# 3  data collection: Reddit pulls (weekly, comments backfill); they resume where they stopped
+# 4  transcription: passive, catches up whenever there is room
+# A job pauses every running job below it that competes for the same resources (memory, GPU). Today the only one
+# that can be paused is transcription; Reddit pulls only use the network, so they leave it running. The Windows
+# tasks' CPU priority follows the level too (Task Scheduler priority 4 / 6 / 7 / 9).
+LEVELS = {"publish": 1, "backup": 2, "features": 2, "reddit": 3, "transcription": 4}
 RUNNER = Path.home() / "vod-archive"
 RUNNER_TASK = "VOD transcription run now"
 
@@ -288,6 +294,16 @@ def transcription_running() -> bool:
         f.seek(0)
         msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
     return False
+
+
+@contextlib.contextmanager
+def make_room(job: str, why: str):
+    """Pause the lower-priority jobs that compete with `job` for memory and GPU, and restart them afterwards."""
+    if LEVELS[job] >= LEVELS["reddit"]:          # level 3 and below: network only, nothing to pause
+        yield
+        return
+    with transcription_paused(f"{why} (priority {LEVELS[job]} over transcription's {LEVELS['transcription']})"):
+        yield
 
 
 @contextlib.contextmanager
@@ -323,7 +339,7 @@ def backup_due() -> bool:
 def features() -> int:
     """The nightly features job (Spotlight, Chat vs Hasan, Receipts, quiz), run here instead of on the laptop."""
     sync_live()
-    with transcription_paused("the features job"):
+    with make_room("features", "the features job"):
         ok = step("pipeline/features.py", "run")
         push_features()        # even after a partial run: what finished is already in features/
     return 0 if ok else 1
@@ -356,7 +372,7 @@ def run(force: bool) -> int:
     if not new and not due:
         return 0
     rc = 0
-    with transcription_paused("publishing" if new else "the daily backup"):
+    with make_room("publish" if new else "backup", "publishing" if new else "the daily backup"):
         if new:
             rc = publish(st, sig)
         if due:
