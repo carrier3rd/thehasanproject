@@ -281,6 +281,8 @@ def test_build_db_reloads_exactly_the_changed_vod(project):
     arc, _ = dbs(project)
     assert arc.execute("SELECT COUNT(*) FROM turns_fts WHERE turns_fts MATCH 'solidarity'").fetchone()[0] == 1
     assert arc.execute("SELECT COUNT(*) FROM turns WHERE video_id='ytABCDEFGH1'").fetchone()[0] == 3   # no duplicates
+    arc.close(); _.close()     # Windows can't replace public.db while a connection holds it open:
+    import gc; gc.collect()    # earlier tests' unclosed dbs() connections too
     run(root, "publish.py")
 
 
@@ -343,6 +345,7 @@ def test_publish_deleted_text_flag_and_id_optout(project, tmp_path):
     pub = sqlite3.connect(alt / "public.db")
     authors = {r[0] for r in pub.execute("SELECT author FROM chat")}
     assert "dave" not in authors and "carol_new" in authors
+    pub.close()      # Windows can't replace a file that is still open (the site closes its connection per request)
     (alt / "optout.txt").write_text("")
     run(alt, "publish.py")
     pub = sqlite3.connect(alt / "public.db")

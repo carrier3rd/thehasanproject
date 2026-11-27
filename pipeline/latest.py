@@ -24,7 +24,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import P, get_logger, load_config  # noqa: E402
+from common import P, get_logger, load_config, replace_file  # noqa: E402
 
 DEFAULTS = {"model": "claude-opus-5-5", "effort": "high", "claude_bin": "claude", "timeout_s": 1800,
             "max_line_chars": 700}
@@ -200,7 +200,7 @@ def build(cfg: dict, vid: str | None, force: bool) -> int:
     if vid == newest:
         tmp = out_dir / "latest.json.tmp"
         tmp.write_text(json.dumps(section, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, out_dir / "latest.json")
+        replace_file(tmp, out_dir / "latest.json")
         print(f"latest.json: {vid} {section['upload_date']}: {section['headline']}")
     return 0
 

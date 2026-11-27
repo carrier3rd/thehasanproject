@@ -141,6 +141,40 @@ def P(cfg: dict, key: str) -> Path:
     return p if p.is_absolute() else Path(cfg["_root"]) / p
 
 
+def try_lock(f) -> bool:
+    """Non-blocking exclusive lock on an open file, on Linux and Windows. False when another process holds it.
+    (Moved here from backup.py Nov 26 2026 so chatflags.py locks on Windows too.)"""
+    try:
+        import fcntl
+    except ImportError:                       # Windows
+        import msvcrt
+        try:
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+            return True
+        except OSError:
+            return False
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except OSError:
+        return False
+
+
+def replace_file(src: str | os.PathLike, dst: str | os.PathLike, wait_s: float = 60) -> None:
+    """os.replace, retried while Windows refuses because a reader has dst open (Nov 26 2026: the site moved to the
+    PC). The site opens public.db read-only for each request and closes it, and np.load closes vecs.npy, so a gap
+    comes within milliseconds. On Linux the first try always works."""
+    deadline = time.time() + wait_s
+    while True:
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if time.time() > deadline:
+                raise
+            time.sleep(0.05)
+
+
 def cfg_file(cfg: dict, name: str) -> Path:
     p = Path(cfg[name])
     return p if p.is_absolute() else Path(cfg["_root"]) / p

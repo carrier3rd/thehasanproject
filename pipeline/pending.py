@@ -35,7 +35,7 @@ def main():
     for vid in ids[:n]:
         for f in (P(cfg, "audio") / f"{vid}.{cfg['audio_format']}", P(cfg, "muted") / f"{vid}.json"):
             if f.exists():
-                print(f.relative_to(root) if f.is_relative_to(root) else f)
+                print((f.relative_to(root) if f.is_relative_to(root) else f).as_posix())   # same output on Windows
 
 
 if __name__ == "__main__":

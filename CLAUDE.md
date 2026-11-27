@@ -12,12 +12,19 @@ semantic search, and a synced watch page.
 4. When you finish a step, learn a fact or the owner makes a decision, update `STATUS.md` in the private repo.
 
 ## How the project runs
-- **Laptop (always on, Ubuntu, no NVIDIA GPU):**
-  - runs everything except transcription, as systemd services installed by `deploy/laptop/install.sh`;
-  - the public site is served through Tailscale Funnel;
-  - `vod-update.timer` pulls `main` of both repos every 10 minutes and restarts what changed.
-  - **So pushing to `main` deploys.** Run `python -m pytest` first.
-- **Rented GPU (by the hour):** transcription and voice enrollment, driven from the laptop by `deploy/gpu/run_remote.sh`.
+- **Windows PC (since 2026-11-26; the laptop's RAM corrupts data):** everything. The archive's main copy is the
+  `hasan-hub` clone on the PC (`~\projects\hasan-hub`).
+  - Always-on programs (`win/daemons.ps1`, each under `win/keep_running.py`): the public site (`web.app`) behind the
+    Cloudflare tunnel for thehasanproject.org, the live chat logger and the admin app.
+  - `win/hub.py run`, hourly: downloads, then rebuild and publish when something new arrived, then the daily backup.
+    `win/hub.py features`, nightly.
+  - Transcription on the PC's GPU (`deploy/pc/windows/runner.py`, installed in `~/vod-archive`), lowest priority.
+  - There is no auto-update: after pushing to `main`, `git pull` in the hub clone (and copy runner.py to
+    `~/vod-archive/win/` if it changed). Run `python -m pytest` first.
+- **Laptop (Ubuntu):** retired for the archive. Its copy of the data is as of 2026-11-26. `deploy/laptop/` and
+  `deploy/nightly.sh` describe how it ran until then.
+- **Rented GPU (by the hour):** transcription and voice enrollment, driven by `deploy/gpu/run_remote.sh` (unused
+  since the PC took over transcription).
 - **Cloud Claude sessions** can't reach the laptop, Twitch, YouTube or Hugging Face. The owner runs commands on the
   laptop and pastes the output. Don't pretend a step ran when it didn't.
 

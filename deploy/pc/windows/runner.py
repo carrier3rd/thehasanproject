@@ -1,14 +1,14 @@
 """GPU transcription runner for Windows (replaces the WSL bash scripts, 2026-11-14).
 
 Setup on a new Windows PC: deploy/pc/windows/setup.ps1, then copy .env (HF_TOKEN) and private/config.yaml next to
-pipeline/, add ssh alias `laptop`, and run prefetch.py once. Scheduled tasks: see README.md here.
+pipeline/, and run prefetch.py once. The archive itself is the hub folder (HUB below). Scheduled tasks: see README.md here.
 
-  runner.py run [--until HH:MM]   backfill the laptop's pending VODs, then the older YouTube queue; stop at --until
+  runner.py run [--until HH:MM]   backfill the hub's pending VODs, then the older YouTube queue; stop at --until
   runner.py status                print one status line now
   runner.py stop                  ask a running `run` to stop (it kills the current transcription and exits)
 
 What the old scripts did, and where it is now:
-  pc_backfill2.sh      -> backfill()         VODs with no transcript on the laptop, newest first, results copied back
+  pc_backfill2.sh      -> backfill()         VODs with no transcript in the hub, newest first, results copied back
   older_transcribe.sh  -> older()            newest N no-caption YouTube uploads: audio only, transcripts stay in older/
   gpu_thermostat.sh    -> thermostat()       safety net: suspend transcription at HOT C, resume at COOL C
   live.sh              -> status_loop()      one line every ~2 min in logs/live-status.log
@@ -41,8 +41,7 @@ OLDER = ROOT / "older"
 PY = ROOT / ".venv" / "Scripts" / "python.exe"
 YTDLP = ROOT / ".venv" / "Scripts" / "yt-dlp.exe"
 STOP_FILE = LOGS / "STOP"
-SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", "laptop"]
-REMOTE = "thehasanproject"
+HUB = Path.home() / "projects" / "hasan-hub"  # the archive's main copy since Nov 26 2026 (was the laptop, over ssh)
 OLDER_N = 181  # owner approved the newest 181 no-caption videos (2026-11-12); more need a new OK
 AHEAD = 30  # the downloader keeps at most this many audio files waiting
 HOT = int(os.environ.get("HOT", 85))
@@ -72,10 +71,6 @@ def log(name: str, msg: str, status: str | None = None) -> None:
 
 def run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", creationflags=NOWIN, **kw)
-
-
-def ssh(command: str, stdin: str | None = None, timeout: int = 120) -> subprocess.CompletedProcess:
-    return run(SSH + [command], input=stdin, timeout=timeout)
 
 
 def env() -> dict:
@@ -129,61 +124,76 @@ def transcribe(vid: str, logname: str) -> bool:
     return proc.returncode == 0 and (DATA / "transcripts" / f"{vid}.json").exists()
 
 
-# ---------------------------------------------------------------- laptop backfill
-def scp_down(remote: str, local: Path) -> bool:
+# ---------------------------------------------------------------- backfill (the hub's pending VODs)
+# Until Nov 26 2026 this copied audio from the laptop over ssh and the transcripts back; since then the archive's main
+# copy is the hub folder on this PC (HUB, win/hub.py there), because the laptop's RAM corrupts data. Same steps, local.
+def copy_down(src: Path, local: Path) -> bool:
     part = local.with_name(local.name + ".part")
-    ok = run(["scp", "-q", "-o", "BatchMode=yes", f"laptop:{remote}", str(part)], timeout=3600).returncode == 0
-    if ok:
-        part.replace(local)
-    else:
+    try:
+        shutil.copyfile(src, part)
+    except OSError:
         part.unlink(missing_ok=True)
-    return ok
-
-
-def scp_up_new(local: Path, remote_dir: str) -> bool:
-    """Copy to the laptop unless a file of that name is already there (never overwrite: it may have been re-labelled)."""
-    if ssh(f"test -f {remote_dir}/{local.name}").returncode == 0:
-        return True
-    tmp = f"{remote_dir}/.{local.name}.part"
-    if run(["scp", "-q", "-o", "BatchMode=yes", str(local), f"laptop:{tmp}"], timeout=3600).returncode != 0:
         return False
-    return ssh(f"mv -n {tmp} {remote_dir}/{local.name}").returncode == 0
+    part.replace(local)
+    return True
+
+
+def copy_up_new(local: Path, dest_dir: Path) -> bool:
+    """Copy into the hub unless a file of that name is already there (never overwrite: it may have been re-labelled)."""
+    dest = dest_dir / local.name
+    if dest.exists():
+        return True
+    tmp = dest_dir / f".{local.name}.part"
+    try:
+        shutil.copyfile(local, tmp)
+        if dest.exists():                       # appeared meanwhile: keep that one
+            tmp.unlink()
+        else:
+            tmp.replace(dest)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        return False
+    return True
+
+
+def hub_pending() -> list[str] | None:
+    """Livestream VODs in the hub with audio but no transcript yet, newest first (None if pending.py failed)."""
+    r = run([str(HUB / ".venv" / "Scripts" / "python.exe"), "pipeline/pending.py"], cwd=HUB, timeout=300)
+    if r.returncode != 0:
+        return None
+    return sorted({m[:-5] for m in re.findall(r"v[0-9]+\.opus", r.stdout)}, reverse=True)
 
 
 def new_streams() -> list[str]:
-    """Livestream VODs on the laptop with audio but no transcript yet (what backfill() would do), newest first."""
-    r = ssh(f"cd {REMOTE} && .venv/bin/python pipeline/pending.py 2>/dev/null")
-    if r.returncode != 0:
-        return []
-    return sorted({m[:-5] for m in re.findall(r"v[0-9]+\.opus", r.stdout)}, reverse=True)
+    return hub_pending() or []
 
 
 def backfill() -> None:
     say = lambda m: log("pc-backfill.log", m, "pc-status.txt")
     for d in ("audio", "muted", "transcripts"):
         (DATA / d).mkdir(parents=True, exist_ok=True)
-    r = ssh(f"cd {REMOTE} && .venv/bin/python pipeline/pending.py 2>/dev/null")
-    if r.returncode != 0:
-        say(f"could not reach the laptop for the pending list (ssh exit {r.returncode}); skipping backfill")
+    ids = hub_pending()
+    if ids is None:
+        say(f"pending.py failed in {HUB}; skipping backfill")
         return
-    ids = sorted({m[:-5] for m in re.findall(r"v[0-9]+\.opus", r.stdout)}, reverse=True)
     if not ids:
         say("nothing pending")
         return
     say(f"windows backfill: {len(ids)} VOD(s) pending: {' '.join(ids)}")
+    hub_data = HUB / "data"
     for vid in ids:
         if stop.is_set():
             return
-        if ssh(f"test -f {REMOTE}/data/transcripts/{vid}.json").returncode == 0:
-            say(f"{vid} already on laptop, skipping")
+        if (hub_data / "transcripts" / f"{vid}.json").exists():
+            say(f"{vid} already in the hub, skipping")
             continue
         audio = DATA / "audio" / f"{vid}.opus"
-        if not audio.exists() and not scp_down(f"{REMOTE}/data/audio/{vid}.opus", audio):
+        if not audio.exists() and not copy_down(hub_data / "audio" / f"{vid}.opus", audio):
             say(f"could not copy {vid} audio")
             return
         muted = DATA / "muted" / f"{vid}.json"
-        if not muted.exists():
-            scp_down(f"{REMOTE}/data/muted/{vid}.json", muted)
+        if not muted.exists() and (hub_data / "muted" / f"{vid}.json").exists():
+            copy_down(hub_data / "muted" / f"{vid}.json", muted)
         mins = duration_min(audio)
         est = mins * 10 // 125
         state.update(job="backfill", vod=vid, started=time.time(), est_min=est)
@@ -191,20 +201,22 @@ def backfill() -> None:
         if not transcribe(vid, "pc-process.log"):
             say(f"{vid} stopped by the runner" if stop.is_set() else f"{vid} FAILED (see logs/pc-process.log); stopping")
             return
-        tdir = f"{REMOTE}/data/transcripts"
+        tdir = hub_data / "transcripts"
         emb = DATA / "transcripts" / f"{vid}.emb.npz"
         if emb.exists():
-            scp_up_new(emb, tdir)
-        if not scp_up_new(DATA / "transcripts" / f"{vid}.json", tdir):
-            say(f"{vid} transcribed but could not be copied to the laptop; stopping")
+            copy_up_new(emb, tdir)
+        if not copy_up_new(DATA / "transcripts" / f"{vid}.json", tdir):
+            say(f"{vid} transcribed but could not be copied into the hub; stopping")
             return
         times = LOGS / "process_times.tsv"
         if times.exists():
             lines = [l for l in times.read_text(encoding="utf-8").splitlines() if l.startswith(vid + "\t")]
-            if lines:
-                f = f"{REMOTE}/logs/process_times.tsv"
-                ssh(f'line=$(cat); grep -qxF -- "$line" {f} || printf "%s\\n" "$line" >> {f}', stdin=lines[-1])
-        say(f"{vid} done and on the laptop")
+            hub_times = HUB / "logs" / "process_times.tsv"
+            have = hub_times.read_text(encoding="utf-8").splitlines() if hub_times.exists() else []
+            if lines and lines[-1] not in have:
+                with open(hub_times, "a", encoding="utf-8", newline="\n") as f:
+                    f.write(lines[-1] + "\n")
+        say(f"{vid} done and in the hub")
         audio.unlink(missing_ok=True)
     say("backfill finished")
 
@@ -300,12 +312,12 @@ def older() -> None:
     ready = lambda y: (OLDER / "audio" / f"yt_{y}.opus").exists() or (DATA / "audio" / f"yt_{y}.opus").exists()
     tried: set[str] = set()
     while not stop.is_set():
-        # new livestreams always come first (owner, 2026-11-20): before every older video, ask the laptop whether a
+        # new livestreams always come first (owner, 2026-11-20): before every older video, ask the hub whether a
         # new stream is waiting and transcribe it first. A stream that backfill could not finish is not retried in
         # this run, so a broken copy can't stall the older queue.
         fresh = [v for v in new_streams() if v not in tried]
         if fresh:
-            say(f"new livestream(s) waiting on the laptop: {' '.join(fresh)}; doing them first")
+            say(f"new livestream(s) waiting in the hub: {' '.join(fresh)}; doing them first")
             tried.update(fresh)
             backfill()
             if stop.is_set():

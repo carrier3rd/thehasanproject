@@ -28,7 +28,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from common import P, get_logger, load_config, make_dirs
+from common import P, get_logger, load_config, make_dirs, try_lock  # noqa: F401 (try_lock moved to common)
 
 log = get_logger("backup")
 DEFAULTS = {"repos": [], "password_file": "~/.config/vod-archive/restic-password", "include_audio": False,
@@ -68,24 +68,6 @@ def restic_env(bst: dict) -> dict:
     env = dict(os.environ, RESTIC_PASSWORD_FILE=str(password_file(bst)))
     env.pop("RESTIC_PASSWORD", None)
     return env
-
-
-def try_lock(f) -> bool:
-    """Non-blocking exclusive lock on an open file, on Linux and Windows. False when another process holds it."""
-    try:
-        import fcntl
-    except ImportError:                       # Windows
-        import msvcrt
-        try:
-            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
-            return True
-        except OSError:
-            return False
-    try:
-        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return True
-    except OSError:
-        return False
 
 
 def rclone_program(bst: dict | None = None) -> str | None:

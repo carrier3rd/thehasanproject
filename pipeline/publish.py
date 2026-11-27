@@ -9,7 +9,7 @@ import sqlite3
 import time
 from collections import defaultdict
 
-from common import SPEC_VERSION, Anchors, P, cfg_file, connect_archive, get_logger, load_config
+from common import SPEC_VERSION, Anchors, P, cfg_file, connect_archive, get_logger, load_config, replace_file
 
 log = get_logger("publish")
 
@@ -207,7 +207,7 @@ def main():
             log.error("PUBLISH FAILED: %s", p)
         tmp.unlink()
         return 1
-    os.replace(tmp, dest)
+    replace_file(tmp, dest)
     size = dest.stat().st_size / 1e6
     print(f"public.db: {size:.1f} MB, " + ", ".join(f"{n} {k}" for k, n in counts.items()))
     print(f"opt-out test passed ({len(ex_names)} name(s), {len(ex_ids)} id(s) excluded)")

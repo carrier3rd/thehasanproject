@@ -30,7 +30,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from common import P, get_logger, load_config  # noqa: E402
+from common import P, get_logger, load_config, try_lock  # noqa: E402
 import reel  # noqa: E402
 
 log = get_logger("chatflags")
@@ -177,12 +177,7 @@ def single_run(cfg: dict):
     """A lock held for the life of the process, so the nightly timer and a hand-started run never overlap (they
     would send the same chunks twice). -> the open lock file, or None when another run holds it."""
     f = open(db_path(cfg).parent / "run.lock", "w")
-    try:
-        import fcntl
-        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except ImportError:              # not POSIX (tests on Windows): no lock
-        return f
-    except OSError:
+    if not try_lock(f):              # until Nov 26 2026 Windows had no lock here; chatflags now runs on the PC
         f.close()
         return None
     return f

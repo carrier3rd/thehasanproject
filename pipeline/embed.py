@@ -8,7 +8,7 @@ import sqlite3
 
 import numpy as np
 
-from common import P, get_logger, load_config, make_dirs
+from common import P, get_logger, load_config, make_dirs, replace_file
 
 log = get_logger("embed")
 
@@ -72,8 +72,8 @@ def build(cfg: dict, embed_docs, include_media: bool = False, rebuild: bool = Fa
     np.save(tmp_v, vecs)
     tmp_m.write_text(json.dumps({"model": cfg["embed_model"], "include_media": include_media,
                                  "videos": videos, "windows": windows}))
-    tmp_v.replace(vp)
-    tmp_m.replace(mp)
+    replace_file(tmp_v, vp)
+    replace_file(tmp_m, mp)
     stats["windows"] = len(windows)
     return stats
 
