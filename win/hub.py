@@ -165,14 +165,14 @@ def features() -> int:
 
 
 def reel() -> int:
-    """reel.py weekly (the finished week, then one backfill week), then the week in progress. Every Claude call is
+    """The week in progress first, then reel.py weekly (the finished week, then one backfill week). Every Claude call is
     claude -p on the subscription, and results are cached per stream window and per claim, so an hour with no new
     stream sends nothing; a new stream costs only its own requests. Light on memory: no need to pause transcription."""
     import datetime as dt
-    ok = step("pipeline/reel.py", "weekly")
     today = dt.date.today()
     week = (today - dt.timedelta(days=(today.weekday() + 1) % 7)).isoformat()   # the Sunday that starts this week
-    ok = step("pipeline/reel.py", "build", "--week", week, "--yes") and ok
+    ok = step("pipeline/reel.py", "build", "--week", week, "--yes")          # new streams first
+    ok = step("pipeline/reel.py", "weekly") and ok
     return 0 if ok else 1
 
 
