@@ -219,18 +219,19 @@ body.notes .note { display: block }
   </section>
 
   <section class="latest" aria-labelledby="checks-h" style="margin-top:-12px">
-    <div class="eyebrow">Fact-checks · Wed Nov 25</div>
+    <div class="eyebrow" id="checks-when">Fact-checks · Wed Nov 25</div>
     <h2 class="weektitle" id="checks-h">What he got wrong on Nov 25</h2>
-    <p class="lede">Five claims from the stream, each checked by hand against the sources linked under it.</p>
+    <p class="lede" id="checks-lede">Five claims from the stream, each checked by hand against the sources linked under it.</p>
     <div class="feed" id="checks-nov25"></div>
+    <div id="checks-right"></div>
   </section>
 
   <div class="weekhead">
-    <div class="eyebrow">Last week · Sun Nov 15 – Sat Nov 21 · 7 streams</div>
+    <div class="eyebrow" id="week-when">Last week · Sun Nov 15 – Sat Nov 21 · 7 streams</div>
     <h2 class="weektitle">Last week's fact-checks and quotes</h2>
   </div>
 
-  <section class="stats" aria-label="Last week in numbers">
+  <section class="stats" id="week-stats" aria-label="Last week in numbers">
     <div class="stat"><div class="k">On stream</div><div class="v">64.8 h</div><div class="s">7 streams</div></div>
     <div class="stat"><div class="k">Top topic</div><div class="v">GTA VI</div><div class="s">21.7 h · a third of the week</div></div>
     <div class="stat"><div class="k">Streamer drama</div><div class="v">5.9 h</div><div class="s">the H3 / Ethan Klein split</div></div>
@@ -244,7 +245,7 @@ body.notes .note { display: block }
     </div>
 
     <aside class="rail">
-      <section class="panel" aria-labelledby="q-h">
+      <section class="panel handmade" data-week="2026-11-15" aria-labelledby="q-h">
         <div class="eyebrow">Question of the week</div>
         <h3 id="q-h">After GTA VI, what did Hasan spend the most time on last week?</h3>
         <p class="small">He streamed 64.8 hours across 7 streams.</p>
@@ -256,7 +257,7 @@ body.notes .note { display: block }
         </div>
       </section>
 
-      <section class="panel" aria-labelledby="h-h">
+      <section class="panel handmade" data-week="2026-11-15" aria-labelledby="h-h">
         <h3 id="h-h">Where the hours went</h3>
         <div class="hours" id="hours"></div>
         <p class="small">Hours are estimates from the transcripts.</p>
@@ -264,7 +265,7 @@ body.notes .note { display: block }
     </aside>
   </div>
 
-  <section id="topics" style="margin-top:36px" class="panel">
+  <section id="topics" style="margin-top:36px" class="panel handmade" data-week="2026-11-15">
     <h3>Search last week's topics</h3>
     <p class="small">Every stream is transcribed. Each topic opens a search of everything he said about it.</p>
     <div class="topics">
@@ -284,6 +285,8 @@ const KINDS = {
   false: ['False', 'false', 'Fact-checks'], misleading: ['Misleading', 'misleading', 'Fact-checks'],
   record: ['On the record', '', 'On the record'], blind: ['Blindspot', 'blind', 'Blindspots'],
   chat: ['Chat', 'chat', 'Chat'], receipt: ['Receipt', 'receipt', 'Receipts'],
+  accurate: ['Accurate', '', 'Fact-checks'], mostly_accurate: ['Mostly accurate', '', 'Fact-checks'],
+  unsupported: ['Unsupported', '', 'Fact-checks'],
 };
 
 const CARDS = [
@@ -498,8 +501,81 @@ async function loadLatest() {
   drawSegs(L.video_id, L.segments.map(s => [s.t, s.title, s.category, s.summary]));
 }
 
-drawSegs(LATEST, SEGS); drawChips(); drawFeed(); drawHours(); loadLatest();
+// ---------------------------------------------------------------- built from the fact-check data (Nov 27 2026)
+// Everything above that names a date is a fallback for when the data can't load. The latest stream's fact-checks
+// and last week's feed come from /api/reels, so they follow every new stream on their own: the hourly reel job
+// checks the newest stream first. Hand-made extras (question, hours, topics) show only in the week they were made for.
+const plainDay = d => { const x = dayLabel(d); return x ? x.split(' ').slice(1).join(' ') : d; };
+function factCard(f) {
+  return { id: f.id, kind: f.verdict, date: dayLabel(f.date), vid: f.video_id, t: Math.max(0, Math.floor(+f.t - 5)),
+    h: f.claim, quote: f.quote, fix: f.correction, more: f.explanation,
+    src: (f.sources || []).filter(x => /^https?:\/\//i.test(x.url || '')).map(x => [x.title || x.url, x.url]) };
+}
+function clipCard(c) {
+  return { id: c.id, kind: 'record', date: dayLabel(c.date), vid: c.video_id, t: Math.floor(+c.start), h: c.title,
+    quote: c.quote, ctx: c.summary, more: c.nuance };
+}
+const isBad = f => f.verdict === 'false' || f.verdict === 'misleading';
+const badFirst = (a, b) => (a.verdict === 'false' ? 0 : 1) - (b.verdict === 'false' ? 0 : 1) || a.date.localeCompare(b.date) || a.t - b.t;
+async function getJSON(u) { const r = await fetch(u, { cache: 'no-cache' }); if (!r.ok) throw new Error(r.status); return r.json(); }
+
+async function loadChecks(latestDay) {
+  const weeks = (await getJSON('/api/reels')).weeks || [];
+  if (!weeks.length) return;
+  const cur = await getJSON('/api/reels/' + weeks[0].week);
+  const all = cur.fact_checks || [];
+  const day = latestDay || all.reduce((m, f) => (f.date > m ? f.date : m), '');
+  const fs = all.filter(f => f.date === day);
+  const bad = fs.filter(isBad).sort(badFirst), ok = fs.filter(f => !isBad(f));
+  const n = v => fs.filter(f => f.verdict === v).length;
+  $('#checks-when').textContent = `Fact-checks · ${dayLabel(day)}`;
+  $('#checks-h').textContent = `What he got wrong on ${plainDay(day)}`;
+  if (!fs.length) {
+    $('#checks-lede').textContent = 'This stream is still being fact-checked. Checks usually appear within a few hours of the stream going up.';
+    $('#checks-nov25').replaceChildren(); $('#checks-right').replaceChildren();
+    return;
+  }
+  $('#checks-lede').textContent = `Claude checked ${fs.length} factual claim${fs.length === 1 ? '' : 's'} from the stream against sources found by web search: ` +
+    `${n('false')} false, ${n('misleading')} misleading. Sources are under each card.`;
+  $('#checks-nov25').replaceChildren(...(bad.length ? bad.map(f => card(factCard(f))) : [el('p', { text: 'Nothing false or misleading on this stream.' })]));
+  $('#checks-right').replaceChildren(ok.length ? el('details', { class: 'more gotright' },
+    el('summary', { text: `Got right: ${n('accurate') + n('mostly_accurate')} (${n('accurate')} accurate, ${n('mostly_accurate')} mostly accurate)` +
+      (n('unsupported') ? ` · ${n('unsupported')} unsupported` : '') }),
+    el('div', { class: 'feed' }, ...ok.map(f => card(factCard(f))))) : '');
+}
+
+async function loadWeek() {
+  const weeks = (await getJSON('/api/reels')).weeks || [];
+  const t = new Date(), today = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+  const w = weeks.find(x => x.week_end < today);
+  if (!w) return;
+  for (const n of document.querySelectorAll('.handmade')) n.hidden = n.dataset.week !== w.week;
+  const r = await getJSON('/api/reels/' + w.week);
+  const fs = r.fact_checks || [], bad = fs.filter(isBad).sort(badFirst), clips = r.clips || [];
+  const d0 = w.week.replace(/-/g, ''), d1 = w.week_end.replace(/-/g, '');
+  $('#week-when').textContent = `Last week · ${dayLabel(d0)} – ${dayLabel(d1)} · ${(r.streams || []).length} streams`;
+  const nf = fs.filter(f => f.verdict === 'false').length, nm = fs.filter(f => f.verdict === 'misleading').length;
+  const nu = fs.filter(f => f.verdict === 'unsupported').length;
+  const stat = (k, v, sub) => el('div', { class: 'stat' }, el('div', { class: 'k', text: k }), v, el('div', { class: 's', text: sub }));
+  $('#week-stats').replaceChildren(
+    stat('Streams', el('div', { class: 'v', text: String((r.streams || []).length) }), `${plainDay(d0)} – ${plainDay(d1)}`),
+    stat('Claims checked', el('div', { class: 'v' }, `${fs.length} · `, el('span', { class: 'bad', text: String(nf + nm) })), `${nf} false, ${nm} misleading`),
+    stat('Got right', el('div', { class: 'v', text: String(fs.length - nf - nm - nu) }), 'accurate or mostly accurate'),
+    stat('On the record', el('div', { class: 'v', text: String(clips.length) }), 'clips on the Weekly page'));
+  CARDS.splice(0, CARDS.length, ...clips.map(clipCard), ...bad.map(factCard), ...CARDS.filter(c => c.placeholder));
+  drawChips(); drawFeed();
+}
+
+drawSegs(LATEST, SEGS); drawChips(); drawFeed(); drawHours();
 $('#checks-nov25').replaceChildren(...CHECKS_NOV25.map(card));
+(async () => {
+  await loadLatest();
+  let day = null;
+  try { const L = await getJSON('/api/features/latest'); day = L && L.upload_date; } catch (e) { /* the newest checked day */ }
+  try { await loadChecks(day); } catch (e) { /* the hand-made fallback stays */ }
+  try { await loadWeek(); } catch (e) { /* the hand-made fallback stays */ }
+  if (location.hash) { const t = document.getElementById(location.hash.slice(1)); if (t) t.scrollIntoView(); }
+})();
 try { const a = localStorage.getItem('mock-q2-2026-11-21'); if (a) answer(a); } catch (e) {}
 if (location.hash) { const t = document.getElementById(location.hash.slice(1)); if (t) t.scrollIntoView(); }
 </script>
