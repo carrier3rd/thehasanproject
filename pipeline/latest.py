@@ -15,6 +15,7 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import re
 import sqlite3
 import subprocess
@@ -100,7 +101,9 @@ def ask(text: str, st: dict) -> dict:
            if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_USE_BEDROCK",
                         "CLAUDE_CODE_USE_VERTEX", "ANTHROPIC_MODEL")}
     env["PATH"] = str(Path.home() / ".local" / "bin") + os.pathsep + env.get("PATH", "")
-    args = [st["claude_bin"], "-p", "--model", st["model"], "--effort", st["effort"], "--output-format", "json",
+    # full path: Windows looks a bare name up in this process's PATH, not env's (failed in a scheduled task, Nov 27 2026)
+    exe = shutil.which(st["claude_bin"], path=env["PATH"]) or st["claude_bin"]
+    args = [exe, "-p", "--model", st["model"], "--effort", st["effort"], "--output-format", "json",
             "--no-session-persistence", "--strict-mcp-config", "--disable-slash-commands", "--setting-sources", "",
             "--tools", "", "--system-prompt", SYSTEM, "--json-schema", json.dumps(SCHEMA)]
     p = subprocess.run(args, input=text, capture_output=True, text=True, encoding="utf-8", env=env,

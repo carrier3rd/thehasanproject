@@ -422,9 +422,17 @@ def cli_env() -> dict:
     return env
 
 
+def claude_exe(name: str) -> str:
+    """Full path of the claude CLI. Windows looks a bare program name up in the caller's PATH, not in the env passed to
+    the child, so a scheduled task without ~/.local/bin on its PATH could not start "claude" (Nov 27 2026)."""
+    import os as _os
+    import shutil as _sh
+    return _sh.which(name, path=str(Path.home() / ".local" / "bin") + _os.pathsep + _os.environ.get("PATH", "")) or name
+
+
 def cli_args(st: dict, kind: str, system: str, schema: dict | None) -> list[str]:
     effort = st[f"{kind}_effort"]      # screen, judge, fact, chat, verify here; features.py adds its own kinds
-    args = [st["claude_bin"], "-p", "--model", st["model"], "--effort", effort,
+    args = [claude_exe(st["claude_bin"]), "-p", "--model", st["model"], "--effort", effort,
             "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--strict-mcp-config",
             "--disable-slash-commands", "--setting-sources", "", "--system-prompt", system]
     if kind == "fact":   # web search only; the answer ends in JSON (as with the API)
