@@ -18,6 +18,9 @@ $Jobs = @(
   @("VOD hub publish",  @("win\hub.py", "run"),             (Every-Minutes 60 45), 4, 3),
   # Spotlight, Chat vs Hasan, Receipts, quiz (claude -p on the subscription)
   @("VOD features",     @("win\hub.py", "features"),        (New-ScheduledTaskTrigger -Daily -At 02:30), 6, 6),
+  # weekly reel + fact-checks, including the week in progress (claude -p on the subscription; cached, so a quiet
+  # hour sends nothing). Starts 30 min after the publish run; a run still going when the next is due is not doubled.
+  @("VOD reel",         @("win\hub.py", "reel"),            (Every-Minutes 60 15), 6, 6),
   # posts and comments of the broad subs for the blindspot feature
   @("VOD reddit pull",  @("pipeline\reddit_pull.py"),       (New-ScheduledTaskTrigger -Weekly -DaysOfWeek Tuesday -At 23:00), 7, 6)
 )

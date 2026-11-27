@@ -9,6 +9,8 @@ The laptop keeps its copy of the data as it was on Nov 26 and runs nothing for t
 
   python win/hub.py run [--force]   download new streams, then rebuild and publish when something new arrived
   python win/hub.py features        the nightly features job (Spotlight, Chat vs Hasan, Receipts, quiz)
+  python win/hub.py reel            weekly reel + fact-checks: the finished week (and one earlier week), then the
+                                    week in progress, so every new stream is screened and fact-checked within the hour
 
 The site reads public.db, index/ and features/ from this folder: a fresh read-only connection per request, and the
 search index reloads itself when its files change, so a publish needs no restart (common.replace_file waits out the
@@ -162,6 +164,18 @@ def features() -> int:
     return 0 if ok else 1
 
 
+def reel() -> int:
+    """reel.py weekly (the finished week, then one backfill week), then the week in progress. Every Claude call is
+    claude -p on the subscription, and results are cached per stream window and per claim, so an hour with no new
+    stream sends nothing; a new stream costs only its own requests. Light on memory: no need to pause transcription."""
+    import datetime as dt
+    ok = step("pipeline/reel.py", "weekly")
+    today = dt.date.today()
+    week = (today - dt.timedelta(days=(today.weekday() + 1) % 7)).isoformat()   # the Sunday that starts this week
+    ok = step("pipeline/reel.py", "build", "--week", week, "--yes") and ok
+    return 0 if ok else 1
+
+
 def publish(st: dict, sig: str) -> int:
     step("pipeline/align_chat.py")
     step("pipeline/build_db.py")
@@ -197,12 +211,12 @@ def run(force: bool) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["run", "features"])
+    ap.add_argument("cmd", choices=["run", "features", "reel"])
     ap.add_argument("--force", action="store_true", help="rebuild and publish even if no files changed")
     a = ap.parse_args()
     say(f"=== hub {a.cmd} start")
     try:
-        rc = features() if a.cmd == "features" else run(a.force)
+        rc = features() if a.cmd == "features" else reel() if a.cmd == "reel" else run(a.force)
     except Exception as e:
         say(f"!!! {e}")
         rc = 1
