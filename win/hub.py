@@ -10,7 +10,7 @@ The laptop keeps its copy of the data as it was on Nov 26 and runs nothing for t
   python win/hub.py run [--force]   download new streams, then rebuild and publish when something new arrived
   python win/hub.py features        the nightly features job (Spotlight, Chat vs Hasan, Receipts, quiz)
   python win/hub.py reel            fact-checks + reel for the week in progress, so every new stream is screened and
-                                    fact-checked soon after it is published (level 3)
+                                    fact-checked soon after it is published, the newest day first (level 3.5)
   python win/hub.py reel-backfill   reel.py weekly: the finished week, then one earlier week (level 4)
 
 The site reads public.db, index/ and features/ from this folder: a fresh read-only connection per request, and the
@@ -91,13 +91,13 @@ def downloads() -> None:
 # ---------------------------------------------------------------- priority levels (owner, 2026-11-26)
 # 1  the owner using the PC (gaming); the site, the live chat logger; publishing a new stream (hourly hub)
 # 2  daily upkeep: the backup, the features job
-# 3  data collection: Reddit pulls (weekly, comments backfill); they resume where they stopped; fact-checking new
-#    streams (hub.py reel: the week in progress, hourly)
+# 3  data collection: Reddit pulls (weekly, comments backfill); they resume where they stopped
+# 3.5 fact-checking the current day's VOD, then the rest of the week in progress (hub.py reel, hourly)
 # 4  transcription: passive, catches up whenever there is room; the reel backfill of earlier weeks (hub.py reel-backfill)
 # A job pauses every running job below it that competes for the same resources (memory, GPU). Today the only one
 # that can be paused is transcription; Reddit pulls only use the network, so they leave it running. The Windows
 # tasks' CPU priority follows the level too (Task Scheduler priority 4 / 6 / 7 / 9).
-LEVELS = {"publish": 1, "backup": 2, "features": 2, "reddit": 3, "reel": 3, "transcription": 4,
+LEVELS = {"publish": 1, "backup": 2, "features": 2, "reddit": 3, "reel": 3.5, "transcription": 4,
           "reel-backfill": 4}
 RUNNER = Path.home() / "vod-archive"
 RUNNER_TASK = "VOD transcription run now"
@@ -170,11 +170,11 @@ def features() -> int:
 def reel() -> int:
     """The week in progress: every new stream screened, judged and fact-checked. Every Claude call is claude -p on the
     subscription, and results are cached per stream window and per claim, so an hour with no new stream sends nothing.
-    Network only (level 3): it leaves transcription running."""
+    The newest day first. Network only (level 3.5): it leaves transcription running."""
     import datetime as dt
     today = dt.date.today()
     week = (today - dt.timedelta(days=(today.weekday() + 1) % 7)).isoformat()   # the Sunday that starts this week
-    return 0 if step("pipeline/reel.py", "build", "--week", week, "--yes") else 1
+    return 0 if step("pipeline/reel.py", "build", "--week", week, "--yes", "--latest-first") else 1
 
 
 def reel_backfill() -> int:

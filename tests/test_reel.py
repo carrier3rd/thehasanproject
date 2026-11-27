@@ -382,3 +382,16 @@ def test_subscription_stops_at_the_usage_limit_and_resumes(sub_project, monkeypa
     fake = FakeClaude()
     monkeypatch.setattr("subprocess.run", fake)
     assert reel.weekly(cfg, now=dt.datetime(2026, 11, 8, 12))[0] == f"{WEEK}: written"
+
+
+def test_latest_first_does_the_newest_day_first_and_writes_the_same_week(sub_project, monkeypatch):
+    root, cfg = sub_project
+    monkeypatch.setattr("subprocess.run", FakeClaude())
+    assert reel.build(cfg, WEEK, yes=True, latest_first=True) == "written"
+    out = json.loads((root / "reels" / f"{WEEK}.json").read_text())
+    assert [c["title"] for c in out["clips"]] == ["Rent control segment"]
+    assert [f["verdict"] for f in out["fact_checks"]] == ["misleading"]
+    fake = FakeClaude()                       # everything is cached now: a second run sends nothing
+    monkeypatch.setattr("subprocess.run", fake)
+    assert reel.build(cfg, WEEK, yes=True, latest_first=True) == "written"
+    assert fake.calls == []

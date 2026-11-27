@@ -935,18 +935,35 @@ def summarise(facts: list[dict]) -> dict:
 
 # ---------------------------------------------------------------- build
 def build(cfg, week: str, client=None, yes: bool = False, wait: bool = False, budget: float | None = None,
-          now: dt.datetime | None = None) -> str:
-    """Advance one week as far as it can go. Returns 'written', 'waiting', 'estimate', 'over_budget' or 'empty'."""
+          now: dt.datetime | None = None, latest_first: bool = False) -> str:
+    """Advance one week as far as it can go. Returns 'written', 'waiting', 'estimate', 'over_budget' or 'empty'.
+    latest_first: screen, judge and fact-check the week's newest stream day on its own first (its answers are cached),
+    so the current day's VOD is done before the rest of the week (hub.py reel, subscription backend)."""
     st = settings(cfg)
     con = public_db(cfg)
     streams = week_streams(con, week)
     if not streams:
         log.info("week %s: no streams in public.db", week)
         return "empty"
+    if latest_first and st["backend"] != "api":
+        day = max(v["upload_date"] for v in streams)
+        first = [v for v in streams if v["upload_date"] == day]
+        if len(first) < len(streams):
+            log.info("week %s: the newest day (%s, %d stream(s)) first", week, day, len(first))
+            r = passes(cfg, st, con, first, week, client, yes, wait, budget)
+            if isinstance(r, str):
+                return r
+    r = passes(cfg, st, con, streams, week, client, yes, wait, budget)
+    if isinstance(r, str):
+        return r
+    judged, checked, screened = r
+    return write_week(cfg, st, con, streams, week, judged, checked, screened, client, yes, wait, budget, now)
 
+
+def sender(cfg, st, week, box, yes, budget):
+    """send(batches) for one build: claude -p on the subscription, or the Batches API (box["client"])."""
     def send(batches: list[tuple[str, list, float]]) -> str | None:
         """batches: (kind, requests, estimated usd). Returns a status to stop with, or None after submitting."""
-        nonlocal client
         todo = [(k, r, u) for k, r, u in batches if r]
         if not todo:
             return None
@@ -970,14 +987,21 @@ def build(cfg, week: str, client=None, yes: bool = False, wait: bool = False, bu
         if budget is not None and usd > budget:
             log.error("week %s: estimate $%.2f is over the $%.2f budget; not submitted", week, usd, budget)
             return "over_budget"
-        client = client or api_client()
+        box["client"] = box["client"] or api_client()
         for kind, reqs, _ in todo:
-            submit(cfg, st, kind, reqs, client)
+            submit(cfg, st, kind, reqs, box["client"])
         return None
+    return send
 
+
+def passes(cfg, st, con, streams, week, client, yes, wait, budget):
+    """Passes 1-3 (screen, judge, fact-check) for these streams. Returns (judged, checked, screened), or a status to stop with."""
+
+    box = {"client": client}
+    send = sender(cfg, st, week, box, yes, budget)
     while True:
-        if client is not None:
-            collect(cfg, client, wait=False)
+        if box["client"] is not None:
+            collect(cfg, box["client"], wait=False)
         need, screened, waiting = screen_requests(cfg, st, con, streams)
         stop = send([("screen", need, estimate(st, need, 600))])
         if stop:
@@ -987,7 +1011,7 @@ def build(cfg, week: str, client=None, yes: bool = False, wait: bool = False, bu
         if need or waiting:
             if not wait:
                 return "waiting"
-            collect(cfg, client, wait=True)
+            collect(cfg, box["client"], wait=True)
             continue
         jneed, judged, jwait = judge_requests(cfg, st, con, streams, candidates(st, screened))
         fneed, checked, fwait = fact_requests(cfg, st, con, streams, claims_from(st, screened))
@@ -1001,15 +1025,21 @@ def build(cfg, week: str, client=None, yes: bool = False, wait: bool = False, bu
         if jneed or fneed or jwait or fwait:
             if not wait:
                 return "waiting"
-            collect(cfg, client, wait=True)
+            collect(cfg, box["client"], wait=True)
             continue
         break
+    return judged, checked, screened
+
+
+def write_week(cfg, st, con, streams, week, judged, checked, screened, client, yes, wait, budget, now):
+    box = {"client": client}
+    send = sender(cfg, st, week, box, yes, budget)
     clips = [c for c in (clip_from(st, *x, con=con) for x in judged) if c]
     clips.sort(key=lambda c: (-c["severity"], {"high": 0, "medium": 1, "low": 2}[c["confidence"]], c["date"], c["start"]))
     clips = clips[: st["max_clips"]]
     while True:                              # pass 4: flag hateful or abusive chat next to each chosen clip
-        if client is not None:
-            collect(cfg, client, wait=False)
+        if box["client"] is not None:
+            collect(cfg, box["client"], wait=False)
         cneed, flagged, cwait = chat_requests(cfg, st, con, clips)
         stop = send([("chat", cneed, estimate(st, cneed, 600))])
         if stop:
@@ -1019,7 +1049,7 @@ def build(cfg, week: str, client=None, yes: bool = False, wait: bool = False, bu
         if cneed or cwait:
             if not wait:
                 return "waiting"
-            collect(cfg, client, wait=True)
+            collect(cfg, box["client"], wait=True)
             continue
         break
     for c in clips:
@@ -1144,6 +1174,8 @@ def status(cfg) -> None:
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("cmd", choices=["auto", "weekly", "build", "status"])
+    ap.add_argument("--latest-first", action="store_true",
+                    help="build: do the week's newest stream day on its own first (the current day's VOD)")
     ap.add_argument("--week", help="build: the Sunday that starts the week, YYYY-MM-DD (default: last finished week)")
     ap.add_argument("--yes", action="store_true", help="build: submit the batches (otherwise only estimate)")
     ap.add_argument("--wait", action="store_true", help="build: wait for the batches instead of returning")
@@ -1163,7 +1195,7 @@ def main():
     if not WEEK_RE.match(week):
         sys.exit("--week must be YYYY-MM-DD")
     client = api_client() if a.yes and settings(cfg)["backend"] == "api" else None
-    print("reel:", build(cfg, week, client=client, yes=a.yes, wait=a.wait))
+    print("reel:", build(cfg, week, client=client, yes=a.yes, wait=a.wait, latest_first=a.latest_first))
     return 0
 
 
