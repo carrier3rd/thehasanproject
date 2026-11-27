@@ -10,6 +10,8 @@ What is backed up: a consistent snapshot of archive.db (SQLite online backup, sa
 transcripts, chat, muted spans, voices, voiceprints, reels and the Claude caches, QA labels, inventory and logs.
 Not backed up: .env and site.env (secrets: keep them in a password manager), audio unless `include_audio` (re-
 downloadable while the VODs exist), public.db and index/ (rebuilt from the archive).
+`backup.extra` adds other folders of the same machine as separately tagged snapshots (each set: tag, paths, exclude);
+on the PC it holds ~/socialscope_data (config.local.yaml there).
 Repositories are listed in config `backup.repos` (set in the private repo's config.yaml). Everything is encrypted with
 the password in `backup.password_file`. **Without that password the backups cannot be read: keep a copy of it
 somewhere other than this laptop.**
@@ -33,7 +35,10 @@ from common import P, get_logger, load_config, make_dirs, try_lock  # noqa: F401
 log = get_logger("backup")
 DEFAULTS = {"repos": [], "password_file": "~/.config/vod-archive/restic-password", "include_audio": False,
             "every_hours": 24, "keep_daily": 7, "keep_weekly": 8, "keep_monthly": 12, "check_every_days": 7,
-            "prune_every_days": 7}
+            "prune_every_days": 7,
+            # other folders on the same machine, each backed up as its own snapshot with its own tag in the same
+            # repositories (added Nov 26 2026 for ~/socialscope_data on the PC): [{tag, paths: [...], exclude: [...]}]
+            "extra": []}
 
 
 def settings(cfg: dict) -> dict:
@@ -195,8 +200,31 @@ def run(cfg, force: bool = False, now: float | None = None) -> str:
                                 if l.startswith("{") and '"message_type":"summary"' in l.replace(" ", "")), {})
                 keep = ["--keep-daily", str(bst["keep_daily"]), "--keep-weekly", str(bst["keep_weekly"]),
                         "--keep-monthly", str(bst["keep_monthly"])]
+                extra_failed = []
+                for ex in bst["extra"]:           # one failing extra set doesn't stop the others or the archive's
+                    xs = rs.setdefault("extra", {}).setdefault(ex["tag"], {})
+                    xpaths = [os.path.expanduser(p) for p in ex.get("paths", []) if os.path.exists(os.path.expanduser(p))]
+                    if not xpaths:
+                        xs.update(error="none of its paths exist", last_error=now)
+                        extra_failed.append(ex["tag"])
+                        continue
+                    xargs = [a for pat in ex.get("exclude", []) for a in ("--exclude", pat)]
+                    try:
+                        xr = restic(bst, repo, "backup", "--json", "--tag", ex["tag"], *xargs, *xpaths)
+                        xsum = next((json.loads(l) for l in reversed(xr.stdout.splitlines())
+                                     if l.startswith("{") and '"message_type":"summary"' in l.replace(" ", "")), {})
+                        xs.update(last_ok=now, error=None, snapshot=xsum.get("snapshot_id"), files=xsum.get("total_files_processed"),
+                                  added_bytes=xsum.get("data_added"), total_bytes=xsum.get("total_bytes_processed"))
+                        log.info("%s [%s]: backed up %s files, %.1f MB new", repo, ex["tag"], xsum.get("total_files_processed"),
+                                 (xsum.get("data_added") or 0) / 1e6)
+                    except Exception as e:
+                        xs.update(error=str(e)[-400:], last_error=now)
+                        extra_failed.append(ex["tag"])
+                        log.error("%s [%s]: %s", repo, ex["tag"], e)
                 if now - rs.get("last_prune", 0) > bst["prune_every_days"] * 86400:
                     restic(bst, repo, "forget", "--tag", "vod-archive", *keep, "--prune")
+                    for ex in bst["extra"]:
+                        restic(bst, repo, "forget", "--tag", ex["tag"], *keep, "--prune")
                     rs["last_prune"] = now
                 if now - rs.get("last_check", 0) > bst["check_every_days"] * 86400:
                     restic(bst, repo, "check", "--read-data-subset", "5%")
@@ -204,7 +232,7 @@ def run(cfg, force: bool = False, now: float | None = None) -> str:
                 rs.update(last_ok=now, error=None, seconds=round(time.time() - t0),
                           snapshot=summary.get("snapshot_id"), added_bytes=summary.get("data_added"),
                           total_bytes=summary.get("total_bytes_processed"), files=summary.get("total_files_processed"))
-                results[repo] = "ok"
+                results[repo] = "partial" if extra_failed else "ok"   # partial: retried at the next hourly run
                 log.info("%s: backed up %s files, %.1f MB new, in %ds", repo, summary.get("total_files_processed"),
                          (summary.get("data_added") or 0) / 1e6, rs["seconds"])
             except Exception as e:          # one destination failing must not stop the others
@@ -218,7 +246,9 @@ def run(cfg, force: bool = False, now: float | None = None) -> str:
         st["last_ok"] = now
     st["last_run"], st["warning"] = now, None
     write_status(cfg, st)
-    return "ok" if all(v == "ok" for v in results.values()) else ("partial" if "ok" in results.values() else "failed")
+    if all(v == "ok" for v in results.values()):
+        return "ok"
+    return "partial" if any(v in ("ok", "partial") for v in results.values()) else "failed"
 
 
 def status(cfg) -> int:
@@ -233,6 +263,9 @@ def status(cfg) -> int:
         print(f"{repo}: last ok {age(rs.get('last_ok'))}, {rs.get('files')} files, "
               f"{(rs.get('total_bytes') or 0) / 1e9:.2f} GB, last check {age(rs.get('last_check'))}"
               + (f"\n  LAST ERROR: {rs['error']}" if rs.get("error") else ""))
+        for tag, xs in rs.get("extra", {}).items():
+            print(f"  [{tag}] last ok {age(xs.get('last_ok'))}, {xs.get('files')} files, "
+                  f"{(xs.get('total_bytes') or 0) / 1e9:.2f} GB" + (f"\n  LAST ERROR: {xs['error']}" if xs.get("error") else ""))
     return 0
 
 
