@@ -41,7 +41,12 @@ OLDER = ROOT / "older"
 PY = ROOT / ".venv" / "Scripts" / "python.exe"
 YTDLP = ROOT / ".venv" / "Scripts" / "yt-dlp.exe"
 STOP_FILE = LOGS / "STOP"
-HUB = Path.home() / "projects" / "hasan-hub"  # the archive's main copy since Nov 26 2026 (was the laptop, over ssh)
+# Where the archive's main copy lives (the hub: win/hub.py there). Since Nov 27 2026 that is the server laptop, reached
+# over ssh (alias "server" in ~/.ssh/config, Tailscale). VOD_HUB_HOST="" means the hub folder is on this machine.
+HUB_HOST = os.environ.get("VOD_HUB_HOST", "server")
+HUB_REL = os.environ.get("VOD_HUB_REL", "projects/hasan-hub")   # the hub folder, relative to the hub user's home
+HUB = Path.home() / HUB_REL                                     # local mode only
+SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", HUB_HOST]
 OLDER_N = 181  # owner approved the newest 181 no-caption videos (2026-11-12); more need a new OK
 AHEAD = 30  # the downloader keeps at most this many audio files waiting
 HOT = int(os.environ.get("HOT", 85))
@@ -125,40 +130,86 @@ def transcribe(vid: str, logname: str) -> bool:
 
 
 # ---------------------------------------------------------------- backfill (the hub's pending VODs)
-# Until Nov 26 2026 this copied audio from the laptop over ssh and the transcripts back; since then the archive's main
-# copy is the hub folder on this PC (HUB, win/hub.py there), because the laptop's RAM corrupts data. Same steps, local.
-def copy_down(src: Path, local: Path) -> bool:
+# History: until Nov 26 2026 the hub was the old Ubuntu laptop (ssh); Nov 26-27 it was a folder on this PC; since
+# Nov 27 it is the Windows server laptop, again over ssh (HUB_HOST). All paths below are relative to the hub folder,
+# with forward slashes. With VOD_HUB_HOST="" the same steps work on a local hub folder (HUB).
+def _win(rel: str) -> str:
+    return rel.replace("/", "\\")
+
+
+def hub_cmd(cmd: str, stdin: str | None = None, timeout: int = 300) -> subprocess.CompletedProcess:
+    """Run a cmd.exe command inside the hub folder on the hub machine."""
+    return run(SSH + [f"cd /d %USERPROFILE%\\{_win(HUB_REL)} && {cmd}"], input=stdin, timeout=timeout)
+
+
+def hub_exists(rel: str) -> bool:
+    if not HUB_HOST:
+        return (HUB / rel).exists()
+    return "yes" in hub_cmd(f'if exist "{_win(rel)}" (echo yes) else (echo no)').stdout
+
+
+def copy_down(rel: str, local: Path) -> bool:
+    """Copy a hub file here (to a .part name first)."""
     part = local.with_name(local.name + ".part")
-    try:
-        shutil.copyfile(src, part)
-    except OSError:
+    if HUB_HOST:
+        ok = run(["scp", "-q", "-o", "BatchMode=yes", f"{HUB_HOST}:{HUB_REL}/{rel}", str(part)], timeout=3600).returncode == 0
+    else:
+        try:
+            shutil.copyfile(HUB / rel, part)
+            ok = True
+        except OSError:
+            ok = False
+    if ok:
+        part.replace(local)
+    else:
         part.unlink(missing_ok=True)
-        return False
-    part.replace(local)
-    return True
+    return ok
 
 
-def copy_up_new(local: Path, dest_dir: Path) -> bool:
+def copy_up_new(local: Path, rel_dir: str) -> bool:
     """Copy into the hub unless a file of that name is already there (never overwrite: it may have been re-labelled)."""
-    dest = dest_dir / local.name
-    if dest.exists():
+    rel = f"{rel_dir}/{local.name}"
+    if hub_exists(rel):
         return True
-    tmp = dest_dir / f".{local.name}.part"
+    tmp = f"{rel_dir}/.{local.name}.part"
+    if HUB_HOST:
+        if run(["scp", "-q", "-o", "BatchMode=yes", str(local), f"{HUB_HOST}:{HUB_REL}/{tmp}"], timeout=3600).returncode != 0:
+            return False
+        hub_cmd(f'if exist "{_win(rel)}" (del "{_win(tmp)}") else (move /Y "{_win(tmp)}" "{_win(rel)}" >nul)')
+        return hub_exists(rel)
     try:
-        shutil.copyfile(local, tmp)
-        if dest.exists():                       # appeared meanwhile: keep that one
-            tmp.unlink()
+        shutil.copyfile(local, HUB / tmp)
+        if (HUB / rel).exists():                # appeared meanwhile: keep that one
+            (HUB / tmp).unlink()
         else:
-            tmp.replace(dest)
+            (HUB / tmp).replace(HUB / rel)
     except OSError:
-        tmp.unlink(missing_ok=True)
+        (HUB / tmp).unlink(missing_ok=True)
         return False
     return True
+
+
+def hub_append_line(rel: str, line: str) -> None:
+    """Append one line to a hub text file unless it is already there (process_times.tsv)."""
+    if HUB_HOST:
+        # no double quotes inside: the whole thing is one double-quoted cmd.exe argument
+        ps = ("$l = [Console]::In.ReadToEnd().Trim(); $f = '" + _win(rel) + "'; "
+              "if (-not ((Test-Path $f) -and (Select-String -Path $f -SimpleMatch $l -Quiet))) { Add-Content -Path $f -Value $l }")
+        hub_cmd(f'powershell -NoProfile -Command "{ps}"', stdin=line)
+        return
+    f = HUB / rel
+    have = f.read_text(encoding="utf-8").splitlines() if f.exists() else []
+    if line not in have:
+        with open(f, "a", encoding="utf-8", newline="\n") as fh:
+            fh.write(line + "\n")
 
 
 def hub_pending() -> list[str] | None:
     """Livestream VODs in the hub with audio but no transcript yet, newest first (None if pending.py failed)."""
-    r = run([str(HUB / ".venv" / "Scripts" / "python.exe"), "pipeline/pending.py"], cwd=HUB, timeout=300)
+    if HUB_HOST:
+        r = hub_cmd(r".venv\Scripts\python.exe pipeline\pending.py")
+    else:
+        r = run([str(HUB / ".venv" / "Scripts" / "python.exe"), "pipeline/pending.py"], cwd=HUB, timeout=300)
     if r.returncode != 0:
         return None
     return sorted({m[:-5] for m in re.findall(r"v[0-9]+\.opus", r.stdout)}, reverse=True)
@@ -174,26 +225,25 @@ def backfill() -> None:
         (DATA / d).mkdir(parents=True, exist_ok=True)
     ids = hub_pending()
     if ids is None:
-        say(f"pending.py failed in {HUB}; skipping backfill")
+        say(f"pending.py failed on the hub ({HUB_HOST or HUB}); skipping backfill")
         return
     if not ids:
         say("nothing pending")
         return
     say(f"windows backfill: {len(ids)} VOD(s) pending: {' '.join(ids)}")
-    hub_data = HUB / "data"
     for vid in ids:
         if stop.is_set():
             return
-        if (hub_data / "transcripts" / f"{vid}.json").exists():
+        if hub_exists(f"data/transcripts/{vid}.json"):
             say(f"{vid} already in the hub, skipping")
             continue
         audio = DATA / "audio" / f"{vid}.opus"
-        if not audio.exists() and not copy_down(hub_data / "audio" / f"{vid}.opus", audio):
+        if not audio.exists() and not copy_down(f"data/audio/{vid}.opus", audio):
             say(f"could not copy {vid} audio")
             return
         muted = DATA / "muted" / f"{vid}.json"
-        if not muted.exists() and (hub_data / "muted" / f"{vid}.json").exists():
-            copy_down(hub_data / "muted" / f"{vid}.json", muted)
+        if not muted.exists() and hub_exists(f"data/muted/{vid}.json"):
+            copy_down(f"data/muted/{vid}.json", muted)
         mins = duration_min(audio)
         est = mins * 10 // 125
         state.update(job="backfill", vod=vid, started=time.time(), est_min=est)
@@ -201,21 +251,17 @@ def backfill() -> None:
         if not transcribe(vid, "pc-process.log"):
             say(f"{vid} stopped by the runner" if stop.is_set() else f"{vid} FAILED (see logs/pc-process.log); stopping")
             return
-        tdir = hub_data / "transcripts"
         emb = DATA / "transcripts" / f"{vid}.emb.npz"
         if emb.exists():
-            copy_up_new(emb, tdir)
-        if not copy_up_new(DATA / "transcripts" / f"{vid}.json", tdir):
+            copy_up_new(emb, "data/transcripts")
+        if not copy_up_new(DATA / "transcripts" / f"{vid}.json", "data/transcripts"):
             say(f"{vid} transcribed but could not be copied into the hub; stopping")
             return
         times = LOGS / "process_times.tsv"
         if times.exists():
             lines = [l for l in times.read_text(encoding="utf-8").splitlines() if l.startswith(vid + "\t")]
-            hub_times = HUB / "logs" / "process_times.tsv"
-            have = hub_times.read_text(encoding="utf-8").splitlines() if hub_times.exists() else []
-            if lines and lines[-1] not in have:
-                with open(hub_times, "a", encoding="utf-8", newline="\n") as f:
-                    f.write(lines[-1] + "\n")
+            if lines:
+                hub_append_line("logs/process_times.tsv", lines[-1])
         say(f"{vid} done and in the hub")
         audio.unlink(missing_ok=True)
     say("backfill finished")
