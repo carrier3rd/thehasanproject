@@ -224,3 +224,14 @@ def test_every_stream_report_lists_every_reel_fact_check(apps, project):
     assert {x["id"] for x in r["items"]} == {"f-2026-11-15-0", "f-2026-11-15-1", "f-2026-11-22-0"}
     assert r["counts"]["false"] == 1 and r["counts"]["misleading"] == 1 and r["counts"]["accurate"] == 1
     assert r["period"] == "weeks of 2026-11-15 to 2026-11-22"
+
+
+def test_status_reports_what_is_current(apps, project):
+    pub, _ = apps
+    st = pub.get("/api/status").json()
+    assert st["newest_stream"]["upload_date"] and st["published"]
+    keys = {x["key"]: x for x in st["items"]}
+    assert keys["streams"]["state"] == "current" and keys["streams"]["through"] == st["newest_stream"]["upload_date"]
+    assert all(x["state"] in ("current", "working", "snapshot") for x in st["items"])
+    assert st["behind"] == sum(1 for x in st["items"] if x["state"] == "working")
+    assert pub.get("/about.html").status_code == 200

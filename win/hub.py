@@ -12,6 +12,9 @@ The laptop keeps its copy of the data as it was on Nov 26 and runs nothing for t
   python win/hub.py reel            fact-checks + reel for the week in progress, so every new stream is screened and
                                     fact-checked soon after it is published, the newest day first (level 3.5)
   python win/hub.py reel-backfill   reel.py weekly: the finished week, then one earlier week (level 4)
+  python win/hub.py chatflags       the chat check behind the weekly trophies, newest stream first, then its second review
+  python win/hub.py reddit          the weekly Reddit pull for Spotlight
+  python win/hub.py update          git pull; restart the site when its code changed, re-register tasks when they changed
 
 The site reads public.db, index/ and features/ from this folder: a fresh read-only connection per request, and the
 search index reloads itself when its files change, so a publish needs no restart (common.replace_file waits out the
@@ -97,7 +100,7 @@ def downloads() -> None:
 # A job pauses every running job below it that competes for the same resources (memory, GPU). Today the only one
 # that can be paused is transcription; Reddit pulls only use the network, so they leave it running. The Windows
 # tasks' CPU priority follows the level too (Task Scheduler priority 4 / 6 / 7 / 9).
-LEVELS = {"publish": 1, "backup": 2, "features": 2, "reddit": 3, "reel": 3.5, "transcription": 4,
+LEVELS = {"publish": 1, "backup": 2, "features": 2, "reddit": 3, "reel": 3.5, "chatflags": 3.5, "transcription": 4,
           "reel-backfill": 4}
 RUNNER = Path.home() / "vod-archive"
 RUNNER_TASK = "VOD transcription run now"
@@ -182,6 +185,54 @@ def reel_backfill() -> int:
     return 0 if step("pipeline/reel.py", "weekly") else 1
 
 
+def chatflags() -> int:
+    """The archive-wide chat check (weekly trophies): newest stream day first, then the stricter second review of the
+    messages that could count. claude -p on the subscription; cached; a usage limit stops it until the next run."""
+    ok = step("pipeline/chatflags.py", "run")
+    return 0 if step("pipeline/chatflags.py", "verify") and ok else 1
+
+
+def reddit() -> int:
+    return 0 if step("pipeline/reddit_pull.py") else 1
+
+
+def git(*args: str) -> str:
+    r = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, timeout=300)
+    if r.returncode != 0:
+        raise RuntimeError(f"git {' '.join(args)}: {r.stderr.strip() or r.stdout.strip()}")
+    return r.stdout.strip()
+
+
+def update() -> int:
+    """What the old laptop's vod-update.timer did: pull the code, and restart only what the pull changed. Static pages
+    need nothing (served from disk per request). Server code (pipeline/, web/, admin/): the site and admin daemons
+    are ended and keep_running starts them again within seconds. win/*.ps1: the tasks are registered again."""
+    old = git("rev-parse", "HEAD")
+    git("pull", "-q", "--ff-only")
+    new = git("rev-parse", "HEAD")
+    if new == old:
+        return 0
+    changed = git("diff", "--name-only", old, new).splitlines()
+    say(f"updated {old[:7]} -> {new[:7]}: {len(changed)} file(s)")
+    ps = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass"]
+    code = [f for f in changed if f.endswith(".py") and f.split("/")[0] in ("pipeline", "web", "admin")]
+    if code:
+        say("restarting the site and the admin app (their code changed)")
+        subprocess.run(ps + ["-Command", "Get-CimInstance Win32_Process | ? { $_.CommandLine -match 'uvicorn' } | "
+                             "% { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"], timeout=120)
+    if "pipeline/chat_logger.py" in changed:
+        say("restarting the chat logger (its code changed)")
+        subprocess.run(ps + ["-Command", "Get-CimInstance Win32_Process | ? { $_.CommandLine -match 'chat_logger[.]py' "
+                             "-and $_.CommandLine -notmatch 'keep_running' } | % { Stop-Process -Id $_.ProcessId -Force "
+                             "-ErrorAction SilentlyContinue }"], timeout=120)
+    if any(f in ("win/tasks.ps1", "win/tasklib.ps1") for f in changed):
+        say("registering the scheduled tasks again (win/tasks.ps1 changed)")
+        r = subprocess.run(ps + ["-File", str(ROOT / "win" / "tasks.ps1"), "-Server"], capture_output=True, text=True,
+                           timeout=300)
+        say(r.stdout.strip() or r.stderr.strip())
+    return 0
+
+
 def publish(st: dict, sig: str) -> int:
     step("pipeline/align_chat.py")
     step("pipeline/build_db.py")
@@ -217,12 +268,19 @@ def run(force: bool) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["run", "features", "reel", "reel-backfill"])
+    ap.add_argument("cmd", choices=["run", "features", "reel", "reel-backfill", "chatflags", "reddit", "update"])
     ap.add_argument("--force", action="store_true", help="rebuild and publish even if no files changed")
     a = ap.parse_args()
+    if a.cmd == "update":                   # every 10 minutes: only speaks when something changed
+        try:
+            return update()
+        except Exception as e:
+            say(f"!!! update: {e}")
+            return 1
     say(f"=== hub {a.cmd} start")
     try:
-        rc = {"features": features, "reel": reel, "reel-backfill": reel_backfill}.get(a.cmd, lambda: run(a.force))()
+        rc = {"features": features, "reel": reel, "reel-backfill": reel_backfill, "chatflags": chatflags, "reddit": reddit,
+              "update": update}.get(a.cmd, lambda: run(a.force))()
     except Exception as e:
         say(f"!!! {e}")
         rc = 1

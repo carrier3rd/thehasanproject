@@ -24,6 +24,11 @@ function fmtTime(s) {
   return `${p(Math.floor(s / 3600))}:${p(Math.floor(s / 60) % 60)}:${p(s % 60)}`;
 }
 function fmtDate(d) { return d && d.length === 8 ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6)}` : (d || ''); }
+// "2026-11-27T04:08:52" -> "Nov 27, 4:08 AM" (the server's local time)
+function fmtWhen(iso) {
+  const d = iso ? new Date(iso) : null;
+  return d && !isNaN(d) ? d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—';
+}
 function watchUrl(id, t) { return `watch.html?v=${encodeURIComponent(id)}&t=${Math.floor(t || 0)}`; }
 
 // "[[hit]] text" -> text nodes and <mark> elements
@@ -153,7 +158,14 @@ async function chrome(active) {
     cfg.mode === 'admin' ? el('span', { class: 'badge', text: 'ADMIN · private' }) : null));
   const cur = document.querySelector('.mainnav [aria-current]');
   if (cur) requestAnimationFrame(() => cur.scrollIntoView({ block: 'nearest', inline: 'center' }));
-  document.body.append(el('footer', { text: 'Transcripts and speaker labels are machine-generated and may contain errors. ' +
-    'The linked video is the authoritative record.' }));
+  const fresh = el('div', { class: 'fresh' });
+  document.body.append(el('footer', {}, 'Transcripts and speaker labels are machine-generated and may contain errors. ' +
+    'The linked video is the authoritative record.', fresh));
+  // what the site is current through, worked out live by /api/status (never blocks the page)
+  api('/api/status').then(st => {
+    if (!st.newest_stream) return;
+    fresh.replaceChildren(`Newest stream: ${fmtDate(st.newest_stream.upload_date)} · published ${fmtWhen(st.published)} · `,
+      el('a', { href: 'about.html#status', text: st.behind ? `${st.behind} section${st.behind === 1 ? '' : 's'} catching up` : 'everything is current' }));
+  }).catch(() => {});
   return cfg;
 }

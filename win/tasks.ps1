@@ -24,7 +24,11 @@ $Jobs = @(
   # earlier weeks of the reel, level 4 (same as transcription)
   @("VOD reel backfill", @("win\hub.py", "reel-backfill"), (New-ScheduledTaskTrigger -Daily -At 11:30), 9, 8),
   # posts and comments of the broad subs for the blindspot feature
-  @("VOD reddit pull",  @("pipeline\reddit_pull.py"),       (New-ScheduledTaskTrigger -Weekly -DaysOfWeek Tuesday -At 23:00), 7, 6)
+  @("VOD reddit pull",  @("win\hub.py", "reddit"),          (New-ScheduledTaskTrigger -Weekly -DaysOfWeek Tuesday -At 23:00), 7, 6),
+  # the chat check behind the weekly trophies, newest stream first (level 3.5; claude -p on the subscription)
+  @("VOD chatflags",    @("win\hub.py", "chatflags"),       (New-ScheduledTaskTrigger -Daily -At 01:30), 8, 6),
+  # git pull every 10 minutes; restarts the site only when its code changed (the old laptop's vod-update.timer)
+  @("VOD update",       @("win\hub.py", "update"),          (Every-Minutes 10 5), 4, 0.25)
 )
 
 foreach ($j in $Jobs) {

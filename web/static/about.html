@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>About · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112701"></head>
+<title>About · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112702"></head>
 <body><main>
   <h1>About this archive</h1>
   <p>This is an unofficial, searchable archive of one streamer's past broadcasts. Each stream has a machine-generated
@@ -16,11 +16,25 @@
      granted. If you live in the EU or UK, or anywhere else data-protection law gives you a right to have your data
      erased, say so in your request; those requests are handled under that law. Removed messages, under your current
      and previous names, are excluded the next time the site is rebuilt, normally within a day.</p>
+  <h2 id="status">What is current</h2>
+  <p>The site updates itself: new streams are picked up every hour, fact-checked the same day, and the other sections
+    are rebuilt every night. This table is worked out live.</p>
+  <div id="statusbox"><div class="note">Loading…</div></div>
   <h2>Corrections and takedown requests</h2>
   <p id="contact">Contact address not configured.</p>
 </main>
-<script src="common.js?v=2026112506"></script>
+<script src="common.js?v=2026112702"></script>
 <script>
+const STATE = { current: 'Current', working: 'Catching up', snapshot: 'One-off report' };
+api('/api/status').then(st => {
+  $('#statusbox').replaceChildren(el('table', { class: 'status' },
+    el('thead', {}, el('tr', {}, ...['Section', 'Status', 'Covers streams through', 'Last updated', ''].map(t => el('th', { text: t })))),
+    el('tbody', {}, ...st.items.map(x => el('tr', {},
+      el('td', {}, el('a', { href: x.page, text: x.label })),
+      el('td', {}, el('span', { class: 'st st-' + x.state, text: STATE[x.state] || x.state })),
+      el('td', { text: x.through ? fmtDate(x.through) : '—' }), el('td', { text: fmtWhen(x.updated) }),
+      el('td', { class: 'note small', text: x.note || '' }))))));
+}).catch(e => $('#statusbox').replaceChildren(el('div', { class: 'note', text: 'Could not load the status: ' + e.message })));
 chrome('about.html').then(cfg => {
   if (cfg.contact_email) $('#contact').replaceChildren('For removal requests, corrections or takedown requests, write to ',
     el('a', { href: 'mailto:' + cfg.contact_email, text: cfg.contact_email }), '.');

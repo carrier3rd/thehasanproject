@@ -684,6 +684,86 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
                        | {"checked": len(every["items"])})
         return {"reports": out}
 
+    @app.get("/api/status")
+    def status():
+        """What every part of the site is current through, worked out live from the files the jobs write, so nothing
+        here can itself go stale. state: current (covers the newest stream), working (a job is catching up), or
+        snapshot (made once, not refreshed). Shown in every page's footer and on the About page."""
+        def mtime(p) -> str | None:
+            try:
+                return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(Path(p).stat().st_mtime))
+            except OSError:
+                return None
+
+        def item(key, label, page, updated, through, state, note=""):
+            return {"key": key, "label": label, "page": page, "updated": updated, "through": through, "state": state,
+                    "note": note}
+
+        con = db()
+        try:
+            row = con.execute("SELECT id, title, upload_date FROM videos ORDER BY upload_date DESC, id DESC LIMIT 1").fetchone()
+            n_streams = con.execute("SELECT count(*) FROM videos").fetchone()[0]
+        finally:
+            con.close()
+        newest = row["upload_date"] if row else None
+        state = lambda through: "current" if through and newest and through >= newest else "working"
+        published = mtime(db_path)
+        items = [item("streams", "Streams, transcripts and search", "videos.html", published, newest, "current",
+                      f"{n_streams} streams")]
+        try:
+            latest = json.loads((feat_dir / "latest.json").read_text(encoding="utf-8"))
+            items.append(item("latest", "Home page: latest stream", "/", mtime(feat_dir / "latest.json"),
+                              latest.get("upload_date"), state(latest.get("upload_date"))))
+        except (OSError, ValueError, TypeError):
+            items.append(item("latest", "Home page: latest stream", "/", None, None, "working"))
+        reel, files = None, sorted(reels.glob("????-??-??.json"), reverse=True) if reels is not None and reels.is_dir() else []
+        for p in files:
+            reel = load_reel(p.stem)
+            if reel:
+                break
+        if reel:
+            through = max((v.get("date") or "" for v in reel.get("streams", [])), default=None)
+            n = len(reel.get("fact_checks") or [])
+            updated = mtime(reels / f"{reel['week']}.json")
+            items.append(item("weekly", "Weekly: clips and chat", "reel.html", updated, through, state(through),
+                              f"week of {reel['week']}, {len(reel.get('clips') or [])} clips"))
+            items.append(item("factchecks", "Fact-checks: every stream", "factchecks.html", updated, through,
+                              state(through), f"{n} checked in the week of {reel['week']}"))
+        else:
+            items.append(item("weekly", "Weekly: clips and chat", "reel.html", None, None, "working"))
+        try:                                    # the chat check works newest day first: what is left is the backlog
+            fcon = sqlite3.connect(f"file:{flags_db}?mode=ro", uri=True)
+            try:
+                left, oldest = fcon.execute(
+                    "SELECT count(*), max(day) FROM cands WHERE fp NOT IN (SELECT fp FROM checked) "
+                    "AND fp NOT IN (SELECT fp FROM failed)").fetchone()
+                through = fcon.execute("SELECT max(day) FROM cands").fetchone()[0]
+            finally:
+                fcon.close()
+            done = not left or (newest and oldest and oldest < chatflags.week_days(chatflags.week_of(newest))[0])
+            items.append(item("chat", "Weekly trophies: chat check", "reel.html?view=trophies", mtime(flags_db),
+                              through if not left else None, "current" if done and state(through) == "current" else "working",
+                              f"{left:,} messages still to check" if left else "all chat checked"))
+        except (sqlite3.Error, OSError, ValueError, AttributeError):
+            pass
+        if feat_dir is not None:
+            for key, label, page, name in (("spotlight", "Spotlight", "spotlight.html", "stories.json"),
+                                           ("chatvs", "Chat vs Hasan", "chatvs.html", "chatvs.json"),
+                                           ("receipts", "Receipts", "receipts.html", "receipts.json"),
+                                           ("quiz", "Quiz", "quiz.html", "quiz.json")):
+                up = mtime(feat_dir / name)             # rebuilt nightly: current once built after the last publish
+                items.append(item(key, label, page, up, newest if up and published and up >= published else None,
+                                  "current" if up and published and up >= published else "working"))
+        if reports is not None and reports.is_dir():
+            for p in sorted(reports.glob("*.json")):
+                r = load_report(p.stem)
+                if r:
+                    items.append(item(f"report-{r['id']}", f"Fact-checks: {r['title']}", f"factchecks.html?r={r['id']}",
+                                      r.get("checked_on"), None, "snapshot", r.get("period") or ""))
+        return JSONResponse({"newest_stream": dict(row) if row else None, "published": published, "items": items,
+                             "behind": sum(1 for x in items if x["state"] == "working")},
+                            headers={"Cache-Control": "no-cache"})
+
     @app.get("/api/reports/{rid}")
     def report(rid: str):
         r = load_report(rid)

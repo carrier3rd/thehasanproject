@@ -128,8 +128,9 @@ UNCHECKED = "SELECT {} FROM cands WHERE fp NOT IN (SELECT fp FROM checked) AND f
 
 
 def candidates(con: sqlite3.Connection, pub: sqlite3.Connection, limit: int) -> list[dict]:
-    """The next unchecked candidates, oldest stream first, with their text as published now (fingerprint matched)."""
-    want = dict(con.execute(UNCHECKED.format("id, fp") + " ORDER BY day, video_id, id LIMIT ?", (limit,)))
+    """The next unchecked candidates, newest stream day first (the current week's trophies fill in before the
+    backlog), with their text as published now (fingerprint matched)."""
+    want = dict(con.execute(UNCHECKED.format("id, fp") + " ORDER BY day DESC, video_id, id LIMIT ?", (limit,)))
     ids = list(want)
     out = {}
     for i in range(0, len(ids), 900):
@@ -397,7 +398,7 @@ def trophies(flags_db: Path, pub: sqlite3.Connection, week: str, st: dict | None
     st = {**DEFAULTS, **(st or {})}
     lo, hi = week_days(week)
     empty = {"week": week, "antisemitism": [], "hateful": [], "streamers": [], "checked_through": None,
-             "min": st["trophy_min"], "pending_review": 0}
+             "unchecked": None, "min": st["trophy_min"], "pending_review": 0}
     if not Path(flags_db).exists():
         return empty
     fcon = sqlite3.connect(f"file:{flags_db}?mode=ro", uri=True)
@@ -405,6 +406,11 @@ def trophies(flags_db: Path, pub: sqlite3.Connection, week: str, st: dict | None
     try:
         flags = [dict(r) for r in fcon.execute("SELECT * FROM flags WHERE day BETWEEN ? AND ?", (lo, hi))]
         empty["checked_through"] = fcon.execute("SELECT max(day) FROM flags").fetchone()[0]
+        # candidates of this week the first pass has not judged yet (checked newest day first, so a week is either
+        # being worked on or done); None when the week has no scanned chat
+        n, left = fcon.execute("SELECT count(*), sum(fp NOT IN (SELECT fp FROM checked) AND fp NOT IN (SELECT fp FROM "
+                               "failed)) FROM cands WHERE day BETWEEN ? AND ?", (lo, hi)).fetchone()
+        empty["unchecked"] = (left or 0) if n else None
         has = fcon.execute("SELECT 1 FROM sqlite_master WHERE name='verified'").fetchone()
         verdicts = {r["fp"]: dict(r) for r in fcon.execute("SELECT * FROM verified")} if has else {}
     finally:

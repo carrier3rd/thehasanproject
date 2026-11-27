@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Weekly reel · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112701"></head>
+<title>Weekly reel · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112702"></head>
 <body><main class="reel">
   <h1 class="sr-only">Weekly reel</h1>
   <p class="intro">Each week, Claude reads every line of every stream and picks the moments worth a look, with the chat at the time and fact-checks of his claims.</p>
@@ -58,7 +58,7 @@
   <p class="note small">Picked and written by Claude (AI) from machine-made transcripts, counting only Hasan's own words.
     Watch the moment before relying on it.</p>
 </main>
-<script src="common.js?v=2026112506"></script>
+<script src="common.js?v=2026112702"></script>
 <script>
 let lastNow = 0;
 let cfg, reel = null, idx = 0, clip = null, player = null, chat = [], playing = false, sim = null, mounting = 0;
@@ -483,7 +483,9 @@ async function renderTrophies() {
         'Each message was flagged by one Claude pass and confirmed by a second, stricter one that saw it in context; ' +
         'Nazi/Holocaust comparisons are not counted. AI labels can still be wrong: read the messages. '),
       contact ? el('a', { href: `mailto:${contact}?subject=${encodeURIComponent('Trophy error, week of ' + week)}`, text: 'Report a mistake' }) : null,
-      t.checked_through ? document.createTextNode(` · Chat checked through ${fmtDate(t.checked_through)}.`) : null,
+      t.unchecked == null ? null : document.createTextNode(t.unchecked > 0
+        ? ` · Chat check in progress: ${t.unchecked.toLocaleString()} message${t.unchecked === 1 ? '' : 's'} of this week still to check.`
+        : ' · All of this week’s chat has been checked.'),
       t.pending_review ? document.createTextNode(` · ${t.pending_review} chatter${t.pending_review === 1 ? '' : 's'} awaiting the second review.`) : null),
     podium('Most antisemitic chatter', 'Antisemitism only: slurs for Jews, tropes, Holocaust denial or mockery, hostility to Jews as Jews.', t.antisemitism),
     podium('Most hateful chatter', 'Any kind: slurs, antisemitism, racism and bigotry, dehumanizing language, threats, harassment.', t.hateful),

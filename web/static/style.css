@@ -433,3 +433,14 @@ a.fcard:hover { text-decoration:none; border-color:var(--accent); }
 table.attn { font-size:14px; margin:8px 0; } table.attn th[scope=row] { font-weight:600; }
 table.attn td { vertical-align:top; } table.attn .linkish { font-size:14px; min-height:24px; }
 @media (max-width: 640px) { table.attn { font-size:13px; } table.attn th, table.attn td { padding:6px 4px; } }
+
+/* what the site is current through (footer line on every page, table on the About page) */
+footer .fresh { margin-top:4px; font-size:13px; color:var(--muted); }
+table.status { width:100%; border-collapse:collapse; font-size:14px; margin:8px 0 16px; }
+table.status th, table.status td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+.st { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; font-weight:600; border:1px solid var(--line); white-space:nowrap; }
+.st-current { color:#1a7f37; border-color:#1a7f37; }
+.st-working { color:#9a6700; border-color:#9a6700; }
+.st-snapshot { color:var(--muted); }
+@media (max-width:640px) { table.status th:nth-child(5), table.status td:nth-child(5) { display:none; } }
+body:has(main.watch) footer .fresh { display:none; }
