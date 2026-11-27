@@ -9,8 +9,9 @@ The laptop keeps its copy of the data as it was on Nov 26 and runs nothing for t
 
   python win/hub.py run [--force]   download new streams, then rebuild and publish when something new arrived
   python win/hub.py features        the nightly features job (Spotlight, Chat vs Hasan, Receipts, quiz)
-  python win/hub.py reel            weekly reel + fact-checks: the finished week (and one earlier week), then the
-                                    week in progress, so every new stream is screened and fact-checked within the hour
+  python win/hub.py reel            fact-checks + reel for the week in progress, so every new stream is screened and
+                                    fact-checked soon after it is published (level 3)
+  python win/hub.py reel-backfill   reel.py weekly: the finished week, then one earlier week (level 4)
 
 The site reads public.db, index/ and features/ from this folder: a fresh read-only connection per request, and the
 search index reloads itself when its files change, so a publish needs no restart (common.replace_file waits out the
@@ -90,12 +91,14 @@ def downloads() -> None:
 # ---------------------------------------------------------------- priority levels (owner, 2026-11-26)
 # 1  the owner using the PC (gaming); the site, the live chat logger; publishing a new stream (hourly hub)
 # 2  daily upkeep: the backup, the features job
-# 3  data collection: Reddit pulls (weekly, comments backfill); they resume where they stopped
-# 4  transcription: passive, catches up whenever there is room
+# 3  data collection: Reddit pulls (weekly, comments backfill); they resume where they stopped; fact-checking new
+#    streams (hub.py reel: the week in progress, hourly)
+# 4  transcription: passive, catches up whenever there is room; the reel backfill of earlier weeks (hub.py reel-backfill)
 # A job pauses every running job below it that competes for the same resources (memory, GPU). Today the only one
 # that can be paused is transcription; Reddit pulls only use the network, so they leave it running. The Windows
 # tasks' CPU priority follows the level too (Task Scheduler priority 4 / 6 / 7 / 9).
-LEVELS = {"publish": 1, "backup": 2, "features": 2, "reddit": 3, "transcription": 4}
+LEVELS = {"publish": 1, "backup": 2, "features": 2, "reddit": 3, "reel": 3, "transcription": 4,
+          "reel-backfill": 4}
 RUNNER = Path.home() / "vod-archive"
 RUNNER_TASK = "VOD transcription run now"
 
@@ -165,15 +168,18 @@ def features() -> int:
 
 
 def reel() -> int:
-    """The week in progress first, then reel.py weekly (the finished week, then one backfill week). Every Claude call is
-    claude -p on the subscription, and results are cached per stream window and per claim, so an hour with no new
-    stream sends nothing; a new stream costs only its own requests. Light on memory: no need to pause transcription."""
+    """The week in progress: every new stream screened, judged and fact-checked. Every Claude call is claude -p on the
+    subscription, and results are cached per stream window and per claim, so an hour with no new stream sends nothing.
+    Network only (level 3): it leaves transcription running."""
     import datetime as dt
     today = dt.date.today()
     week = (today - dt.timedelta(days=(today.weekday() + 1) % 7)).isoformat()   # the Sunday that starts this week
-    ok = step("pipeline/reel.py", "build", "--week", week, "--yes")          # new streams first
-    ok = step("pipeline/reel.py", "weekly") and ok
-    return 0 if ok else 1
+    return 0 if step("pipeline/reel.py", "build", "--week", week, "--yes") else 1
+
+
+def reel_backfill() -> int:
+    """Level 4: the finished week (rebuilt when its streams changed), then one earlier week."""
+    return 0 if step("pipeline/reel.py", "weekly") else 1
 
 
 def publish(st: dict, sig: str) -> int:
@@ -211,12 +217,12 @@ def run(force: bool) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["run", "features", "reel"])
+    ap.add_argument("cmd", choices=["run", "features", "reel", "reel-backfill"])
     ap.add_argument("--force", action="store_true", help="rebuild and publish even if no files changed")
     a = ap.parse_args()
     say(f"=== hub {a.cmd} start")
     try:
-        rc = features() if a.cmd == "features" else reel() if a.cmd == "reel" else run(a.force)
+        rc = {"features": features, "reel": reel, "reel-backfill": reel_backfill}.get(a.cmd, lambda: run(a.force))()
     except Exception as e:
         say(f"!!! {e}")
         rc = 1

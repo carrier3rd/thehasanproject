@@ -5,7 +5,7 @@
 #   powershell -File win\tasks.ps1 -Server    a server: run whether anyone is logged in or not, no password
 #   powershell -File win\tasks.ps1 -Disable   switch them off here (after they moved to another machine)
 #
-# Priorities follow win/hub.py's levels: 4 publishing, 6 daily upkeep, 7 data collection.
+# Priorities follow win/hub.py's levels: 4 publishing, 6 daily upkeep, 7 data collection + new-stream fact-checks, 9 backfill.
 param([switch]$Server, [switch]$Disable)
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\tasklib.ps1"
@@ -18,9 +18,11 @@ $Jobs = @(
   @("VOD hub publish",  @("win\hub.py", "run"),             (Every-Minutes 60 45), 4, 3),
   # Spotlight, Chat vs Hasan, Receipts, quiz (claude -p on the subscription)
   @("VOD features",     @("win\hub.py", "features"),        (New-ScheduledTaskTrigger -Daily -At 02:30), 6, 6),
-  # weekly reel + fact-checks, including the week in progress (claude -p on the subscription; cached, so a quiet
-  # hour sends nothing). Starts 30 min after the publish run; a run still going when the next is due is not doubled.
-  @("VOD reel",         @("win\hub.py", "reel"),            (Every-Minutes 60 15), 6, 6),
+  # fact-checks + reel for the week in progress, level 3 (claude -p on the subscription; cached, so a quiet hour sends
+  # nothing). 30 min after the publish run; a run still going when the next is due is not doubled.
+  @("VOD reel",          @("win\hub.py", "reel"),          (Every-Minutes 60 15), 7, 6),
+  # earlier weeks of the reel, level 4 (same as transcription)
+  @("VOD reel backfill", @("win\hub.py", "reel-backfill"), (New-ScheduledTaskTrigger -Daily -At 11:30), 9, 8),
   # posts and comments of the broad subs for the blindspot feature
   @("VOD reddit pull",  @("pipeline\reddit_pull.py"),       (New-ScheduledTaskTrigger -Weekly -DaysOfWeek Tuesday -At 23:00), 7, 6)
 )
