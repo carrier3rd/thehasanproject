@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Fact-checks · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112506"></head>
+<title>Fact-checks · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112701"></head>
 <body><main class="fcpage">
   <h1>Fact-checks</h1>
   <p class="note" style="padding:0">Claims Hasan made on stream, checked against public records and reporting, one topic at a
@@ -79,6 +79,15 @@ function render() {
   setUrl();
 }
 
+function gotRight() {   // what he got right: there, but folded away; only false and misleading are listed openly
+  const c = cur.counts, ok = cur.items.filter(x => ['accurate', 'mostly_accurate', 'unsupported'].includes(x.verdict));
+  const sections = Object.fromEntries(cur.sections.map(s => [s.key, s.title]));
+  const text = `Got right: ${(c.accurate || 0) + (c.mostly_accurate || 0)} (${c.accurate || 0} accurate, ${c.mostly_accurate || 0} mostly accurate)` +
+    (c.unsupported ? ` · ${c.unsupported} unsupported` : '') + (c.not_checkable ? ` · ${c.not_checkable} not checkable` : '');
+  return ok.length ? el('details', { class: 'gotright' }, el('summary', { text }), ...ok.map(x => card(x, sections)))
+                   : el('p', { class: 'note', text });
+}
+
 async function open(id, focus) {
   $('#report').replaceChildren(el('div', { class: 'note', text: 'Loading…' }));
   cur = await api(`/api/reports/${encodeURIComponent(id)}`);
@@ -99,16 +108,13 @@ async function open(id, focus) {
     el('p', { class: 'fx', text: `${cur.subtitle}. ${cur.period}; checked ${cur.checked_on}. ${cur.items.length} claims.` }),
     el('details', { class: 'alltime' }, el('summary', { text: 'How this was checked' }), el('p', { text: cur.method })),
     el('div', { class: 'tally' + (filt.verdicts.size ? ' picking' : '') }, ...chips),
-    el('p', { class: 'note', text: `Got right: ${(cur.counts.accurate || 0) + (cur.counts.mostly_accurate || 0)} ` +
-      `(${cur.counts.accurate || 0} accurate, ${cur.counts.mostly_accurate || 0} mostly accurate)` +
-      (cur.counts.unsupported ? ` · ${cur.counts.unsupported} unsupported` : '') +
-      (cur.counts.not_checkable ? ` · ${cur.counts.not_checkable} not checkable` : '') + '. Only the false and misleading claims are listed.' }),
+    gotRight(),
     el('div', { class: 'row filters' }, sel, q, el('span', { id: 'shown', class: 'note small' })),
     el('div', { id: 'items' }));
   render();
   if (focus) {
     const n = document.getElementById(focus);
-    if (n) { n.classList.add('focus'); n.scrollIntoView({ block: 'center' }); }
+    if (n) { const d = n.closest('details'); if (d) d.open = true; n.classList.add('focus'); n.scrollIntoView({ block: 'center' }); }
   }
 }
 

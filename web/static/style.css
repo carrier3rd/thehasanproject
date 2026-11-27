@@ -238,6 +238,10 @@ main.reel #player iframe { width:100%; height:100%; border:0; display:block; }
 .alltime { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:8px 12px; margin-bottom:12px; }
 .alltime summary { cursor:pointer; font-weight:600; }
 .alltime table { margin-top:8px; font-size:14px; }
+/* what he got right: there, but folded away and quiet next to the false/misleading list */
+.gotright { margin:0 0 12px; }
+.gotright > summary { cursor:pointer; color:var(--muted); font-size:14px; list-style-position:inside; }
+.gotright[open] > summary { margin-bottom:8px; }
 .fact { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:12px 14px; margin-bottom:10px; }
 .fact h3 { font-size:16px; margin:6px 0 2px; line-height:1.35; }
 .fact blockquote { margin:8px 0; padding:4px 12px; border-left:3px solid var(--accent); background:var(--band); font-style:italic; }

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Weekly reel · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112506"></head>
+<title>Weekly reel · VOD archive</title><link rel="stylesheet" href="style.css?v=2026112701"></head>
 <body><main class="reel">
   <h1 class="sr-only">Weekly reel</h1>
   <p class="intro">Each week, Claude reads every line of every stream and picks the moments worth a look, with the chat at the time and fact-checks of his claims.</p>
@@ -332,6 +332,22 @@ const safeUrl = u => /^https?:\/\//i.test(u || '') ? u : null;
 function tally(counts, order) {
   return el('div', { class: 'tally' }, ...order.map(v => el('span', { class: `verdict v-${v}`, text: `${VERDICT[v]} ${counts[v] || 0}` })));
 }
+function factCard(f) {
+  const src = (f.sources || []).filter(x => safeUrl(x.url));
+  return el('article', { class: 'fact', id: f.id },
+    el('div', { class: 'cmeta' }, vbadge(f.verdict), el('span', { class: 'tag', text: f.topic.replace(/_/g, ' ') }),
+      el('span', { class: 'tag', text: `${f.confidence} confidence` })),
+    correctionNote(f),
+    el('h3', { text: f.claim }),
+    el('div', { class: 'cwhen' }, el('a', { href: watchUrl(f.video_id, Math.max(f.t - 5, 0)), text: `${fmtDate(f.date)} · ${fmtTime(f.t)}` }),
+      document.createTextNode(` · ${f.stream_title}`)),
+    el('blockquote', { text: `“${f.quote}”` }),
+    f.correction ? el('p', {}, el('b', { text: 'What’s accurate: ' }), document.createTextNode(f.correction)) : null,
+    f.explanation ? el('p', { class: 'fx', text: f.explanation }) : null,
+    src.length ? el('ul', { class: 'cex' }, ...src.map(x => el('li', {}, el('a', { href: safeUrl(x.url), target: '_blank', rel: 'noopener noreferrer nofollow', text: x.title || x.url })))) : null,
+    el('div', { class: 'row' }, shareButton(f, `${VERDICT[f.verdict]}: ${f.claim}`)),
+    reportBox('fact', f));
+}
 let totals = null;
 async function renderFacts() {
   const box = $('#facts');
@@ -346,9 +362,12 @@ async function renderFacts() {
     const c = {}; for (const f of fs) c[f.verdict] = (c[f.verdict] || 0) + 1;
     nodes.push(tally(c, ['false', 'misleading']));
     const right = (c.accurate || 0) + (c.mostly_accurate || 0);
-    nodes.push(el('p', { class: 'note', style: 'padding:0 0 8px', text: `Got right: ${right} (${c.accurate || 0} accurate, ` +
-      `${c.mostly_accurate || 0} mostly accurate)` + (c.unsupported ? ` · ${c.unsupported} unsupported (no source either way)` : '') +
-      '. Only the false and misleading claims are listed below.' }));
+    const ok = fs.filter(f => f.verdict === 'accurate' || f.verdict === 'mostly_accurate' || f.verdict === 'unsupported');
+    // what he got right is here but folded away: only the false and misleading claims are listed openly
+    nodes.push(ok.length ? el('details', { class: 'gotright' },
+      el('summary', { text: `Got right: ${right} (${c.accurate || 0} accurate, ${c.mostly_accurate || 0} mostly accurate)` +
+        (c.unsupported ? ` · ${c.unsupported} unsupported` : '') }),
+      ...ok.map(factCard)) : el('p', { class: 'note', style: 'padding:0 0 8px', text: 'Got right: 0' }));
   }
   if (reel && reel.withdrawn) nodes.push(el('p', { class: 'note', style: 'padding:0 0 8px',
     text: `${reel.withdrawn} item${reel.withdrawn === 1 ? '' : 's'} withdrawn after review.` }));
@@ -363,27 +382,13 @@ async function renderFacts() {
   }
   if (!fs.length) nodes.push(el('div', { class: 'note', text: 'No fact-checks for this week.' }));
   else if (!shown.length) nodes.push(el('div', { class: 'note', text: 'Nothing false or misleading this week.' }));
-  for (const f of shown) {
-    const src = (f.sources || []).filter(x => safeUrl(x.url));
-    nodes.push(el('article', { class: 'fact', id: f.id },
-      el('div', { class: 'cmeta' }, vbadge(f.verdict), el('span', { class: 'tag', text: f.topic.replace(/_/g, ' ') }),
-        el('span', { class: 'tag', text: `${f.confidence} confidence` })),
-      correctionNote(f),
-      el('h3', { text: f.claim }),
-      el('div', { class: 'cwhen' }, el('a', { href: watchUrl(f.video_id, Math.max(f.t - 5, 0)), text: `${fmtDate(f.date)} · ${fmtTime(f.t)}` }),
-        document.createTextNode(` · ${f.stream_title}`)),
-      el('blockquote', { text: `“${f.quote}”` }),
-      f.correction ? el('p', {}, el('b', { text: 'What’s accurate: ' }), document.createTextNode(f.correction)) : null,
-      f.explanation ? el('p', { class: 'fx', text: f.explanation }) : null,
-      src.length ? el('ul', { class: 'cex' }, ...src.map(x => el('li', {}, el('a', { href: safeUrl(x.url), target: '_blank', rel: 'noopener noreferrer nofollow', text: x.title || x.url })))) : null,
-      el('div', { class: 'row' }, shareButton(f, `${VERDICT[f.verdict]}: ${f.claim}`)),
-      reportBox('fact', f)));
-  }
+  for (const f of shown) nodes.push(factCard(f));
   box.replaceChildren(...nodes);
   const want = qs.get('item');                 // opened from a shared link
   if (want && want.startsWith('f-')) {
     const n = document.getElementById(want);
-    if (n) { n.classList.add('focus'); n.scrollIntoView({ block: 'center' }); }
+    if (n) { const d = n.closest('details'); if (d) d.open = true;   // a shared link to a claim he got right
+      n.classList.add('focus'); n.scrollIntoView({ block: 'center' }); }
     qs.delete('item');
   }
 }
