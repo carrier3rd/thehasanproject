@@ -492,7 +492,7 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
         out = []
         for p in sorted(reels.glob("????-??-??.json"), reverse=True):
             try:
-                r = json.loads(p.read_text())
+                r = json.loads(p.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 continue
             out.append({"week": r["week"], "week_end": r["week_end"], "clips": len(r["clips"]),
@@ -503,7 +503,7 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
         if reels is None or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", week) or not (reels / f"{week}.json").is_file():
             return None
         try:
-            return feedback.apply_corrections(cfg, json.loads((reels / f"{week}.json").read_text()))
+            return feedback.apply_corrections(cfg, json.loads((reels / f"{week}.json").read_text(encoding="utf-8")))
         except (OSError, ValueError):
             return None
 
@@ -660,7 +660,7 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
         if reports is None or not re.fullmatch(r"[a-z0-9-]{1,60}", rid) or not (reports / f"{rid}.json").is_file():
             return None
         try:
-            r = json.loads((reports / f"{rid}.json").read_text())
+            r = json.loads((reports / f"{rid}.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return None
         r["counts"] = {v: sum(1 for x in r.get("items", []) if x.get("verdict") == v) for v in REPORT_VERDICTS}

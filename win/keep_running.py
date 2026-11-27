@@ -77,7 +77,9 @@ def run(args):
         os.remove(p["stop"])                        # a stale stop request from before must not stop this start
     except FileNotFoundError:
         pass
-    env = dict(os.environ)
+    # UTF-8 mode for Python daemons: Windows' default text encoding is cp1252, which can't read the archive's UTF-8
+    # JSON (the site silently skipped most weekly reels until Nov 27 2026)
+    env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
     if args.env_file:
         env.update(read_env(args.env_file))
     ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)
