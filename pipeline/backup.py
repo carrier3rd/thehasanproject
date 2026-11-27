@@ -242,18 +242,30 @@ def restore_test(cfg, repo: str | None = None) -> int:
     if not repo:
         print("no repository configured")
         return 1
+    # Restore only the snapshot's archive-snapshot folder ("<snapshot>:<folder>"), not the full path from the root:
+    # on Windows restic recreates C:/Users with permissions this user can't set or remove, fails on its timestamp and
+    # leaves a folder tempfile can't delete (Nov 26 2026).
+    ls = restic(bst, repo, "ls", "--json", "latest", "--tag", "vod-archive").stdout.splitlines()
+    snap = json.loads(ls[0])
+    paths = [json.loads(l)["path"] for l in ls[1:] if l.strip()]
+    db = next((p for p in paths if p.endswith("/archive-snapshot/archive.db")), None)
+    if not db:
+        print("restore-test FAILED: archive.db not found in the latest snapshot")
+        return 1
     with tempfile.TemporaryDirectory(prefix="vod-restore-") as tmp:
-        restic(bst, repo, "restore", "latest", "--tag", "vod-archive", "--target", tmp, "--include", "archive.db")
-        found = list(Path(tmp).rglob("archive-snapshot/archive.db"))
-        if not found:
-            print("restore-test FAILED: archive.db not found in the latest snapshot")
+        restic(bst, repo, "restore", f"{snap['id']}:{db.rsplit('/', 1)[0]}", "--target", tmp, "--include", "/archive.db")
+        found = Path(tmp) / "archive.db"
+        if not found.exists():
+            print("restore-test FAILED: archive.db did not come back from the snapshot")
             return 1
-        con = sqlite3.connect(found[0])
+        size = found.stat().st_size
+        con = sqlite3.connect(found)
         ok = con.execute("PRAGMA integrity_check").fetchone()[0]
         counts = {t: con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in ("videos", "turns", "chat", "live_msgs")}
         con.close()
-        print(f"restore-test {'OK' if ok == 'ok' else 'FAILED: ' + ok}: {repo} latest archive.db "
-              f"({found[0].stat().st_size / 1e6:.0f} MB) " + ", ".join(f"{k} {v:,}" for k, v in counts.items()))
+        print(f"restore-test {'OK' if ok == 'ok' else 'FAILED: ' + ok}: {repo} snapshot {snap.get('short_id')} "
+              f"({snap.get('time', '')[:16]}) archive.db ({size / 1e6:.0f} MB) "
+              + ", ".join(f"{k} {v:,}" for k, v in counts.items()))
         return 0 if ok == "ok" else 1
 
 
