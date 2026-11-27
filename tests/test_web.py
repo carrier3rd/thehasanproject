@@ -1,4 +1,5 @@
 import json
+import re
 import sys
 
 import numpy as np
@@ -235,3 +236,41 @@ def test_status_reports_what_is_current(apps, project):
     assert all(x["state"] in ("current", "working", "snapshot") for x in st["items"])
     assert st["behind"] == sum(1 for x in st["items"] if x["state"] == "working")
     assert pub.get("/about.html").status_code == 200
+
+
+def test_topic_reports_take_in_tagged_stream_fact_checks(apps, project, monkeypatch):
+    root, cfg = project
+    pub, _ = apps
+    from common import P
+    import reel, report_tags
+    rep = root / "reports"
+    rep.mkdir(exist_ok=True)
+    (rep / "dems.json").write_text(json.dumps({
+        "id": "dems", "title": "Claims about Democrats", "subtitle": "s", "checked_on": "2026-11-23", "period": "p",
+        "method": "m", "sections": [{"key": "a", "title": "A"}, {"key": "other", "title": "Other"}],
+        "items": [{"id": "dems-1", "section": "a", "verdict": "false", "what_he_said": "w", "finding": "f", "quote": "q",
+                   "vid": "v1001", "t": 1, "date": "20261118", "repeats": 0, "sources": []}]}))
+    d = P(cfg, "reels")
+    d.mkdir(parents=True, exist_ok=True)
+    facts = [{"id": f"f-v1001-{i}", "verdict": "misleading", "topic": "economy", "claim": f"claim {i}", "quote": "q",
+              "correction": "x", "video_id": "v1001", "t": i, "date": day, "stream_title": "s", "sources": []}
+             for i, day in enumerate(["20261117", "20261124", "20261125"])]
+    (d / "2026-11-22.json").write_text(json.dumps({"week": "2026-11-22", "streams": [], "clips": [], "fact_checks": facts}))
+    assert pub.get("/api/reports/dems").json()["ongoing"] is False       # nothing tagged yet: as it was made
+    sent = []
+
+    def fake_cli(cfg_, st, kind, reqs):
+        for key, system, user, schema in reqs:
+            sent.append(user)
+            where = {"claim 0": "a", "claim 1": "other"}          # other tests' reels share this project folder
+            claims = [{"n": int(m.group(1)), "reports": [{"id": "dems", "section": where[m.group(2)]}] if m.group(2) in where else []}
+                      for m in re.finditer(r"(?m)^(\d+)\. Claim: (.*)$", user)]
+            reel.cache_put(cfg_, kind, key, {"status": "succeeded", "result": {"claims": claims}})
+        return len(reqs)
+    monkeypatch.setattr(reel, "run_cli", fake_cli)
+    assert report_tags.run(cfg) == "done" and len(sent) == 1
+    assert report_tags.run(cfg) == "done" and len(sent) == 1               # all tagged: nothing is sent again
+    r = pub.get("/api/reports/dems").json()
+    # claim 0 is dated before the report's own last item, so only claim 1 joins; claim 2 was tagged for no report
+    assert [x["id"] for x in r["items"]] == ["dems-1", "f-v1001-1"] and r["items"][1]["section"] == "other"
+    assert r["ongoing"] and r["through"] == "20261124" and r["counts"]["misleading"] == 1

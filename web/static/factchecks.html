@@ -105,7 +105,9 @@ async function open(id, focus) {
     oninput: e => { filt.q = e.target.value.trim(); render(); } });
   $('#report').replaceChildren(
     el('h2', { text: cur.title }),
-    el('p', { class: 'fx', text: `${cur.subtitle}. ${cur.period}; checked ${cur.checked_on}. ${cur.items.length} claims.` }),
+    el('p', { class: 'fx', text: `${cur.subtitle}. ${cur.period}; checked ${cur.checked_on}. ${cur.items.length} claims.` +
+      (cur.ongoing ? ` Kept current: ${cur.items.filter(x => x.from_stream_check).length} added from the fact-checks of newer streams` +
+        (cur.through > cur.own_through ? `, through ${fmtDate(cur.through)}.` : '.') : '') }),
     el('details', { class: 'alltime' }, el('summary', { text: 'How this was checked' }), el('p', { text: cur.method })),
     el('div', { class: 'tally' + (filt.verdicts.size ? ' picking' : '') }, ...chips),
     gotRight(),

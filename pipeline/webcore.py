@@ -624,8 +624,9 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
 
     EVERY = "every-stream"
 
-    def every_stream_report() -> dict | None:
-        """Every fact-check the weekly reels hold (each stream's claims), as one report in the standing reports' shape."""
+    def stream_fact_items() -> tuple[list[dict], list[str]]:
+        """Every fact-check the weekly reels hold, in the standing reports' item shape (section = its topic), and the
+        weeks that have any, newest first."""
         items, weeks = [], []
         if reels is not None and reels.is_dir():
             for p in sorted(reels.glob("????-??-??.json"), reverse=True):
@@ -643,6 +644,11 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
                                   "finding": f.get("correction") or f.get("explanation") or "",
                                   "vid": f.get("video_id"), "t": f.get("t", 0), "date": f.get("date"),
                                   "title": f.get("stream_title"), "sources": f.get("sources") or []})
+        return items, weeks
+
+    def every_stream_report() -> dict | None:
+        """Every fact-check the weekly reels hold (each stream's claims), as one report in the standing reports' shape."""
+        items, weeks = stream_fact_items()
         if not items:
             return None
         topics = sorted({x["section"] for x in items})
@@ -663,6 +669,21 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
             r = json.loads((reports / f"{rid}.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return None
+        # the report keeps growing: stream fact-checks that report_tags.py placed in it, dated after its own last
+        # item (its own items already cover the streams before that)
+        try:
+            tags = json.loads((reels / "report_tags.json").read_text(encoding="utf-8")).get("tags", {}) if reels else {}
+        except (OSError, ValueError):
+            tags = None                                      # no tagging run yet: the report is as it was made
+        own_through = max((x.get("date") or "" for x in r.get("items", [])), default="")
+        r["own_through"], r["through"], r["ongoing"] = own_through, own_through, tags is not None
+        if tags:
+            keys = {s["key"] for s in r.get("sections", [])}
+            for x in stream_fact_items()[0]:
+                sec = (tags.get(x["id"]) or {}).get(rid)
+                if sec in keys and (x.get("date") or "") > own_through:
+                    r["items"].append({**x, "section": sec, "repeats": 0, "from_stream_check": True})
+                    r["through"] = max(r["through"], x["date"])
         r["counts"] = {v: sum(1 for x in r.get("items", []) if x.get("verdict") == v) for v in REPORT_VERDICTS}
         return r
 
@@ -758,8 +779,18 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
             for p in sorted(reports.glob("*.json")):
                 r = load_report(p.stem)
                 if r:
+                    if not r.get("ongoing"):
+                        items.append(item(f"report-{r['id']}", f"Fact-checks: {r['title']}", f"factchecks.html?r={r['id']}",
+                                          r.get("checked_on"), None, "snapshot", r.get("period") or ""))
+                        continue
+                    added = sum(1 for x in r["items"] if x.get("from_stream_check"))
+                    # tagged right after each stream's fact-checks, so it is as current as they are
+                    tagged = mtime(reels / "report_tags.json")
+                    through = max((v.get("date") or "" for v in (reel or {}).get("streams", [])), default=None)
+                    if reel and (tagged or "") < (mtime(reels / f"{reel['week']}.json") or ""):
+                        through = r.get("through")           # the newest fact-checks are not tagged yet
                     items.append(item(f"report-{r['id']}", f"Fact-checks: {r['title']}", f"factchecks.html?r={r['id']}",
-                                      r.get("checked_on"), None, "snapshot", r.get("period") or ""))
+                                      tagged, through, state(through), f"{len(r['items'])} claims, {added} added from new streams"))
         return JSONResponse({"newest_stream": dict(row) if row else None, "published": published, "items": items,
                              "behind": sum(1 for x in items if x["state"] == "working")},
                             headers={"Cache-Control": "no-cache"})

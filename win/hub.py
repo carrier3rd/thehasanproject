@@ -177,12 +177,16 @@ def reel() -> int:
     import datetime as dt
     today = dt.date.today()
     week = (today - dt.timedelta(days=(today.weekday() + 1) % 7)).isoformat()   # the Sunday that starts this week
-    return 0 if step("pipeline/reel.py", "build", "--week", week, "--yes", "--latest-first") else 1
+    ok = step("pipeline/reel.py", "build", "--week", week, "--yes", "--latest-first")
+    step("pipeline/report_tags.py", "run")   # the topic reports (Fact-checks page) take in the new fact-checks
+    return 0 if ok else 1
 
 
 def reel_backfill() -> int:
     """Level 4: the finished week (rebuilt when its streams changed), then one earlier week."""
-    return 0 if step("pipeline/reel.py", "weekly") else 1
+    ok = step("pipeline/reel.py", "weekly")
+    step("pipeline/report_tags.py", "run")
+    return 0 if ok else 1
 
 
 def chatflags() -> int:
