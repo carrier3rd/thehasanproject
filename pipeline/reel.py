@@ -16,7 +16,7 @@ when the config sets reel.backend: api, through the Message Batches API (half pr
   2. judge: the strongest candidates, each with 20 minutes of transcript and the chat at that time, get a final call:
      own view or reading/joke/condemnation, severity on a fixed rubric, context and nuance, the chat's reaction, and
      a segment as long as the point needs (15 seconds to 15 minutes);
-  3. fact-check: pass 1 also lists the checkable factual claims he states as fact; the most consequential are checked
+  3. fact-check: pass 1 also lists the checkable factual claims he states as fact; the most consequential of each stream day are checked
      with web search, as of the day he said them, and get a verdict with sources.
 Results are cached per stream window and per candidate, so a late transcript only costs its own stream.
 Reads public.db only (public speaker labels; chat without opt-outs or mod-deleted text) and writes reels/<week>.json,
@@ -42,7 +42,8 @@ log = get_logger("reel")
 DEFAULTS = {"model": "claude-opus-5-5", "screen_effort": "low", "judge_effort": "high",
             "window_s": 720, "overlap_s": 60, "screen_min_severity": 5, "max_judge": 30, "max_clips": 10,
             "min_severity": 5, "context_s": 600, "chat_max": 400, "clip_min_s": 15, "clip_max_s": 900,
-            "fact_effort": "medium", "max_facts": 40, "fact_min_importance": 3, "fact_search_uses": 5,
+            "fact_effort": "medium", "max_facts": 40,   # per stream day; the week lists every day's checks
+            "fact_min_importance": 3, "fact_search_uses": 5,
             "fact_context_s": 90, "search_usd": 0.01,   # web search: $10 per 1,000 searches
             "build_after_hour": 10,          # local hour on Sunday after which the finished week is built
             "max_usd_per_week": 15.0,        # auto never submits more than this per week (estimate)
@@ -58,7 +59,7 @@ CATEGORIES = ["antisemitism", "nazi_or_holocaust_comparison", "justifying_or_glo
               "misinformation", "other"]
 STANCES = ["own_view", "joke_or_bait", "reading_or_quoting", "condemning", "unclear"]
 WEEK_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-VERSION = 6          # bump when selection logic changes: auto rebuilds reels made by an older version (from cache)
+VERSION = 7          # bump when selection logic changes: auto rebuilds reels made by an older version (from cache)
 _NONWORD = re.compile(r"[^a-z0-9]+")
 
 
@@ -725,14 +726,18 @@ def claims_from(st, screened) -> list[dict]:
         for c in got["result"].get("claims", []):
             if c["importance"] < st["fact_min_importance"] or not quoted(c["quote"], text):
                 continue
-            out.append({**c, "vid": v["id"]})
+            out.append({**c, "vid": v["id"], "day": v["upload_date"]})
     out.sort(key=lambda c: (-c["importance"], c["vid"], c["start"]))
     kept = []
     for c in out:                            # windows overlap; the same claim is often listed twice
         if any(k["vid"] == c["vid"] and norm(k["quote"]) == norm(c["quote"]) for k in kept):
             continue
         kept.append(c)
-    return kept[: st["max_facts"]]
+    per_day: dict = {}                       # the most important max_facts of each stream day, like transcription:
+    for c in kept:                           # every day is checked on its own and the week lists them all
+        per_day.setdefault(c["day"], []).append(c)
+    return sorted((c for day in per_day.values() for c in day[: st["max_facts"]]),
+                  key=lambda c: (-c["importance"], c["vid"], c["start"]))
 
 
 def fact_requests(cfg, st, con, streams, claims) -> tuple[list, list, bool]:
@@ -1067,7 +1072,7 @@ def write_week(cfg, st, con, streams, week, judged, checked, screened, client, y
                      "may have said something egregious, then re-judged the strongest with 20 minutes of context and "
                      "the chat at the time, against a fixed rubric (own words only; readings, condemnations and "
                      "mainstream criticism excluded), choosing each segment's length. The same first pass listed the "
-                     "factual claims he stated as fact; the most consequential were checked with web search as of the "
+                     "factual claims he stated as fact; the most consequential of each day were checked with web search as of the "
                      "day he said them. Verdicts assess accuracy only: nobody can tell from a transcript whether he "
                      "believed a claim. Chat next to each clip was read by Claude, which flagged slurs, "
                      "hate, threats and harassment for highlighting."}
