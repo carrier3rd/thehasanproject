@@ -622,7 +622,41 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
     reports = P(cfg, "reports") if "reports" in cfg.get("paths", {}) else None
     REPORT_VERDICTS = ["false", "misleading", "unsupported", "mostly_accurate", "accurate", "not_checkable"]
 
+    EVERY = "every-stream"
+
+    def every_stream_report() -> dict | None:
+        """Every fact-check the weekly reels hold (each stream's claims), as one report in the standing reports' shape."""
+        items, weeks = [], []
+        if reels is not None and reels.is_dir():
+            for p in sorted(reels.glob("????-??-??.json"), reverse=True):
+                r = load_reel(p.stem)
+                if not r:
+                    continue
+                fs = r.get("fact_checks") or []
+                if fs:
+                    weeks.append(r["week"])
+                for f in fs:
+                    if f.get("verdict") not in REPORT_VERDICTS:
+                        continue
+                    items.append({"id": f.get("id"), "verdict": f["verdict"], "section": f.get("topic") or "other",
+                                  "what_he_said": f.get("claim", ""), "quote": f.get("quote", ""),
+                                  "finding": f.get("correction") or f.get("explanation") or "",
+                                  "vid": f.get("video_id"), "t": f.get("t", 0), "date": f.get("date"),
+                                  "title": f.get("stream_title"), "sources": f.get("sources") or []})
+        if not items:
+            return None
+        topics = sorted({x["section"] for x in items})
+        return {"id": EVERY, "title": "Every stream", "subtitle": "Every factual claim checked, stream by stream",
+                "period": f"weeks of {weeks[-1]} to {weeks[0]}", "checked_on": weeks[0],
+                "method": "Each stream's transcript is read by Claude, which lists the factual claims Hasan states as "
+                          "fact; each is checked with web search as of the day he said it. Verdicts assess accuracy "
+                          "only. The same checks appear week by week on the Weekly page.",
+                "sections": [{"key": t, "title": t.replace("_", " ").capitalize()} for t in topics],
+                "items": items, "counts": {v: sum(1 for x in items if x["verdict"] == v) for v in REPORT_VERDICTS}}
+
     def load_report(rid: str) -> dict | None:
+        if rid == EVERY:
+            return every_stream_report()
         if reports is None or not re.fullmatch(r"[a-z0-9-]{1,60}", rid) or not (reports / f"{rid}.json").is_file():
             return None
         try:
@@ -644,6 +678,10 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
                                | {"checked": len(r.get("items", []))})
         out.sort(key=lambda r: r["id"])
         out.sort(key=lambda r: r["checked_on"] or "", reverse=True)
+        every = every_stream_report()        # every stream's fact-checks first: the page opens on them
+        if every:
+            out.insert(0, {k: every[k] for k in ("id", "title", "subtitle", "checked_on", "period", "counts")}
+                       | {"checked": len(every["items"])})
         return {"reports": out}
 
     @app.get("/api/reports/{rid}")

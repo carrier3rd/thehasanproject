@@ -205,3 +205,22 @@ def test_fact_check_reports(apps, project):
     for bad in ("nope", "..%2Fconfig", "Test-Report", "broken"):
         assert pub.get(f"/api/reports/{bad}").status_code == 404
     assert pub.get("/factchecks.html").status_code == 200
+
+
+def test_every_stream_report_lists_every_reel_fact_check(apps, project):
+    root, cfg = project
+    pub, _ = apps
+    from common import P
+    d = P(cfg, "reels")
+    d.mkdir(parents=True, exist_ok=True)
+    for week, verdicts in (("2026-11-15", ["false", "accurate"]), ("2026-11-22", ["misleading"])):
+        (d / f"{week}.json").write_text(json.dumps({"week": week, "clips": [], "fact_checks": [
+            {"id": f"f-{week}-{i}", "verdict": v, "topic": "economy", "claim": "c", "quote": "q", "correction": "x",
+             "video_id": "v1001", "t": 1, "date": "20261020", "stream_title": "s", "sources": []}
+            for i, v in enumerate(verdicts)]}))
+    lst = pub.get("/api/reports").json()["reports"]
+    assert lst[0]["id"] == "every-stream" and lst[0]["checked"] == 3
+    r = pub.get("/api/reports/every-stream").json()
+    assert {x["id"] for x in r["items"]} == {"f-2026-11-15-0", "f-2026-11-15-1", "f-2026-11-22-0"}
+    assert r["counts"]["false"] == 1 and r["counts"]["misleading"] == 1 and r["counts"]["accurate"] == 1
+    assert r["period"] == "weeks of 2026-11-15 to 2026-11-22"
