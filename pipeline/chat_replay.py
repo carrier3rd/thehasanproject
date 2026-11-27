@@ -37,7 +37,10 @@ def via_twitchdownloader(vod_id: str, cfg: dict) -> list[dict]:
 def via_chat_downloader(vod_id: str) -> list[dict]:
     from chat_downloader import ChatDownloader
     rows = []
-    for m in ChatDownloader().get_chat(f"https://www.twitch.tv/videos/{vod_id}"):
+    # Bounded retries (Nov 27 2026): with the defaults, a Twitch error ('data' missing from its answer) was retried with
+    # doubling waits and an "or press Enter" prompt, so the hourly run sat in this step for over an hour, never publishing.
+    for m in ChatDownloader().get_chat(f"https://www.twitch.tv/videos/{vod_id}", max_attempts=3, retry_timeout=10,
+                                      interruptible_retry=False, inactivity_timeout=300):
         who = m.get("author") or {}
         badges = ",".join(f"{b.get('name')}/{b.get('version', '')}" for b in (who.get("badges") or []))
         rows.append({"t": float(m.get("time_in_seconds", 0)), "user_id": str(who.get("id") or ""),
@@ -70,7 +73,7 @@ def main():
                 log.warning("%s: TwitchDownloaderCLI failed (%s); trying chat-downloader", vid, e)
                 rows = via_chat_downloader(vod_id)
             tmp = dest.with_suffix(".tmp")
-            with open(tmp, "w") as f:
+            with open(tmp, "w", encoding="utf-8", newline="\n") as f:   # Windows' default encoding can't hold chat
                 for r in rows:
                     f.write(json.dumps(r, ensure_ascii=False) + "\n")
             tmp.replace(dest)
