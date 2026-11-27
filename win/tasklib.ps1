@@ -21,7 +21,7 @@ function Quote([string]$s) { if ($s -match '[\s"]') { '"' + ($s -replace '"', '\
 function Register-Job {
   param([string]$Name, [string[]]$Argv, [string]$WorkDir, $Triggers = @(), [switch]$Daemon, [int]$Priority = 6,
         [double]$LimitHours = 6, [switch]$Server)
-  $u = "$env:USERDOMAIN\$env:USERNAME"
+  $u = (whoami)        # USERDOMAIN is not set in an ssh session (Nov 27 2026)
   if ($Server) {
     # no console window exists in a non-interactive session: run the program directly
     $a = New-ScheduledTaskAction -Execute $Argv[0] -Argument (($Argv[1..($Argv.Count - 1)] | % { Quote $_ }) -join " ") -WorkingDirectory $WorkDir
