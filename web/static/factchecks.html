@@ -64,7 +64,8 @@ function card(x, sections) {
 function render() {
   if (!cur) return;
   const sections = Object.fromEntries(cur.sections.map(s => [s.key, s.title]));
-  const items = cur.items.filter(x => (!filt.verdicts.size || filt.verdicts.has(x.verdict)) && (!filt.section || x.section === filt.section) &&
+  const listed = cur.items.filter(x => x.verdict === 'false' || x.verdict === 'misleading');   // the rest are only tallied
+  const items = listed.filter(x => (!filt.verdicts.size || filt.verdicts.has(x.verdict)) && (!filt.section || x.section === filt.section) &&
     (!filt.q || `${x.what_he_said} ${x.finding} ${x.quote}`.toLowerCase().includes(filt.q.toLowerCase())));
   const rank = { false: 0, misleading: 1, unsupported: 2, mostly_accurate: 3, accurate: 4, not_checkable: 5 };
   const nodes = [];
@@ -74,7 +75,7 @@ function render() {
     nodes.push(el('h2', { class: 'fh', text: `${s.title} (${xs.length})` }), ...xs.map(x => card(x, sections)));
   }
   $('#items').replaceChildren(...(nodes.length ? nodes : [el('div', { class: 'note', text: 'Nothing matches those filters.' })]));
-  $('#shown').textContent = `Showing ${items.length} of ${cur.items.length}.`;
+  $('#shown').textContent = `Showing ${items.length} of ${listed.length} false or misleading.`;
   setUrl();
 }
 
@@ -82,7 +83,7 @@ async function open(id, focus) {
   $('#report').replaceChildren(el('div', { class: 'note', text: 'Loading…' }));
   cur = await api(`/api/reports/${encodeURIComponent(id)}`);
   for (const b of document.querySelectorAll('#reports button')) { b.classList.toggle('on', b.dataset.id === id); b.setAttribute('aria-selected', b.dataset.id === id ? 'true' : 'false'); }
-  const chips = ORDER.filter(v => cur.counts[v]).map(v => el('button', { class: `verdict v-${v} chip`, 'data-v': v, 'aria-pressed': filt.verdicts.has(v) ? 'true' : 'false',
+  const chips = ['false', 'misleading'].filter(v => cur.counts[v]).map(v => el('button', { class: `verdict v-${v} chip`, 'data-v': v, 'aria-pressed': filt.verdicts.has(v) ? 'true' : 'false',
     text: `${VERDICT[v]} ${cur.counts[v]}`, title: 'Show only these (click again to clear)', onclick: e => {
       filt.verdicts.has(v) ? filt.verdicts.delete(v) : filt.verdicts.add(v);
       for (const c of document.querySelectorAll('.chip')) c.setAttribute('aria-pressed', filt.verdicts.has(c.dataset.v) ? 'true' : 'false');
@@ -98,6 +99,10 @@ async function open(id, focus) {
     el('p', { class: 'fx', text: `${cur.subtitle}. ${cur.period}; checked ${cur.checked_on}. ${cur.items.length} claims.` }),
     el('details', { class: 'alltime' }, el('summary', { text: 'How this was checked' }), el('p', { text: cur.method })),
     el('div', { class: 'tally' + (filt.verdicts.size ? ' picking' : '') }, ...chips),
+    el('p', { class: 'note', text: `Got right: ${(cur.counts.accurate || 0) + (cur.counts.mostly_accurate || 0)} ` +
+      `(${cur.counts.accurate || 0} accurate, ${cur.counts.mostly_accurate || 0} mostly accurate)` +
+      (cur.counts.unsupported ? ` · ${cur.counts.unsupported} unsupported` : '') +
+      (cur.counts.not_checkable ? ` · ${cur.counts.not_checkable} not checkable` : '') + '. Only the false and misleading claims are listed.' }),
     el('div', { class: 'row filters' }, sel, q, el('span', { id: 'shown', class: 'note small' })),
     el('div', { id: 'items' }));
   render();

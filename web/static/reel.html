@@ -339,10 +339,16 @@ async function renderFacts() {
   const order = ['false', 'misleading', 'unsupported', 'mostly_accurate', 'accurate'];
   if (!totals) { try { totals = await api('/api/factchecks'); } catch (e) { totals = null; } }
   const nodes = [];
+  // every claim is checked; only the false and misleading ones are listed, the rest are tallied (owner, 2026-11-27)
+  const shown = fs.filter(f => f.verdict === 'false' || f.verdict === 'misleading');
   nodes.push(el('h2', { class: 'fh', text: reel ? `Week of ${reel.week} – ${reel.week_end}: ${fs.length} claim${fs.length === 1 ? '' : 's'} checked` : 'This week' }));
-  if (reel && fs.length) {     // counted from what is shown, so withdrawn items drop out of the tally
+  if (reel && fs.length) {     // counted from what is in the reel, so withdrawn items drop out of the tally
     const c = {}; for (const f of fs) c[f.verdict] = (c[f.verdict] || 0) + 1;
-    nodes.push(tally(c, order));
+    nodes.push(tally(c, ['false', 'misleading']));
+    const right = (c.accurate || 0) + (c.mostly_accurate || 0);
+    nodes.push(el('p', { class: 'note', style: 'padding:0 0 8px', text: `Got right: ${right} (${c.accurate || 0} accurate, ` +
+      `${c.mostly_accurate || 0} mostly accurate)` + (c.unsupported ? ` · ${c.unsupported} unsupported (no source either way)` : '') +
+      '. Only the false and misleading claims are listed below.' }));
   }
   if (reel && reel.withdrawn) nodes.push(el('p', { class: 'note', style: 'padding:0 0 8px',
     text: `${reel.withdrawn} item${reel.withdrawn === 1 ? '' : 's'} withdrawn after review.` }));
@@ -356,7 +362,8 @@ async function renderFacts() {
           ...order.map(v => el('td', { class: 'num', text: String(c[v]) }))))))));
   }
   if (!fs.length) nodes.push(el('div', { class: 'note', text: 'No fact-checks for this week.' }));
-  for (const f of fs) {
+  else if (!shown.length) nodes.push(el('div', { class: 'note', text: 'Nothing false or misleading this week.' }));
+  for (const f of shown) {
     const src = (f.sources || []).filter(x => safeUrl(x.url));
     nodes.push(el('article', { class: 'fact', id: f.id },
       el('div', { class: 'cmeta' }, vbadge(f.verdict), el('span', { class: 'tag', text: f.topic.replace(/_/g, ' ') }),
