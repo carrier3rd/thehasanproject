@@ -5,7 +5,7 @@
 <meta property="og:title" content="The Hasan Project: Hasan's streams, on the record">
 <meta property="og:description" content="Every stream transcribed and searchable, with chat on the same timeline. Daily quiz, receipts, Chat vs Hasan, and what Reddit was talking about while he streamed.">
 <meta property="og:site_name" content="The Hasan Project"><meta property="og:type" content="website"><meta name="twitter:card" content="summary">
-<link rel="stylesheet" href="style.css?v=2026112702"></head>
+<link rel="stylesheet" href="style.css?v=2026112703"></head>
 <body><main class="feat hub">
   <section class="hero">
     <h1>Hasan's streams, on the record</h1>
@@ -18,6 +18,7 @@
     </form>
     <p id="stats" class="note small"></p>
   </section>
+  <section id="latestfacts" class="latestfacts" aria-live="polite"></section>
   <div class="hubgrid">
     <a class="hubcard quizcard" href="quiz.html">
       <span class="hk">Daily quiz</span>
@@ -105,8 +106,43 @@ async function receiptCard() {
   return null;
 }
 
+// the newest stream's fact-checks: false and misleading listed, what he got right folded (owner, Nov 27 2026)
+async function latestFacts() {
+  const box = $('#latestfacts');
+  try {
+    const weeks = (await api('/api/reels')).weeks;
+    for (const w of weeks.slice(0, 2)) {
+      const r = await api('/api/reels/' + w.week);
+      const fs = r.fact_checks || [];
+      if (!fs.length) continue;
+      const day = fs.reduce((m, f) => (f.date > m ? f.date : m), '');
+      const today = fs.filter(f => f.date === day);
+      const bad = today.filter(f => f.verdict === 'false' || f.verdict === 'misleading')
+        .sort((a, b) => (a.verdict === 'false' ? 0 : 1) - (b.verdict === 'false' ? 0 : 1) || a.t - b.t);
+      const ok = today.filter(f => !bad.includes(f));
+      const n = v => today.filter(f => f.verdict === v).length;
+      const link = f => `reel.html?week=${r.week}&view=facts&item=${encodeURIComponent(f.id)}`;
+      const VERD = { false: 'False', misleading: 'Misleading', unsupported: 'Unsupported', mostly_accurate: 'Mostly accurate', accurate: 'Accurate' };
+      const row = f => el('li', {}, el('a', { href: link(f) }, el('span', { class: `verdict v-${f.verdict}`, text: VERD[f.verdict] || f.verdict }),
+        ' ', el('b', { text: f.claim })), f.correction && bad.includes(f) ? el('p', { class: 'fx', text: f.correction }) : null);
+      box.replaceChildren(
+        el('h2', { text: `Fact-checks from the latest stream · ${niceDay(fmtDate(day))}` }),
+        el('p', { class: 'note', text: `${today.length} claim${today.length === 1 ? '' : 's'} checked: ` +
+          `${n('false')} false, ${n('misleading')} misleading.` }),
+        bad.length ? el('ul', { class: 'lfacts' }, ...bad.map(row)) : el('p', { text: 'Nothing false or misleading on this stream.' }),
+        ok.length ? el('details', { class: 'gotright' },
+          el('summary', { text: `Got right: ${n('accurate') + n('mostly_accurate')} (${n('accurate')} accurate, ${n('mostly_accurate')} mostly accurate)` +
+            (n('unsupported') ? ` · ${n('unsupported')} unsupported` : '') }),
+          el('ul', { class: 'lfacts' }, ...ok.map(row))) : null,
+        el('p', {}, el('a', { href: `reel.html?week=${r.week}&view=facts`, text: 'All of this week’s fact-checks, with sources →' })));
+      return;
+    }
+  } catch (e) { /* no reels yet: the section stays empty */ }
+}
+
 (async () => {
   await chrome('home.html');
+  latestFacts();
   try {
     const v = await api('/api/videos', { page: 1 });
     if (v.total) $('#stats').textContent = `${v.total.toLocaleString()} streams transcribed so far, newest first.`;

@@ -444,3 +444,11 @@ table.status th, table.status td { text-align:left; padding:6px 8px; border-bott
 .st-snapshot { color:var(--muted); }
 @media (max-width:640px) { table.status th:nth-child(5), table.status td:nth-child(5) { display:none; } }
 body:has(main.watch) footer .fresh { display:none; }
+
+/* home page: the latest stream's fact-checks */
+.latestfacts:empty { display:none; }
+.latestfacts { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px 16px; margin:0 0 18px; }
+.latestfacts h2 { font-size:20px; margin:0 0 4px; }
+.lfacts { list-style:none; padding:0; margin:8px 0 10px; display:grid; gap:10px; }
+.lfacts li a { color:var(--ink); }
+.lfacts li .fx { margin:4px 0 0; font-size:14px; color:var(--muted); }
