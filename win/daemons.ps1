@@ -1,49 +1,45 @@
-# Always-on VOD archive programs on the Windows PC (moved from the laptop's systemd services on Nov 26 2026: the
-# laptop's RAM corrupts data). Each runs under keep_running.py (restart on exit, one copy, no idle sleep) from a
-# scheduled task that starts at logon and re-launches it every 5 minutes if it died (a running copy makes the
-# re-launch exit at once).
+# Always-on VOD archive programs (moved off the Ubuntu laptop on 2026-11-26). Each runs under keep_running.py
+# (restart on exit, one copy, no idle sleep) from a scheduled task that starts it at logon (desktop) or at boot
+# (-Server) and re-launches it every 5 minutes if it died (a running copy makes the re-launch exit at once).
 #
-#   powershell -File win\daemons.ps1              register (or re-register) every task below and start them
-#   powershell -File win\daemons.ps1 -Only web    only that one
+#   powershell -File win\daemons.ps1                 register (or re-register) every task below and start them
+#   powershell -File win\daemons.ps1 -Only web       only that one
+#   powershell -File win\daemons.ps1 -Server         a server: run at boot without anyone logged in (tasklib.ps1)
+#   powershell -File win\daemons.ps1 -NoStart        register only
+#   powershell -File win\daemons.ps1 -Disable        switch them off here (stop each with keep_running.py stop NAME)
 #
-# Stop one:   .venv\Scripts\python.exe win\keep_running.py stop web   (the 5-minute watchdog starts it again unless
-#             the task is disabled first: Disable-ScheduledTask "VOD web")
 # Status:     .venv\Scripts\python.exe win\keep_running.py status
 # Logs:       logs\<name>.out
-param([string]$Only = "")
+param([string]$Only = "", [switch]$Server, [switch]$NoStart, [switch]$Disable)
 $ErrorActionPreference = "Stop"
-$Hub = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+. "$PSScriptRoot\tasklib.ps1"
+$Hub = Split-Path -Parent $PSScriptRoot
 $Py = "$Hub\.venv\Scripts\python.exe"
-$Cloudflared = "$env:USERPROFILE\tools\cloudflared\cloudflared-windows-amd64.exe"
+$Cloudflared = @("$env:USERPROFILE\tools\cloudflared\cloudflared.exe", "$env:USERPROFILE\tools\cloudflared\cloudflared-windows-amd64.exe") |
+               ? { Test-Path $_ } | Select-Object -First 1
 
 $Daemons = [ordered]@{
-  # was vod-web.service: the public site (public.db, index/, features/ only), behind the tunnel
+  # the public site (public.db, index/, features/ only), behind the tunnel
   "web"         = @{ env = "$Hub\site.env"; cmd = @($Py, "-m", "uvicorn", "web.app:app", "--host", "127.0.0.1", "--port", "8000",
                                                     "--proxy-headers", "--forwarded-allow-ips", "127.0.0.1") }
-  # was vod-admin.service: the private admin app (archive.db), this PC only
+  # the private admin app (archive.db), this machine only
   "admin"       = @{ env = ""; cmd = @($Py, "-m", "uvicorn", "admin.app:app", "--host", "127.0.0.1", "--port", "8001") }
-  # was vod-chat-logger.service: 24/7 anonymous Twitch chat logger -> archive/archive.db (live_msgs, sessions)
+  # 24/7 anonymous Twitch chat logger -> archive/archive.db (live_msgs, sessions)
   "chat-logger" = @{ env = "$Hub\.env"; cmd = @($Py, "pipeline\chat_logger.py") }
-  # was cloudflared.service: the Cloudflare tunnel for thehasanproject.org (config: ~\.cloudflared\config.yml)
+  # the Cloudflare tunnel for the public site (config: ~\.cloudflared\config.yml)
   "cloudflared" = @{ env = ""; cmd = @($Cloudflared, "--no-autoupdate", "--config", "$env:USERPROFILE\.cloudflared\config.yml", "tunnel", "run") }
 }
 
-function Quote([string]$s) { if ($s -match '[\s"]') { '"' + ($s -replace '"', '\"') + '"' } else { $s } }
-
-$u = "$env:USERDOMAIN\$env:USERNAME"
 foreach ($name in $Daemons.Keys) {
   if ($Only -and $name -ne $Only) { continue }
+  if ($Disable) {
+    if (Get-ScheduledTask -TaskName "VOD $name" -ErrorAction SilentlyContinue) { Disable-ScheduledTask -TaskName "VOD $name" | Out-Null; "disabled: VOD $name" }
+    continue
+  }
   $d = $Daemons[$name]
   $argv = @($Py, "$Hub\win\keep_running.py", "run", $name, "--cwd", $Hub, "--log", "$Hub\logs\$name.out")
   if ($d.env) { $argv += @("--env-file", $d.env) }
   $argv += @("--") + $d.cmd
-  $a = New-ScheduledTaskAction -Execute "C:\Windows\System32\conhost.exe" -Argument ("--headless " + (($argv | % { Quote $_ }) -join " ")) -WorkingDirectory $Hub
-  $t1 = New-ScheduledTaskTrigger -AtLogOn -User $u
-  $t2 = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 5)
-  $s = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -MultipleInstances IgnoreNew -AllowStartIfOnBatteries `
-        -DontStopIfGoingOnBatteries -StartWhenAvailable -Priority 4
-  $p = New-ScheduledTaskPrincipal -UserId $u -LogonType Interactive -RunLevel Limited
-  Register-ScheduledTask -TaskName "VOD $name" -Action $a -Trigger $t1, $t2 -Settings $s -Principal $p -Force | Out-Null
-  Start-ScheduledTask -TaskName "VOD $name"
-  "registered and started: VOD $name"
+  Register-Job -Name "VOD $name" -Argv $argv -WorkDir $Hub -Daemon -Priority 4 -Server:$Server
+  if (-not $NoStart) { Start-ScheduledTask -TaskName "VOD $name"; "  started" }
 }

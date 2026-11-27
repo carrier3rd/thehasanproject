@@ -33,6 +33,9 @@ LOG = ROOT / "logs" / f"hub-{time.strftime('%Y-%m-%d')}.log"
 # have their folders on PATH, so add them (same as deploy/pc/windows/runner.py).
 _pkgs = Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet" / "Packages"
 _extra = [str(p.parent) for pat in ("Gyan.FFmpeg*/*/bin/ffmpeg.exe", "DenoLand.Deno*/deno.exe") for p in _pkgs.glob(pat)]
+_tools = Path.home() / "tools" / "ffmpeg"          # the server laptop: ffmpeg copied there (winget refused over ssh)
+if (_tools / "ffmpeg.exe").exists():
+    _extra.append(str(_tools))
 os.environ["PATH"] = os.pathsep.join(_extra + [str(ROOT / ".venv" / "Scripts"), os.environ.get("PATH", "")])
 
 
