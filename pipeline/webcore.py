@@ -753,6 +753,17 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
                               state(through), f"{n} checked in the week of {reel['week']}"))
         else:
             items.append(item("weekly", "Weekly: clips and chat", "reel.html", None, None, "working"))
+        try:                                    # reel.py lowfill: older streams' lower-importance claims
+            lf = json.loads((reels / "lowfill.json").read_text(encoding="utf-8")) if reels is not None else None
+        except (OSError, ValueError):
+            lf = None
+        if isinstance(lf, dict):
+            left = int(lf.get("remaining") or 0)
+            note = f"{int(lf.get('checked') or 0):,} checked, {left:,} left" if left else                 f"all {int(lf.get('checked') or 0):,} checked"
+            if left and lf.get("last_result") not in (None, "ok"):
+                note += f" ({lf['last_result']})"
+            items.append(item("lowfill", "Fact-checks: lower-importance claims of older streams", "factchecks.html",
+                              lf.get("updated"), None if left else newest, "working" if left else "current", note))
         try:                                    # the chat check works newest day first: what is left is the backlog
             fcon = sqlite3.connect(f"file:{flags_db}?mode=ro", uri=True)
             try:

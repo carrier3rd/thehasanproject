@@ -11,6 +11,7 @@ The laptop keeps its copy of the data as it was on Nov 26 and runs nothing for t
   python win/hub.py features        the nightly features job (Spotlight, Chat vs Hasan, Receipts, quiz)
   python win/hub.py reel            fact-checks + reel for the week in progress, so every new stream is screened and
                                     fact-checked soon after it is published, the newest day first (level 3.5)
+                                    then the lower-importance backfill of older streams in what is left of the hour
   python win/hub.py reel-backfill   reel.py weekly: the finished week, then one earlier week (level 4)
   python win/hub.py chatflags       the chat check behind the weekly trophies, newest stream first, then its second review
   python win/hub.py reddit          the weekly Reddit pull for Spotlight
@@ -179,6 +180,10 @@ def reel() -> int:
     week = (today - dt.timedelta(days=(today.weekday() + 1) % 7)).isoformat()   # the Sunday that starts this week
     ok = step("pipeline/reel.py", "build", "--week", week, "--yes", "--latest-first")
     step("pipeline/report_tags.py", "run")   # the topic reports (Fact-checks page) take in the new fact-checks
+    # then, with what is left of the hour, the backfill of older streams' lower-importance claims (level 4 work: it
+    # stops by itself when the week in progress has new work, after 35 minutes, or on a usage limit)
+    if ok and step("pipeline/reel.py", "lowfill", "--minutes", "35"):
+        step("pipeline/report_tags.py", "run")
     return 0 if ok else 1
 
 

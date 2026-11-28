@@ -7,6 +7,9 @@
   reel.py build --week YYYY-MM-DD [--yes] [--wait]
                           one week by its Sunday; without --yes it only prints what it would send
   reel.py status          batches in flight and the reels on disk
+  reel.py lowfill [--max N] [--minutes M]
+                          backfill: the lower-importance claims (1-2) of streams before fact_low_since, newest
+                          stream first, at most N per run; run after the week in progress (hub.py reel)
 
 Three passes, through `claude -p` on the owner's Claude subscription (backend "subscription", the default) or, only
 when the config sets reel.backend: api, through the Message Batches API (half price):
@@ -45,8 +48,13 @@ DEFAULTS = {"model": "claude-opus-5-5", "screen_effort": "low", "judge_effort": 
             "min_severity": 5, "context_s": 600, "chat_max": 400, "clip_min_s": 15, "clip_max_s": 900,
             "fact_effort": "medium",  "fact_min_importance": 3, "fact_search_uses": 5,
             # claims rated 1-2 are checked too, for streams from this date on (YYYYMMDD), and listed folded on the
-            # site (owner, 2026-11-27). Older streams are not backfilled with them, to spare the subscription
+            # site (owner, 2026-11-27). Streams before it get them through the backfill (reel.py lowfill, owner
+            # 2026-11-27): never inside an ordinary build (their budget there is 0, so the week in progress is never
+            # held up), at most fact_low_backfill_per_run per run, newest stream first, resting
+            # fact_low_backfill_cooldown_h after a usage limit. fact_low_backfill_from "" turns the backfill off
             "fact_low_importance": 1, "fact_low_since": "20261127",
+            "fact_low_backfill_from": "20000101", "fact_low_backfill_per_run": 40, "fact_low_backfill_batch": 8,
+            "fact_low_backfill_cooldown_h": 2,
             "fact_context_s": 90, "search_usd": 0.01,   # web search: $10 per 1,000 searches
             "build_after_hour": 10,          # local hour on Sunday after which the finished week is built
             "max_usd_per_week": 15.0,        # auto never submits more than this per week (estimate)
@@ -721,8 +729,18 @@ def clip_from(st, v, m, turns, chat, got, con=None) -> dict | None:
 
 # ---------------------------------------------------------------- pass 3: fact-check
 def checked_importance(st, v) -> int:
-    """The lowest importance checked for this stream: 1 for streams from fact_low_since on, else fact_min_importance."""
-    return st["fact_low_importance"] if v["upload_date"] >= st["fact_low_since"] else st["fact_min_importance"]
+    """The lowest importance checked for this stream: 1 for streams from fact_low_since on (and, through the backfill,
+    for streams from fact_low_backfill_from on), else fact_min_importance."""
+    if v["upload_date"] >= st["fact_low_since"]:
+        return st["fact_low_importance"]
+    if st.get("fact_low_backfill_from") and v["upload_date"] >= st["fact_low_backfill_from"]:
+        return st["fact_low_importance"]
+    return st["fact_min_importance"]
+
+
+def is_backfill(st, v, c) -> bool:
+    """A lower-importance claim of a stream before fact_low_since: asked only by the backfill (reel.py lowfill)."""
+    return c["importance"] < st["fact_min_importance"] and v["upload_date"] < st["fact_low_since"]
 
 
 def claims_from(st, screened) -> list[dict]:
@@ -745,9 +763,15 @@ def claims_from(st, screened) -> list[dict]:
 
 
 def fact_requests(cfg, st, con, streams, claims) -> tuple[list, list, bool]:
+    """Backfill claims (is_backfill) not answered yet are asked only while st["_low_budget"] (a one-item list the
+    backfill sets) has room, newest stream first; otherwise they are left out, without waiting for them."""
     by_id = {v["id"]: v for v in streams}
     need, have, flying, waiting = [], [], in_flight(cfg), False
-    for c in claims:
+    budget = st.get("_low_budget") or [0]
+    regular = [c for c in claims if not is_backfill(st, by_id[c["vid"]], c)]
+    late = [c for c in claims if is_backfill(st, by_id[c["vid"]], c)]
+    late.sort(key=lambda c: (by_id[c["vid"]]["upload_date"], c["vid"], -c["start"]), reverse=True)
+    for c in regular + late:
         v = by_id[c["vid"]]
         turns = [t for t in turns_of(con, v["id"]) if abs(t["start"] - c["start"]) <= st["fact_context_s"]]
         text = lines_text(turns)
@@ -757,7 +781,11 @@ def fact_requests(cfg, st, con, streams, claims) -> tuple[list, list, bool]:
             have.append((v, c, turns, got))
         elif key in flying:
             waiting = True
+        elif is_backfill(st, v, c) and budget[0] <= 0:
+            continue
         else:
+            if is_backfill(st, v, c):
+                budget[0] -= 1
             user = (f"Stream: {v['title']}, {v['upload_date'][:4]}-{v['upload_date'][4:6]}-{v['upload_date'][6:]}.\n"
                     f"Claim to check (as restated by a first pass): {c['claim']}\n"
                     f"His words: \"{c['quote']}\" at {fmt(c['start'])}.\n\nTranscript around it:\n{text}")
@@ -880,7 +908,7 @@ def diagnostics(st, screened, judged, checked) -> dict:
     from collections import Counter
     d = {"screen_windows": len(screened), "screen_status": dict(Counter(g.get("status") for *_, g in screened)),
          "moments": 0, "moments_below_threshold": 0, "moments_reading_or_condemning": 0, "moments_quote_mismatch": 0,
-         "claims": 0, "claims_low_importance": 0, "claims_quote_mismatch": 0,
+         "claims": 0, "claims_low_importance": 0, "claims_backfill": 0, "claims_quote_mismatch": 0,
          "judge_status": dict(Counter(g.get("status") for *_, g in judged)), "judged_kept": 0,
          "judged_rejected": 0, "judged_below_min": 0, "judged_reading_or_condemning": 0, "judged_quote_mismatch": 0,
          "fact_status": dict(Counter(g.get("status") for *_, g in checked)), "fact_not_checkable": 0,
@@ -902,8 +930,9 @@ def diagnostics(st, screened, judged, checked) -> dict:
                     d["examples_quote_mismatch"].append(m["quote"][:200])
         for c in got["result"].get("claims", []):
             d["claims"] += 1
-            if c["importance"] < checked_importance(st, v):
-                d["claims_low_importance"] += 1
+            if c["importance"] < checked_importance(st, v) or is_backfill(st, v, c):
+                d["claims_low_importance"] += 1          # backfill ones too: an ordinary build doesn't ask them
+                d["claims_backfill"] += is_backfill(st, v, c)
             elif not quoted(c["quote"], htext):
                 d["claims_quote_mismatch"] += 1
     for v, m, turns, chat, got in judged:
@@ -944,11 +973,13 @@ def summarise(facts: list[dict]) -> dict:
 
 # ---------------------------------------------------------------- build
 def build(cfg, week: str, client=None, yes: bool = False, wait: bool = False, budget: float | None = None,
-          now: dt.datetime | None = None, latest_first: bool = False) -> str:
+          now: dt.datetime | None = None, latest_first: bool = False, low_budget: list | None = None) -> str:
     """Advance one week as far as it can go. Returns 'written', 'waiting', 'estimate', 'over_budget' or 'empty'.
     latest_first: screen, judge and fact-check the week's newest stream day on its own first (its answers are cached),
     so the current day's VOD is done before the rest of the week (hub.py reel, subscription backend)."""
     st = settings(cfg)
+    if low_budget is not None:               # the backfill: how many lower-importance claims it may still ask
+        st["_low_budget"] = low_budget
     con = public_db(cfg)
     streams = week_streams(con, week)
     if not streams:
@@ -1170,6 +1201,126 @@ def weekly(cfg, now: dt.datetime | None = None) -> list[str]:
     return out
 
 
+# ---------------------------------------------------------------- lower-importance backfill
+def lowfill_path(cfg) -> Path:
+    return reels_dir(cfg) / "lowfill.json"   # next to the reels, where the site reads it (/api/status)
+
+
+def low_pending(cfg, st, con, week: str) -> tuple[int, int, bool]:
+    """-> (backfill claims not answered yet, answered, every screen cached) for one week. Reads the cache only."""
+    streams = week_streams(con, week)
+    if not streams:
+        return 0, 0, True
+    sneed, screened, _ = screen_requests(cfg, st, con, streams)
+    by_id = {v["id"]: v for v in streams}
+    left = done = 0
+    all_turns: dict[str, list[dict]] = {}
+    for c in claims_from(st, screened):
+        v = by_id[c["vid"]]
+        if not is_backfill(st, v, c):
+            continue
+        if v["id"] not in all_turns:
+            all_turns[v["id"]] = turns_of(con, v["id"])
+        turns = [t for t in all_turns[v["id"]] if abs(t["start"] - c["start"]) <= st["fact_context_s"]]
+        key = h("fact", 1, st["model"], v["id"], c["start"], c["claim"], lines_text(turns))
+        if usable(cache_get(cfg, "fact", key)):
+            done += 1
+        else:
+            left += 1
+    return left, done, not sneed
+
+
+def lowfill_weeks(cfg, now: dt.datetime) -> list[str]:
+    """Every week with a reel, plus the week in progress, newest first."""
+    today = now.date()
+    current = (today - dt.timedelta(days=(today.weekday() + 1) % 7)).isoformat()
+    weeks = {p.stem for p in reels_dir(cfg).glob("????-??-??.json")} | {current}
+    return sorted(weeks, reverse=True)
+
+
+def regular_pending(cfg, st, con, week: str) -> bool:
+    """True when the week in progress has ordinary work waiting (a new stream's screens or claims): the backfill
+    stops so that work goes first."""
+    streams = week_streams(con, week)
+    if not streams:
+        return False
+    sneed, screened, _ = screen_requests(cfg, st, con, streams)
+    if sneed:
+        return True
+    fneed, _, _ = fact_requests(cfg, {**st, "_low_budget": [0]}, con, streams, claims_from(st, screened))
+    return bool(fneed)
+
+
+def lowfill(cfg, now: dt.datetime | None = None, max_claims: int | None = None, minutes: float | None = None) -> str:
+    """Check up to max_claims lower-importance claims of older streams, newest week and stream first, in batches of
+    fact_low_backfill_batch, rewriting each week's reel as its claims come in. Stops early on a usage limit (then
+    rests fact_low_backfill_cooldown_h), after `minutes`, or when the week in progress has new work."""
+    st = settings(cfg)
+    now = now or dt.datetime.now()
+    path = lowfill_path(cfg)
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        state = {}
+    con = public_db(cfg)
+    weeks = lowfill_weeks(cfg, now)
+
+    def save(result: str, **extra) -> str:
+        left = done = 0
+        skipped = []
+        for w in weeks:
+            l, d, ok = low_pending(cfg, st, con, w)
+            left, done = left + l, done + d
+            if not ok and l:
+                skipped.append(w)
+        state.update({"updated": dt.datetime.now().isoformat(timespec="seconds"), "remaining": left, "checked": done,
+                      "last_result": result, "weeks_waiting_for_screens": skipped, **extra})
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(state, indent=1))
+        tmp.replace(path)
+        return f"{result}: {done} checked, {left} left"
+
+    if not st.get("fact_low_backfill_from"):
+        return save("off")
+    until = state.get("limit_until")
+    if until and now < dt.datetime.fromisoformat(until):
+        return save("resting after a usage limit")
+    state.pop("limit_until", None)
+    cap = st["fact_low_backfill_per_run"] if max_claims is None else max_claims
+    t0, sent = time.monotonic(), 0
+    current = lowfill_weeks(cfg, now)[0]
+    for week in weeks:
+        if sent >= cap:
+            break
+        left, _, screens_ok = low_pending(cfg, st, con, week)
+        if not left:
+            continue
+        if not screens_ok:                       # never pays for screens: the ordinary builds do those
+            log.info("lowfill: week %s has windows not screened yet; skipped", week)
+            continue
+        while left and sent < cap:
+            if minutes is not None and time.monotonic() - t0 > minutes * 60:
+                return save("time is up", sent_last_run=sent)
+            if regular_pending(cfg, st, con, current):
+                return save("the week in progress has new work; it goes first", sent_last_run=sent)
+            box = [min(st["fact_low_backfill_batch"], cap - sent)]
+            asked = box[0]
+            r = build(cfg, week, yes=True, now=now, low_budget=box)
+            sent += asked - box[0]
+            if r == "limit":
+                rest = dt.datetime.now() + dt.timedelta(hours=st["fact_low_backfill_cooldown_h"])
+                return save("usage limit", limit_until=rest.isoformat(timespec="seconds"), sent_last_run=sent)
+            if r != "written":
+                log.warning("lowfill: week %s: %s", week, r)
+                break
+            new_left = low_pending(cfg, st, con, week)[0]
+            if new_left >= left:                 # nothing moved (a failure is retried once, then dropped)
+                break
+            left = new_left
+    return save("ok", sent_last_run=sent)
+
+
 def status(cfg) -> None:
     for b in read_jsonl(root(cfg) / "batches.jsonl")[-10:]:
         print(f"{b['created']} {b['kind']:6} {b['batch_id']} {len(b['keys'])} requests "
@@ -1182,7 +1333,9 @@ def status(cfg) -> None:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["auto", "weekly", "build", "status"])
+    ap.add_argument("cmd", choices=["auto", "weekly", "build", "status", "lowfill"])
+    ap.add_argument("--max", type=int, help="lowfill: at most this many claims (default fact_low_backfill_per_run)")
+    ap.add_argument("--minutes", type=float, help="lowfill: stop starting batches after this many minutes")
     ap.add_argument("--latest-first", action="store_true",
                     help="build: do the week's newest stream day on its own first (the current day's VOD)")
     ap.add_argument("--week", help="build: the Sunday that starts the week, YYYY-MM-DD (default: last finished week)")
@@ -1199,6 +1352,9 @@ def main():
         return 0
     if a.cmd == "weekly":
         print("reel:", "; ".join(weekly(cfg)))
+        return 0
+    if a.cmd == "lowfill":
+        print("reel lowfill:", lowfill(cfg, max_claims=a.max, minutes=a.minutes))
         return 0
     week = a.week or last_finished_week(dt.datetime.now())
     if not WEEK_RE.match(week):

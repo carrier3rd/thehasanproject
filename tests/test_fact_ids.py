@@ -27,7 +27,7 @@ def test_served_reels_never_repeat_an_id(tmp_path, monkeypatch):
 
 
 def test_low_importance_claims_are_checked_only_from_the_cutoff():
-    st = reel.settings({})
+    st = reel.settings({"reel": {"fact_low_backfill_from": ""}})   # older streams: only through the backfill
     assert reel.checked_importance(st, {"upload_date": "20261126"}) == 3
     assert reel.checked_importance(st, {"upload_date": st["fact_low_since"]}) == 1
     v = {"id": "v1", "title": "s", "upload_date": "20261127"}
