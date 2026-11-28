@@ -287,14 +287,14 @@ def chat_window(con, vid: str, lo: float, hi: float, cap: int) -> list[dict]:
 # ---------------------------------------------------------------- cache + batches
 def cache_get(cfg, kind: str, key: str):
     p = root(cfg) / kind / f"{key}.json"
-    return json.loads(p.read_text()) if p.exists() else None
+    return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
 
 
 def cache_put(cfg, kind: str, key: str, value) -> None:
     p = root(cfg) / kind / f"{key}.json"
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(value, ensure_ascii=False))
+    tmp.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
     tmp.replace(p)
 
 
