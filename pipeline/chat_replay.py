@@ -5,7 +5,8 @@ thread's share of the VOD, and the CLI still reports success (upstream issue lay
 default 4 threads a replay came back with ~5,400 of ~150,000 messages. So the CLI runs with one thread
 (twitch_downloader_threads), and every replay is compared with the live chat log for the same stream: one with
 less than replay_min_share of the live log's messages is replaced by the live log's messages, with a warning.
-  chat_replay.py --redo VIDEO_ID   download one replay again (the old file is kept as <id>.jsonl.short.bak)
+  chat_replay.py --redo VIDEO_ID   download one replay again; the old file stays until the new one is written, then
+                                   is kept as <id>.jsonl.short.bak
 """
 from __future__ import annotations
 
@@ -117,10 +118,8 @@ def main():
         dest = P(cfg, "chat") / f"{vid}.jsonl"
         if a.only and vid != a.only:
             continue
-        if dest.exists():
-            if a.redo != vid:
-                continue
-            dest.replace(dest.with_name(dest.name + ".short.bak"))
+        if dest.exists() and a.redo != vid:
+            continue
         vod_id = json.loads(meta_path.read_text()).get("twitch_vod_id")
         if not vod_id:
             none += 1
@@ -136,15 +135,14 @@ def main():
             with open(tmp, "w", encoding="utf-8", newline="\n") as f:   # Windows' default encoding can't hold chat
                 for r in rows:
                     f.write(json.dumps(r, ensure_ascii=False) + "\n")
+            if dest.exists():                    # --redo: the old file stays in place until the new one is ready
+                dest.replace(dest.with_name(dest.name + ".short.bak"))
             tmp.replace(dest)
             done += 1
             log.info("%s: %d %s messages", vid, len(rows), "replay" if source == "replay" else "live-log")
         except Exception as e:
             log.error("%s: no chat replay: %s", vid, e)
             log_failure(cfg, vid, "chat_replay", e)
-            bak = dest.with_name(dest.name + ".short.bak")
-            if a.redo == vid and bak.exists() and not dest.exists():
-                bak.replace(dest)                # a failed redo leaves the old replay where it was
     print(f"chat replay: {done} downloaded, {none} VOD(s) with no Twitch VOD id")
 
 
