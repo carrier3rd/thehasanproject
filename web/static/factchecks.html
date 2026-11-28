@@ -64,7 +64,8 @@ function card(x, sections) {
 function render() {
   if (!cur) return;
   const sections = Object.fromEntries(cur.sections.map(s => [s.key, s.title]));
-  const listed = cur.items.filter(x => x.verdict === 'false' || x.verdict === 'misleading');   // the rest are only tallied
+  // the rest are only tallied; claims rated 1-2 for importance are folded into their own list (owner, Nov 27 2026)
+  const listed = cur.items.filter(x => (x.verdict === 'false' || x.verdict === 'misleading') && !isLow(x));
   const items = listed.filter(x => (!filt.verdicts.size || filt.verdicts.has(x.verdict)) && (!filt.section || x.section === filt.section) &&
     (!filt.q || `${x.what_he_said} ${x.finding} ${x.quote}`.toLowerCase().includes(filt.q.toLowerCase())));
   const rank = { false: 0, misleading: 1, unsupported: 2, mostly_accurate: 3, accurate: 4, not_checkable: 5 };
@@ -74,10 +75,18 @@ function render() {
     if (!xs.length) continue;
     nodes.push(el('h2', { class: 'fh', text: `${s.title} (${xs.length})` }), ...xs.map(x => card(x, sections)));
   }
+  const low = cur.items.filter(x => (x.verdict === 'false' || x.verdict === 'misleading') && isLow(x) &&
+    (!filt.verdicts.size || filt.verdicts.has(x.verdict)) && (!filt.section || x.section === filt.section) &&
+    (!filt.q || `${x.what_he_said} ${x.finding} ${x.quote}`.toLowerCase().includes(filt.q.toLowerCase())))
+    .sort((a, b) => rank[a.verdict] - rank[b.verdict]);
+  if (low.length) nodes.push(el('details', { class: 'gotright lowimp' },
+    el('summary', { text: `Lower-importance claims: ${low.length} false or misleading` }), ...low.map(x => card(x, sections))));
   $('#items').replaceChildren(...(nodes.length ? nodes : [el('div', { class: 'note', text: 'Nothing matches those filters.' })]));
   $('#shown').textContent = `Showing ${items.length} of ${listed.length} false or misleading.`;
   setUrl();
 }
+
+const isLow = x => x.importance != null && x.importance < 3;
 
 function gotRight() {   // what he got right: there, but folded away; only false and misleading are listed openly
   const c = cur.counts, ok = cur.items.filter(x => ['accurate', 'mostly_accurate', 'unsupported'].includes(x.verdict));

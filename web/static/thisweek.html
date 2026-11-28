@@ -516,6 +516,8 @@ function clipCard(c) {
     quote: c.quote, ctx: c.summary, more: c.nuance };
 }
 const isBad = f => f.verdict === 'false' || f.verdict === 'misleading';
+// claims rated 1-2 for importance are checked and kept, but folded away rather than listed openly (owner, Nov 27 2026)
+const isLow = f => f.importance != null && f.importance < 3;
 const badFirst = (a, b) => (a.verdict === 'false' ? 0 : 1) - (b.verdict === 'false' ? 0 : 1) || a.date.localeCompare(b.date) || a.t - b.t;
 async function getJSON(u) { const r = await fetch(u, { cache: 'no-cache' }); if (!r.ok) throw new Error(r.status); return r.json(); }
 
@@ -525,8 +527,9 @@ async function loadChecks(latestDay) {
   const cur = await getJSON('/api/reels/' + weeks[0].week);
   const all = cur.fact_checks || [];
   const day = latestDay || all.reduce((m, f) => (f.date > m ? f.date : m), '');
-  const fs = all.filter(f => f.date === day);
-  const bad = fs.filter(isBad).sort(badFirst), ok = fs.filter(f => !isBad(f));
+  const fs = all.filter(f => f.date === day), main = fs.filter(f => !isLow(f)), low = fs.filter(isLow).sort(badFirst);
+  const bad = main.filter(isBad).sort(badFirst), ok = main.filter(f => !isBad(f));
+  const nLow = v => low.filter(f => f.verdict === v).length;
   const n = v => fs.filter(f => f.verdict === v).length;
   $('#checks-when').textContent = `Fact-checks · ${dayLabel(day)}`;
   $('#checks-h').textContent = `What he got wrong on ${plainDay(day)}`;
@@ -536,12 +539,16 @@ async function loadChecks(latestDay) {
     return;
   }
   $('#checks-lede').textContent = `Claude checked ${fs.length} factual claim${fs.length === 1 ? '' : 's'} from the stream against sources found by web search: ` +
-    `${n('false')} false, ${n('misleading')} misleading. Sources are under each card.`;
+    `${n('false')} false, ${n('misleading')} misleading. Sources are under each card.` +
+    (low.length ? ` ${low.length} lower-importance claim${low.length === 1 ? ' is' : 's are'} folded at the end.` : '');
   $('#checks-nov25').replaceChildren(...(bad.length ? bad.map(f => card(factCard(f))) : [el('p', { text: 'Nothing false or misleading on this stream.' })]));
   $('#checks-right').replaceChildren(ok.length ? el('details', { class: 'more gotright' },
     el('summary', { text: `Got right: ${n('accurate') + n('mostly_accurate')} (${n('accurate')} accurate, ${n('mostly_accurate')} mostly accurate)` +
       (n('unsupported') ? ` · ${n('unsupported')} unsupported` : '') }),
-    el('div', { class: 'feed' }, ...ok.map(f => card(factCard(f))))) : '');
+    el('div', { class: 'feed' }, ...ok.map(f => card(factCard(f))))) : '',
+    low.length ? el('details', { class: 'more gotright lowimp' },
+      el('summary', { text: `Lower-importance claims: ${low.length} (${nLow('false')} false, ${nLow('misleading')} misleading)` }),
+      el('div', { class: 'feed' }, ...low.map(f => card(factCard(f))))) : '');
 }
 
 async function loadWeek() {
@@ -551,7 +558,7 @@ async function loadWeek() {
   if (!w) return;
   for (const n of document.querySelectorAll('.handmade')) n.hidden = n.dataset.week !== w.week;
   const r = await getJSON('/api/reels/' + w.week);
-  const fs = r.fact_checks || [], bad = fs.filter(isBad).sort(badFirst), clips = r.clips || [];
+  const fs = r.fact_checks || [], bad = fs.filter(f => isBad(f) && !isLow(f)).sort(badFirst), clips = r.clips || [];
   const d0 = w.week.replace(/-/g, ''), d1 = w.week_end.replace(/-/g, '');
   $('#week-when').textContent = `Last week · ${dayLabel(d0)} – ${dayLabel(d1)} · ${(r.streams || []).length} streams`;
   const nf = fs.filter(f => f.verdict === 'false').length, nm = fs.filter(f => f.verdict === 'misleading').length;

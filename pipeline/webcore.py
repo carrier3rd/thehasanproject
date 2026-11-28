@@ -643,7 +643,8 @@ def create_app(cfg: dict, mode: str = "public") -> FastAPI:
                                   "what_he_said": f.get("claim", ""), "quote": f.get("quote", ""),
                                   "finding": f.get("correction") or f.get("explanation") or "",
                                   "vid": f.get("video_id"), "t": f.get("t", 0), "date": f.get("date"),
-                                  "title": f.get("stream_title"), "sources": f.get("sources") or []})
+                                  "title": f.get("stream_title"), "sources": f.get("sources") or [],
+                                  "importance": f.get("importance")})
         return items, weeks
 
     def every_stream_report() -> dict | None:

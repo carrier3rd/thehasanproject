@@ -116,24 +116,32 @@ async function latestFacts() {
       const fs = r.fact_checks || [];
       if (!fs.length) continue;
       const day = fs.reduce((m, f) => (f.date > m ? f.date : m), '');
-      const today = fs.filter(f => f.date === day);
+      const all = fs.filter(f => f.date === day);
+      // claims rated 1-2 for importance are folded into their own list, not shown openly (owner, Nov 27 2026)
+      const isLow = f => f.importance != null && f.importance < 3;
+      const today = all.filter(f => !isLow(f)), low = all.filter(isLow);
       const bad = today.filter(f => f.verdict === 'false' || f.verdict === 'misleading')
         .sort((a, b) => (a.verdict === 'false' ? 0 : 1) - (b.verdict === 'false' ? 0 : 1) || a.t - b.t);
       const ok = today.filter(f => !bad.includes(f));
       const n = v => today.filter(f => f.verdict === v).length;
       const link = f => `reel.html?week=${r.week}&view=facts&item=${encodeURIComponent(f.id)}`;
       const VERD = { false: 'False', misleading: 'Misleading', unsupported: 'Unsupported', mostly_accurate: 'Mostly accurate', accurate: 'Accurate' };
+      const isBadV = f => f.verdict === 'false' || f.verdict === 'misleading';
       const row = f => el('li', {}, el('a', { href: link(f) }, el('span', { class: `verdict v-${f.verdict}`, text: VERD[f.verdict] || f.verdict }),
-        ' ', el('b', { text: f.claim })), f.correction && bad.includes(f) ? el('p', { class: 'fx', text: f.correction }) : null);
+        ' ', el('b', { text: f.claim })), f.correction && isBadV(f) ? el('p', { class: 'fx', text: f.correction }) : null);
+      const nl = v => low.filter(f => f.verdict === v).length;
       box.replaceChildren(
         el('h2', { text: `Fact-checks from the latest stream · ${niceDay(fmtDate(day))}` }),
-        el('p', { class: 'note', text: `${today.length} claim${today.length === 1 ? '' : 's'} checked: ` +
-          `${n('false')} false, ${n('misleading')} misleading.` }),
+        el('p', { class: 'note', text: `${all.length} claim${all.length === 1 ? '' : 's'} checked: ` +
+          `${n('false')} false, ${n('misleading')} misleading` + (low.length ? `, plus ${low.length} lower-importance.` : '.') }),
         bad.length ? el('ul', { class: 'lfacts' }, ...bad.map(row)) : el('p', { text: 'Nothing false or misleading on this stream.' }),
         ok.length ? el('details', { class: 'gotright' },
           el('summary', { text: `Got right: ${n('accurate') + n('mostly_accurate')} (${n('accurate')} accurate, ${n('mostly_accurate')} mostly accurate)` +
             (n('unsupported') ? ` · ${n('unsupported')} unsupported` : '') }),
           el('ul', { class: 'lfacts' }, ...ok.map(row))) : null,
+        low.length ? el('details', { class: 'gotright lowimp' },
+          el('summary', { text: `Lower-importance claims: ${low.length} (${nl('false')} false, ${nl('misleading')} misleading)` }),
+          el('ul', { class: 'lfacts' }, ...low.sort((a, b) => (isBadV(a) ? 0 : 1) - (isBadV(b) ? 0 : 1) || a.t - b.t).map(row))) : null,
         el('p', {}, el('a', { href: `reel.html?week=${r.week}&view=facts`, text: 'All of this week’s fact-checks, with sources →' })));
       return;
     }

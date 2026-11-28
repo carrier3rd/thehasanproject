@@ -60,6 +60,22 @@ def item_id(kind: str, x: dict) -> str:
     return f"{'c' if kind == 'clip' else 'f'}-{x['video_id']}-{int(x['start'] if kind == 'clip' else x['t'])}"
 
 
+def unique_ids(items: list[dict], kind: str) -> list[dict]:
+    """Ids are <c|f>-<video>-<second>, so two items of one stream that start in the same second used to share one (13
+    fact-checks did, Nov 2026). Within each repeated id, the first item (by time, then quote, then text, so the order
+    is the same on every run) keeps the plain id, so links made before the fix still work; the others get -2, -3, ..."""
+    groups = {}
+    for x in items:
+        groups.setdefault(x["id"], []).append(x)
+    t = "start" if kind == "clip" else "t"
+    for base, xs in groups.items():
+        if len(xs) > 1:
+            xs = sorted(xs, key=lambda x: (x.get(t) or 0, x.get("quote") or "", x.get("claim") or x.get("title") or ""))
+            for n, x in enumerate(xs[1:], 2):
+                x["id"] = f"{base}-{n}"
+    return items
+
+
 def add_flag(cfg: dict, week: str, item: str, kind: str, reason: str, note: str) -> int:
     con = connect(cfg)
     cur = con.execute("INSERT INTO flags(created, week, item, kind, reason, note) VALUES(?,?,?,?,?,?)",
@@ -86,9 +102,10 @@ def apply_corrections(cfg: dict, reel: dict) -> dict:
     fix = corrections(cfg, reel["week"])
     withdrawn = 0
     for kind, key in (("clip", "clips"), ("fact", "fact_checks")):
-        keep = []
-        for x in reel.get(key) or []:
+        keep, items = [], reel.get(key) or []
+        for x in items:
             x["id"] = item_id(kind, x)
+        for x in unique_ids(items, kind):
             c = fix.get(x["id"])
             if c and c["action"] == "withdraw":
                 withdrawn += 1

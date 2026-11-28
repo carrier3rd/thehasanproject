@@ -16,6 +16,7 @@ import argparse
 import json
 import sys
 
+import feedback
 import reel
 from common import P, get_logger, load_config
 
@@ -65,7 +66,8 @@ def stream_facts(cfg) -> list[dict]:
             r = json.loads(p.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        out += [f for f in r.get("fact_checks") or [] if f.get("id") and f.get("claim")]
+        fs = [f for f in r.get("fact_checks") or [] if f.get("id") and f.get("claim")]
+        out += feedback.unique_ids(fs, "fact")             # reels built before the id fix can repeat an id
     return out
 
 
@@ -103,8 +105,16 @@ def run(cfg) -> str:
     sig = reel.h("reports", VERSION, desc)             # reports added or re-sectioned: everything is tagged again
     state = load_tags(cfg)
     if state["reports"] != sig:
-        state = {"version": VERSION, "reports": sig, "tags": {}}
-    todo = [f for f in facts if f["id"] not in state["tags"]]
+        state = {"version": VERSION, "reports": sig, "tags": {}, "claims": {}}
+    # a tag belongs to the claim it was made for: state["claims"] holds a hash of each tagged claim's text, and a claim
+    # whose text differs (or, from before the hash was kept, one whose id another claim used to share) is tagged again
+    seen = state.setdefault("claims", {})
+    ids = {f["id"] for f in facts}
+    shared = {f["id"] for f in facts if f["id"] + "-2" in ids}
+    for f in facts:
+        if f["id"] in state["tags"] and f["id"] not in seen and f["id"] not in shared:
+            seen[f["id"]] = reel.h(f["claim"])
+    todo = [f for f in facts if f["id"] not in state["tags"] or seen.get(f["id"]) != reel.h(f["claim"])]
     sections = {r["id"]: {s["key"] for s in r["sections"]} for r in reports}
     sch, result = schema(reports), "done"
     for i in range(0, len(todo), PER_REQUEST):
@@ -127,6 +137,7 @@ def run(cfg) -> str:
         for n, f in enumerate(part, 1):
             state["tags"][f["id"]] = {t["id"]: t["section"] for t in answers.get(n, [])
                                       if t.get("id") in sections and t.get("section") in sections[t["id"]]}
+            seen[f["id"]] = reel.h(f["claim"])
     path = tags_path(cfg)
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")

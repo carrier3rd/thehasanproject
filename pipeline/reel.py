@@ -36,6 +36,7 @@ import time
 from pathlib import Path
 
 from common import P, get_logger, load_config, make_dirs
+from feedback import unique_ids
 from rhetoric import api_client, read_jsonl
 
 log = get_logger("reel")
@@ -43,6 +44,9 @@ DEFAULTS = {"model": "claude-opus-5-5", "screen_effort": "low", "judge_effort": 
             "window_s": 720, "overlap_s": 60, "screen_min_severity": 5, "max_judge": 30, "max_clips": 10,
             "min_severity": 5, "context_s": 600, "chat_max": 400, "clip_min_s": 15, "clip_max_s": 900,
             "fact_effort": "medium",  "fact_min_importance": 3, "fact_search_uses": 5,
+            # claims rated 1-2 are checked too, for streams from this date on (YYYYMMDD), and listed folded on the
+            # site (owner, 2026-11-27). Older streams are not backfilled with them, to spare the subscription
+            "fact_low_importance": 1, "fact_low_since": "20261127",
             "fact_context_s": 90, "search_usd": 0.01,   # web search: $10 per 1,000 searches
             "build_after_hour": 10,          # local hour on Sunday after which the finished week is built
             "max_usd_per_week": 15.0,        # auto never submits more than this per week (estimate)
@@ -58,7 +62,7 @@ CATEGORIES = ["antisemitism", "nazi_or_holocaust_comparison", "justifying_or_glo
               "misinformation", "other"]
 STANCES = ["own_view", "joke_or_bait", "reading_or_quoting", "condemning", "unclear"]
 WEEK_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-VERSION = 8          # bump when selection logic changes: auto rebuilds reels made by an older version (from cache)
+VERSION = 9          # bump when selection logic changes: auto rebuilds reels made by an older version (from cache)
 _NONWORD = re.compile(r"[^a-z0-9]+")
 
 
@@ -716,6 +720,11 @@ def clip_from(st, v, m, turns, chat, got, con=None) -> dict | None:
 
 
 # ---------------------------------------------------------------- pass 3: fact-check
+def checked_importance(st, v) -> int:
+    """The lowest importance checked for this stream: 1 for streams from fact_low_since on, else fact_min_importance."""
+    return st["fact_low_importance"] if v["upload_date"] >= st["fact_low_since"] else st["fact_min_importance"]
+
+
 def claims_from(st, screened) -> list[dict]:
     out = []
     for v, w, got in screened:
@@ -723,7 +732,7 @@ def claims_from(st, screened) -> list[dict]:
             continue
         text = norm(" ".join(t["text"] for t in w if t["speaker"] in ("Hasan", "Auto-captions")))
         for c in got["result"].get("claims", []):
-            if c["importance"] < st["fact_min_importance"] or not quoted(c["quote"], text):
+            if c["importance"] < checked_importance(st, v) or not quoted(c["quote"], text):
                 continue
             out.append({**c, "vid": v["id"]})
     out.sort(key=lambda c: (-c["importance"], c["vid"], c["start"]))
@@ -770,7 +779,7 @@ def fact_from(v, c, turns, got) -> dict | None:
             "date": v["upload_date"], "t": c["start"],
             "quote": c["quote"], "claim": r.get("claim") or c["claim"], "topic": c["topic"], "verdict": r["verdict"],
             "correction": r.get("correction", ""), "explanation": r.get("explanation", ""),
-            "confidence": r.get("confidence", "medium"), "sources": sources}
+            "confidence": r.get("confidence", "medium"), "importance": c.get("importance"), "sources": sources}
 
 
 def last_json(text: str):
@@ -893,7 +902,7 @@ def diagnostics(st, screened, judged, checked) -> dict:
                     d["examples_quote_mismatch"].append(m["quote"][:200])
         for c in got["result"].get("claims", []):
             d["claims"] += 1
-            if c["importance"] < st["fact_min_importance"]:
+            if c["importance"] < checked_importance(st, v):
                 d["claims_low_importance"] += 1
             elif not quoted(c["quote"], htext):
                 d["claims_quote_mismatch"] += 1
@@ -1054,7 +1063,7 @@ def write_week(cfg, st, con, streams, week, judged, checked, screened, client, y
         break
     for c in clips:
         c["chat_flags"] = chat_flags(flagged.get(c["id"], []))
-    facts = [f for f in (fact_from(*x) for x in checked) if f]
+    facts = unique_ids([f for f in (fact_from(*x) for x in checked) if f], "fact")
     order = {"false": 0, "misleading": 1, "unsupported": 2, "mostly_accurate": 3, "accurate": 4}
     facts.sort(key=lambda f: (order[f["verdict"]], f["date"], f["t"]))
     out = {"week": week, "week_end": (dt.date.fromisoformat(week) + dt.timedelta(days=6)).isoformat(),
