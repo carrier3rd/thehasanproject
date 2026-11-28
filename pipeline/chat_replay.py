@@ -40,10 +40,10 @@ def via_twitchdownloader(vod_id: str, cfg: dict) -> list[dict]:
         out = Path(tmp) / "chat.json"
         threads = str(cfg.get("twitch_downloader_threads", 1))   # more than 1 loses most of the chat (see top)
         r = subprocess.run([cfg["twitch_downloader_cli"], "chatdownload", "--id", vod_id, "--threads", threads,
-                            "-o", str(out)], capture_output=True, text=True)
+                            "-o", str(out)], capture_output=True, text=True, encoding="utf-8", errors="replace")
         if r.returncode != 0 or not out.exists():
             raise RuntimeError((r.stderr or r.stdout).strip()[-300:] or "TwitchDownloaderCLI failed")
-        return convert_twitchdownloader(json.loads(out.read_text(), strict=False))  # chat bodies can hold raw control characters
+        return convert_twitchdownloader(json.loads(out.read_text(encoding="utf-8"), strict=False))  # chat bodies can hold raw control characters
 
 
 def via_chat_downloader(vod_id: str) -> list[dict]:
@@ -66,11 +66,11 @@ def stream_window(con, cfg: dict, vid: str) -> tuple[float, float] | None:
     """(start unix, duration s) of a VOD's stream, from archive.db or its info/meta files; None if unknown."""
     audio = P(cfg, "audio")
     try:
-        meta = json.loads((audio / f"{vid}.meta.json").read_text())
+        meta = json.loads((audio / f"{vid}.meta.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         meta = {}
     ip = audio / f"{vid}.info.json"
-    info = json.loads(ip.read_text()) if ip.exists() else {}
+    info = json.loads(ip.read_text(encoding="utf-8")) if ip.exists() else {}
     row = con.execute("SELECT stream_start_unix, duration FROM videos WHERE id=?", (vid,)).fetchone()
     start = (row["stream_start_unix"] if row else None) or meta.get("stream_start_unix") or \
         (info.get("timestamp") if meta.get("platform") == "twitch" else None) or meta.get("twitch_timestamp")
