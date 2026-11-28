@@ -222,7 +222,8 @@ def update() -> int:
     code = [f for f in changed if f.endswith(".py") and f.split("/")[0] in ("pipeline", "web", "admin")]
     if code:
         say("restarting the site and the admin app (their code changed)")
-        subprocess.run(ps + ["-Command", "Get-CimInstance Win32_Process | ? { $_.CommandLine -match 'uvicorn' } | "
+        subprocess.run(ps + ["-Command", "Get-CimInstance Win32_Process | ? { $_.CommandLine -match 'uvicorn' -and $_.CommandLine -notmatch "
+                             "'keep_running' } | "
                              "% { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"], timeout=120)
     if "pipeline/chat_logger.py" in changed:
         say("restarting the chat logger (its code changed)")
